@@ -40,7 +40,7 @@ class RackSerializer(serializers.ModelSerializer):
     def get_load(self, obj):
         if not obj.height:
             return 0
-        devices = obj.devices.all()
+        devices = getattr(obj, '_prefetched_objects_cache', {}).get('devices', obj.devices.all())
         used_u = sum(device.u_height for device in devices if device.u_height)
         return min(int((used_u / obj.height) * 100), 100)
 
@@ -53,6 +53,9 @@ class DatacenterSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
     def get_count(self, obj):
+        prefetched_racks = getattr(obj, '_prefetched_objects_cache', {}).get('racks')
+        if prefetched_racks is not None:
+            return len(prefetched_racks)
         return obj.racks.count()
 
 

@@ -1,3 +1,4 @@
+﻿import gzip
 import io
 import ipaddress
 import json
@@ -880,7 +881,7 @@ class NetworkSectionViewSet(BaseViewSet):
 
 class SubnetViewSet(BaseViewSet):
     audit_module = 'subnet'
-    queryset = Subnet.objects.all()
+    queryset = Subnet.objects.select_related('section').all()
     serializer_class = SubnetSerializer
     filter_backends = [filters.SearchFilter]
     search_fields = ['name', 'cidr', 'location', 'circuit_id']
@@ -888,7 +889,7 @@ class SubnetViewSet(BaseViewSet):
 
 class IPAddressViewSet(BaseViewSet):
     audit_module = 'ip_address'
-    queryset = IPAddress.objects.all()
+    queryset = IPAddress.objects.select_related('subnet').all()
     serializer_class = IPAddressSerializer
     filter_backends = [filters.SearchFilter]
     search_fields = ['ip_address', 'device_name', 'owner', 'description', 'nat_ip']
@@ -921,12 +922,6 @@ class UserViewSet(BaseViewSet):
 
     def partial_update(self, request, *args, **kwargs):
         return self.update(request, *args, **kwargs)
-
-    def destroy(self, request, *args, **kwargs):
-        instance = self.get_object()
-        if instance == request.user:
-            return Response({'detail': '不能删除当前登录账号'}, status=status.HTTP_400_BAD_REQUEST)
-        return super().destroy(request, *args, **kwargs)
 
 
     def destroy(self, request, *args, **kwargs):
@@ -972,13 +967,13 @@ class BlocklistViewSet(BaseViewSet):
 
 class DatacenterViewSet(BaseViewSet):
     audit_module = 'datacenter'
-    queryset = Datacenter.objects.all()
+    queryset = Datacenter.objects.prefetch_related('racks').all()
     serializer_class = DatacenterSerializer
 
 
 class RackViewSet(BaseViewSet):
     audit_module = 'rack'
-    queryset = Rack.objects.all()
+    queryset = Rack.objects.select_related('datacenter').prefetch_related('devices').all()
     serializer_class = RackSerializer
     filter_backends = [filters.SearchFilter]
     search_fields = ['code', 'name']
@@ -986,7 +981,7 @@ class RackViewSet(BaseViewSet):
 
 class RackDeviceViewSet(BaseViewSet):
     audit_module = 'rack_device'
-    queryset = RackDevice.objects.all()
+    queryset = RackDevice.objects.select_related('rack', 'rack__datacenter').all()
     serializer_class = RackDeviceSerializer
     filter_backends = [filters.SearchFilter]
     search_fields = ['name', 'brand', 'sn', 'asset_tag', 'mgmt_ip']
@@ -1599,17 +1594,24 @@ def list_backups(request):
 @authentication_classes([SessionAuthentication, BasicAuthentication])
 @permission_classes([IsAdminUser])
 def trigger_backup(request):
-    backup_dir = '/app/backups'
+    backup_dir = _get_backup_dir()
     try:
         os.makedirs(backup_dir, exist_ok=True)
         filename = f"manual_{datetime.now().strftime('%Y%m%d%H%M')}.sql.gz"
         file_path = os.path.join(backup_dir, filename)
         db = settings.DATABASES['default']
-        cmd = (
-            f"mysqldump -h {db['HOST']} -u {db['USER']} -p'{db['PASSWORD']}' {db['NAME']} "
-            f'| gzip > {file_path}'
-        )
-        subprocess.run(cmd, shell=True, check=True)
+        command = [
+            'mysqldump',
+            '-h', str(db.get('HOST') or '127.0.0.1'),
+            '-u', str(db.get('USER') or ''),
+            f"-p{db.get('PASSWORD') or ''}",
+            str(db.get('NAME') or ''),
+        ]
+        with gzip.open(file_path, 'wb') as backup_stream:
+            result = subprocess.run(command, stdout=backup_stream, stderr=subprocess.PIPE, check=False)
+        if result.returncode != 0:
+            error_message = result.stderr.decode('utf-8', errors='ignore').strip() or 'mysqldump failed'
+            raise RuntimeError(error_message)
         record_audit(request, 'backup', 'trigger_backup', detail=f'手动创建备份文件：{filename}')
         return Response(
             {
@@ -1624,7 +1626,7 @@ def trigger_backup(request):
 
 
 def _get_backup_dir():
-    return '/app/backups'
+    return os.environ.get('BACKUP_DIR') or os.path.join(settings.BASE_DIR, 'backups')
 
 
 def _collect_backup_files():
@@ -2146,8 +2148,30 @@ def import_excel(request):
     if not file_obj:
         return Response({'status': 'error', 'message': '未上传文件'}, status=status.HTTP_400_BAD_REQUEST)
 
+    config_raw = request.data.get('config')
     try:
-        df = pd.read_excel(file_obj, engine='openpyxl')
+        import_config = json.loads(config_raw) if config_raw else {}
+    except (TypeError, json.JSONDecodeError):
+        import_config = {}
+
+    skip_rows = max(int(import_config.get('skipRows') or 1), 1)
+    header_row = max(skip_rows - 1, 0)
+    conflict_mode = str(import_config.get('conflictMode') or 'overwrite').lower()
+    sheet_mapping = str(import_config.get('sheetMapping') or 'none').lower()
+
+    try:
+        if str(file_obj.name).lower().endswith('.csv'):
+            df = pd.read_csv(file_obj, header=header_row).fillna('')
+            df['__sheet_name__'] = ''
+        else:
+            sheet_frames = pd.read_excel(file_obj, sheet_name=None, engine='openpyxl', header=header_row)
+            normalized_frames = []
+            for sheet_name, frame in sheet_frames.items():
+                normalized = frame.fillna('').copy()
+                normalized['__sheet_name__'] = sheet_name
+                normalized_frames.append(normalized)
+            df = pd.concat(normalized_frames, ignore_index=True) if normalized_frames else pd.DataFrame()
+
         required_cols = ['IP地址', '设备名称']
         if not all(column in df.columns for column in required_cols):
             return Response(
@@ -2155,8 +2179,9 @@ def import_excel(request):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        all_subnets = list(Subnet.objects.all())
+        all_subnets = list(Subnet.objects.select_related('section').all())
         success_count = 0
+        skipped_count = 0
 
         for _, row in df.iterrows():
             ip_str = str(row.get('IP地址', '')).strip()
@@ -2166,6 +2191,7 @@ def import_excel(request):
             try:
                 target_ip = ipaddress.ip_address(ip_str)
             except ValueError:
+                skipped_count += 1
                 continue
 
             matched_subnet = None
@@ -2177,20 +2203,46 @@ def import_excel(request):
                 except ValueError:
                     continue
 
+            sheet_name = str(row.get('__sheet_name__', '')).strip()
+            if not matched_subnet and sheet_name and sheet_mapping == 'subnet':
+                matched_subnet = next(
+                    (
+                        subnet for subnet in all_subnets
+                        if sheet_name in str(subnet.name)
+                        or sheet_name in str(subnet.cidr)
+                        or sheet_name in str(subnet.location or '')
+                    ),
+                    None,
+                )
+
+            existing_ip = IPAddress.objects.filter(ip_address=ip_str).first()
+            if existing_ip and conflict_mode == 'skip':
+                skipped_count += 1
+                continue
+
+            description = str(row.get('备注', '')).strip()
+            if sheet_name and sheet_mapping == 'location' and sheet_name not in description:
+                description = f'{description}\n工作表:{sheet_name}'.strip() if description else f'工作表:{sheet_name}'
+
             IPAddress.objects.update_or_create(
                 ip_address=ip_str,
                 defaults={
                     'device_name': row.get('设备名称', ''),
                     'status': row.get('状态', 'offline'),
                     'device_type': row.get('设备类型', 'other'),
-                    'owner': row.get('负责人', ''),
-                    'description': row.get('备注', ''),
+                    'owner': row.get('负责人', row.get('使用人', '')),
+                    'description': description,
                     'subnet': matched_subnet,
                 },
             )
             success_count += 1
 
-        return Response({'status': 'success', 'message': f'成功导入 / 更新 {success_count} 条数据'})
+        return Response(
+            {
+                'status': 'success',
+                'message': f'成功导入 / 更新 {success_count} 条数据，跳过 {skipped_count} 条',
+            }
+        )
     except Exception as exc:
         logger.exception('Import excel failed.')
         return Response({'status': 'error', 'message': f'导入失败: {exc}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2219,3 +2271,4 @@ def init_datacenters(request):
     except Exception as exc:
         logger.exception('Init datacenters failed.')
         return Response({'status': 'error', 'message': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+

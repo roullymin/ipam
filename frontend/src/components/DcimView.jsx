@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   AlignJustify,
   Calculator,
@@ -24,56 +24,56 @@ import {
 import RackElevation from './RackElevation';
 
 const TEXT = {
-  areaTitle: '机房区域',
-  areaHint: '选择机房后查看机柜与排位状态',
-  addDatacenter: '新增机房',
-  locationFallback: '未填写位置说明',
-  overviewEyebrow: '机房容量与功耗概览',
-  cardView: '卡片视图',
-  elevationView: '排位图视图',
-  downloadTemplate: '下载模板',
-  importAssets: '导入资产',
+  areaTitle: 'Datacenters',
+  areaHint: 'Choose a datacenter to view racks and elevation details.',
+  addDatacenter: 'Add Datacenter',
+  locationFallback: 'No location provided',
+  overviewEyebrow: 'Capacity and power overview',
+  cardView: 'Card View',
+  elevationView: 'Elevation View',
+  downloadTemplate: 'Download Template',
+  importAssets: 'Import Assets',
   exportExcel: 'Excel',
   exportHtml: 'HTML',
-  exportImage: '图片',
-  readonlyOverview: '只读概览',
-  addRack: '新增机柜',
-  rackCount: '机柜数量',
-  deviceCount: '设备数量',
-  plannedPower: '设计总负载',
-  actualPower: 'PDU 实测总功率',
-  utilization: '空间占用率',
-  freeUnits: '剩余空间',
-  standardRack: '标准机柜',
-  noDatacenter: '请先选择机房',
-  noDatacenterHint: '左侧选中机房后，这里会显示机柜概览、功率统计和排位信息。',
-  noRacks: '当前机房还没有机柜',
-  noRacksHint: '可以先新增机柜，再录入设备和排位信息。',
-  rackCodeFallback: '未编号机柜',
-  detail: '详情',
-  rackElevation: '机柜排位图',
-  rackElevationHint: '默认使用更紧凑的比例，优先减少横向滚动，方便直接在屏幕上查看。',
-  zoomOut: '缩小排位图',
-  zoomIn: '放大排位图',
-  zoomReset: '恢复默认缩放',
-  closeDetail: '关闭机柜详情',
-  deviceList: '设备清单',
-  deviceListHint: '按 U 位从高到低排列，可直接查看和编辑设备信息。',
-  emptyDevices: '当前机柜还没有设备',
-  emptyDevicesHint: '先新增设备，再录入上架位置、功率和项目归属。',
-  addDevice: '在此机柜上架设备',
-  unnamedDevice: '未命名设备',
-  noMgmtIp: '未填写管理地址',
-  noProject: '未关联项目',
-  noOwner: '未填写负责人',
-  ratedPower: '额定功率',
-  project: '所属项目',
-  owner: '负责人',
-  editRack: '编辑机柜',
-  deleteRack: '删除机柜',
-  editDevice: '编辑设备',
-  unclassified: '未分类',
-  currentRack: '当前机柜',
+  exportImage: 'Image',
+  readonlyOverview: 'Read-only overview',
+  addRack: 'Add Rack',
+  rackCount: 'Racks',
+  deviceCount: 'Devices',
+  plannedPower: 'Planned Power',
+  actualPower: 'Actual Power',
+  utilization: 'Utilization',
+  freeUnits: 'Free Units',
+  standardRack: 'Standard Rack',
+  noDatacenter: 'Select a datacenter first',
+  noDatacenterHint: 'The selected datacenter overview, rack cards, and elevation layout will appear here.',
+  noRacks: 'No racks in this datacenter yet',
+  noRacksHint: 'Create a rack first, then place devices and update their positions.',
+  rackCodeFallback: 'Unnamed Rack',
+  detail: 'Details',
+  rackElevation: 'Rack Elevation',
+  rackElevationHint: 'Compact scaling keeps the elevation easier to read on screen.',
+  zoomOut: 'Zoom Out',
+  zoomIn: 'Zoom In',
+  zoomReset: 'Reset Zoom',
+  closeDetail: 'Close rack details',
+  deviceList: 'Device List',
+  deviceListHint: 'Devices are ordered by U position from top to bottom.',
+  emptyDevices: 'No devices in this rack yet',
+  emptyDevicesHint: 'Add a device to start tracking rack position, power, and ownership.',
+  addDevice: 'Add Device',
+  unnamedDevice: 'Unnamed Device',
+  noMgmtIp: 'No management IP',
+  noProject: 'No project',
+  noOwner: 'No owner',
+  ratedPower: 'Rated Power',
+  project: 'Project',
+  owner: 'Owner',
+  editRack: 'Edit Rack',
+  deleteRack: 'Delete Rack',
+  editDevice: 'Edit Device',
+  unclassified: 'Unclassified',
+  currentRack: 'Current Rack',
 };
 
 const safeInt = (value, fallback = 0) => {
@@ -349,7 +349,7 @@ function RackSidebar({ rack, devices, plannedPower, onClose, onAddDevice, onEdit
               </div>
               <h2 className="mt-3 text-[22px] font-black tracking-tight text-slate-900">{rack.name}</h2>
               <p className="mt-2 text-sm text-slate-500">
-                {rackHeight}U {TEXT.standardRack} 路 鍏?{deviceList.length} 鍙拌澶囷紝鍓╀綑 {freeUnits}U
+                {rackHeight}U {TEXT.standardRack} - {deviceList.length} devices - {freeUnits}U free
               </p>
             </div>
             <button
@@ -376,7 +376,7 @@ function RackSidebar({ rack, devices, plannedPower, onClose, onAddDevice, onEdit
             </div>
             <div className="rounded-xl bg-slate-50 px-3 py-2">
               <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">{TEXT.deviceCount}</div>
-              <div className="mt-1 text-lg font-black text-slate-900">{deviceList.length}鍙?/div>
+              <div className="mt-1 text-lg font-black text-slate-900">{deviceList.length}</div>
             </div>
           </div>
         </div>
@@ -622,8 +622,8 @@ export default function DcimView(props) {
               </div>
 
               <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
-                <MetricTile icon={HardDrive} label={TEXT.rackCount} value={metrics.rackCount} unit="涓? tone="blue" />
-                <MetricTile icon={Server} label={TEXT.deviceCount} value={metrics.deviceCount} unit="台"W" />
+                <MetricTile icon={HardDrive} label={TEXT.rackCount} value={metrics.rackCount} tone="blue" />
+                <MetricTile icon={Server} label={TEXT.deviceCount} value={metrics.deviceCount} />
                 <MetricTile icon={Zap} label={TEXT.actualPower} value={metrics.totalActual} unit="W" tone="emerald" />
               </div>
             </div>
@@ -733,7 +733,7 @@ export default function DcimView(props) {
                               </div>
                               <div className="mt-3 text-[17px] font-black text-white">{rack.name}</div>
                               <div className="mt-1 text-sm text-slate-300">
-                                {safeInt(rack.height, 42)}U · {devices.length} 台设备                              </div>
+                                {safeInt(rack.height, 42)}U 路 {devices.length} 鍙拌澶?                             </div>
                             </div>
                             <div className="rounded-full bg-white/10 px-3 py-1 text-sm font-bold text-slate-200">
                               {TEXT.detail}
@@ -776,3 +776,4 @@ export default function DcimView(props) {
     </div>
   );
 }
+
