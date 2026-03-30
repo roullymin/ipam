@@ -1,0 +1,102 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --app-bg: #eef4f7;
+  --app-bg-accent: #d9edf7;
+  --app-panel: rgba(255, 255, 255, 0.78);
+  --app-panel-border: rgba(148, 163, 184, 0.18);
+}
+
+body {
+  background:
+    radial-gradient(circle at top left, rgba(14, 165, 233, 0.16), transparent 26%),
+    radial-gradient(circle at 85% 12%, rgba(16, 185, 129, 0.12), transparent 22%),
+    linear-gradient(180deg, #f8fbfd 0%, var(--app-bg) 100%);
+}
+
+.app-shell {
+  background:
+    radial-gradient(circle at top left, rgba(14, 165, 233, 0.18), transparent 24%),
+    radial-gradient(circle at 82% 8%, rgba(59, 130, 246, 0.1), transparent 18%),
+    linear-gradient(180deg, #f7fafc 0%, #edf4f7 100%);
+}
+
+.app-sidebar {
+  background: linear-gradient(180deg, rgba(248, 252, 253, 0.92) 0%, rgba(239, 247, 250, 0.88) 100%);
+  border-right: 1px solid rgba(148, 163, 184, 0.18);
+  box-shadow: 12px 0 32px rgba(148, 163, 184, 0.08);
+  backdrop-filter: blur(18px);
+}
+
+.app-topbar {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(248, 250, 252, 0.7) 100%);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  backdrop-filter: blur(16px);
+}
+
+.login-stage {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 15% 20%, rgba(14, 165, 233, 0.16), transparent 24%),
+    radial-gradient(circle at 80% 18%, rgba(16, 185, 129, 0.14), transparent 22%),
+    linear-gradient(180deg, #f8fbfd 0%, #edf4f7 100%);
+}
+
+.login-card {
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  box-shadow:
+    0 24px 60px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(18px);
+}
+
+.ambient-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(14px);
+  opacity: 0.9;
+}
+
+.ambient-orb-a {
+  width: 14rem;
+  height: 14rem;
+  left: 8%;
+  top: 12%;
+  background: rgba(14, 165, 233, 0.18);
+}
+
+.ambient-orb-b {
+  width: 16rem;
+  height: 16rem;
+  right: 10%;
+  bottom: 10%;
+  background: rgba(16, 185, 129, 0.14);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #94a3b8;
+}
+
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}

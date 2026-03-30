@@ -1,0 +1,1659 @@
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import {
+  Server, ShieldCheck, Search, RefreshCw, Folder, Network,
+  ChevronRight, ChevronDown, Edit2, Trash2,
+  X, Save, LogOut, LayoutGrid, Plus, Upload, Download,
+  MapPin, Box, Shield, Activity, Users, Database, Settings,
+  AlertTriangle, Grid as GridIcon, List as ListIcon, Loader2, 
+  ArrowRightLeft, // 使用更通用的名称
+  Zap, Calculator, HardDrive, AlignLeft,
+  ZoomIn, ZoomOut, Maximize, Image as ImageIcon, FileText, Terminal,
+  AlignJustify, Columns, Code, Tag // 确保 Tag 存在
+} from 'lucide-react';
+
+// ============================================================================
+// 1. 常量定义区 (移至顶部防止 ReferenceError)
+// ============================================================================
+
+const DEFAULT_OPTIONS = {
+  isp: ['中国电信', '中国移动', '中国联通', '中国广电', '政务外网', '指挥专网', '自建光纤'],
+  bandwidth: ['10M', '50M', '100M', '500M', '1000M', '10G', '40G', '100G'],
+  location: ['核心机房-3F', '核心机房-A区', '指挥大厅', '7F-弱电间', '1F-消控室'],
+  function: ['互联网出口', '政务外网业务', '视频会议', '内部办公', '服务器管理', '安防监控'],
+  deviceTypes: [
+    { value: 'server', label: '服务器' },
+    { value: 'vm', label: '虚拟机' },
+    { value: 'switch_core', label: '核心交换机' },
+    { value: 'switch_access', label: '接入交换机' },
+    { value: 'router', label: '路由器' },
+    { value: 'firewall', label: '防火墙' },
+    { value: 'storage', label: '存储设备' },
+    { value: 'ups', label: 'UPS电源' },
+    { value: 'pdu', label: 'PDU插排' },
+    { value: 'odf', label: 'ODF配线' },
+    { value: 'pc', label: 'PC终端' },
+    { value: 'printer', label: '打印机' },
+    { value: 'other', label: '其他' },
+  ]
+};
+
+const ROLE_DEFINITIONS = {
+  'admin': { label: '超级管理员', permissions: ['list', 'dcim', 'security', 'backup', 'users'] },
+  'dc_operator': { label: '机房运维 (仅机房)', permissions: ['dcim'] },
+  'ip_manager': { label: 'IP 管理员 (仅IP)', permissions: ['list'] },
+  'auditor': { label: '审计员 (日志&安全)', permissions: ['security'] },
+  'guest': { label: '访客 (只读IP&机房)', permissions: ['list', 'dcim'] },
+};
+
+const TAB_CONFIG = {
+  'list': { icon: Server, label: 'IP 资产台账' },
+  'dcim': { icon: Box, label: '机房基础设施' },
+  'security': { icon: Shield, label: '安全监控中心' },
+  'backup': { icon: Database, label: '数据备份恢复' },
+  'users': { icon: Users, label: '系统用户管理' }
+};
+
+const HISTORY_TRACKED_FIELDS = [
+  'project', 'contact', 'brand', 'model', 'supplier', 'os_version',
+  'specs', 'power_usage', 'typical_power', 'purchase_date', 'warranty_date'
+];
+
+const STATUS_STYLES = {
+  online: { label: '在线 / 使用中', bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', dot: 'bg-emerald-500' },
+  offline: { label: '离线 / 空闲', bg: 'bg-gray-50', text: 'text-gray-600', border: 'border-gray-200', dot: 'bg-gray-400' },
+  rogue: { label: '异常 / 违规', bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', dot: 'bg-red-500' },
+  reserved: { label: '保留地址', bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200', dot: 'bg-blue-500' },
+  free: { label: '空闲', bg: 'bg-white', text: 'text-slate-300', border: 'border-slate-100', dot: 'bg-slate-200' },
+};
+
+const DEVICE_STATUS = {
+  active: { label: '在用', color: 'text-green-600 bg-green-50 border-green-200' },
+  offline: { label: '关机/备用', color: 'text-gray-500 bg-gray-100 border-gray-200' },
+  maintenance: { label: '维修中', color: 'text-orange-600 bg-orange-50 border-orange-200' },
+  planned: { label: '规划中', color: 'text-blue-600 bg-blue-50 border-blue-200' },
+  retired: { label: '报废', color: 'text-red-600 bg-red-200 border-red-200' },
+};
+
+// ============================================================================
+// 2. 工具函数：安全整数解析与网络请求
+// ============================================================================
+const safeInt = (val, def = 0) => {
+    const parsed = parseInt(val, 10);
+    return isNaN(parsed) ? def : parsed;
+};
+
+const safeFetch = async (url, options = {}) => {
+  try {
+    if (window.location.protocol === 'blob:' || window.location.origin === 'null') {
+       return { ok: false, status: 0, statusText: 'Preview Mode', json: async () => ({}), text: async () => '' };
+    }
+    if (options.method && options.method !== 'GET') {
+        const getCookie = (name) => {
+            if (typeof document === 'undefined') return null;
+            let v = document.cookie.match('(^|;) ?' + name + '=([^;]*)(;|$)');
+            return v ? v[2] : null;
+        };
+        const token = getCookie('csrftoken');
+        if (token) {
+            options.headers = { ...options.headers, 'X-CSRFToken': token };
+        }
+    }
+    const response = await fetch(url, options);
+    return response;
+  } catch (error) {
+    console.warn(`[SafeFetch] 请求异常: ${url}`, error);
+    return { ok: false, status: 0, json: async () => ({}), text: async () => error.message };
+  }
+};
+
+// ============================================================================
+// 3. 通用 UI 组件 (FormInput, SmartInput, Modal, etc.)
+// ============================================================================
+
+const FormInput = ({ label, required, ...props }) => (
+  <div className="mb-4">
+    <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">{label}{required && <span className="text-red-500 ml-1" title="必填项">*</span>}</label>
+    <input {...props} className={`w-full bg-white border ${required && !props.value ? 'border-red-200' : 'border-slate-300 focus:border-blue-500'} rounded-md px-3 py-2 text-sm text-slate-700 focus:ring-2 focus:ring-blue-100 outline-none transition-all ${props.disabled ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : ''}`} />
+  </div>
+);
+
+const SmartInput = ({ label, listId, options, onManage, required, ...props }) => (
+  <div className="mb-4 relative">
+    <div className="flex justify-between items-center mb-1.5"><label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider">{label} {required && <span className="text-red-500 ml-1">*</span>}</label>{onManage && (<button onClick={onManage} className="text-[10px] text-blue-500 hover:text-blue-700 flex items-center hover:underline" title="管理选项列表"><Settings className="w-3 h-3 mr-1" /> 管理选项</button>)}</div>
+    <div className="relative group"><input list={listId} {...props} className={`w-full bg-white border ${required && !props.value ? 'border-red-200' : 'border-slate-300 focus:border-blue-500'} rounded-md px-3 py-2 text-sm text-slate-700 outline-none`} placeholder={props.placeholder || "请选择 or 输入..."} /><div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400"><ChevronDown className="w-4 h-4" /></div></div>
+    <datalist id={listId}>{(options || []).map((o, i) => (<option key={i} value={typeof o === 'object' ? o.value : o} />))}</datalist>
+  </div>
+);
+
+const StatusBadge = ({ status }) => {
+  const style = STATUS_STYLES[status] || STATUS_STYLES.offline;
+  return <span className={`px-2.5 py-1 rounded-full text-[10px] font-medium border flex items-center w-fit ${style.bg} ${style.text} ${style.border}`}><span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${style.dot}`}></span>{style.label}</span>;
+};
+
+const Modal = ({ isOpen, onClose, title, children, size = 'md' }) => {
+  if (!isOpen) return null;
+  const sizeClasses = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl' };
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm transition-opacity">
+      <div className={`bg-white rounded-xl shadow-2xl w-full ${sizeClasses[size] || sizeClasses.md} overflow-hidden animate-in fade-in zoom-in duration-200 border border-slate-100 flex flex-col max-h-[90vh]`}>
+        <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex-shrink-0"><h3 className="text-base font-bold text-slate-800">{title}</h3><button onClick={onClose}><X className="w-5 h-5 text-slate-400 hover:text-slate-600" /></button></div><div className="p-6 overflow-y-auto custom-scrollbar">{children}</div>
+      </div>
+    </div>
+  );
+};
+
+const DebugModal = ({ isOpen, onClose, logs, onClear }) => {
+  if (!isOpen) return null;
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="系统排查日志 (Debug Console)">
+      <div className="flex justify-between items-center mb-4">
+        <p className="text-xs text-slate-500">记录最近的操作请求与服务器响应，用于排查数据丢失或保存失败的问题。</p>
+        <button onClick={onClear} className="text-xs text-red-500 hover:underline">清空日志</button>
+      </div>
+      <div className="bg-slate-900 rounded-lg p-4 h-96 overflow-y-auto font-mono text-xs space-y-3 shadow-inner custom-scrollbar">
+        {logs.length === 0 && <div className="text-slate-500 text-center mt-20">暂无日志记录...<br/>请进行操作（如保存设备）以生成日志</div>}
+        {logs.map((log) => (
+          <div key={log.id} className="border-b border-slate-800 pb-2 last:border-0">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-slate-400 opacity-60">[{log.time}]</span>
+              <span className={`font-bold ${log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-green-400' : log.type === 'req' ? 'text-blue-400' : 'text-yellow-400'}`}>{log.action}</span>
+            </div>
+            <pre className="text-slate-300 whitespace-pre-wrap break-all pl-4 border-l-2 border-slate-700 opacity-90 leading-relaxed">{typeof log.content === 'object' ? JSON.stringify(log.content, null, 2) : log.content}</pre>
+          </div>
+        ))}
+      </div>
+    </Modal>
+  );
+};
+
+const OptionManagerModal = ({ title, options, onSave, onClose }) => {
+    const initialList = Array.isArray(options) && typeof options[0] === 'object' ? options.map(o => o.label || o.value) : (Array.isArray(options) ? options : []);
+    const [list, setList] = useState(initialList);
+    const [newItem, setNewItem] = useState('');
+    const handleAdd = () => { if (newItem.trim() && !list.includes(newItem.trim())) { setList([...list, newItem.trim()]); setNewItem(''); } };
+    const handleDelete = (item) => { if (confirm(`确定删除选项 "${item}" 吗？`)) { setList(list.filter(i => i !== item)); } };
+    const handleSave = () => { if (title.includes('设备类型')) { onSave(list.map(l => ({ value: l, label: l }))); } else { onSave(list); } onClose(); };
+    return (
+        <Modal isOpen={true} onClose={onClose} title={`管理选项：${title}`}><div className="space-y-4"><div className="flex space-x-2"><input type="text" value={newItem} onChange={e => setNewItem(e.target.value)} className="flex-1 border border-slate-300 rounded px-3 py-2 text-sm outline-none" placeholder="输入新选项..." onKeyDown={e => e.key === 'Enter' && handleAdd()}/><button onClick={handleAdd} className="px-4 py-2 bg-green-600 text-white rounded text-sm hover:bg-green-700">添加</button></div><div className="border border-slate-200 rounded max-h-60 overflow-y-auto divide-y divide-slate-100">{list.map((item, idx) => (<div key={idx} className="flex justify-between items-center px-3 py-2 hover:bg-slate-50"><span className="text-sm text-slate-700">{item}</span><button onClick={() => handleDelete(item)} className="text-slate-400 hover:text-red-500"><X className="w-4 h-4" /></button></div>))}</div><div className="pt-2 flex justify-end"><button onClick={handleSave} className="px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 shadow-sm">保存更改</button></div></div></Modal>
+    );
+};
+
+const LoginScreen = ({ onLogin }) => {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+        const res = await safeFetch('/api/login/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
+        if (res.ok) onLogin(username); else alert(`登录失败: 账号或密码错误`);
+    } catch (e) { alert("系统错误: " + e.message); } finally { setLoading(false); }
+  };
+  return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="w-full max-w-sm p-8 bg-white rounded-xl shadow-lg border border-slate-100">
+          <div className="text-center mb-8"><div className="inline-flex items-center justify-center w-12 h-12 bg-blue-600 rounded-lg mb-4 text-white shadow-lg shadow-blue-200"><ShieldCheck className="w-6 h-6" /></div><h1 className="text-xl font-bold text-slate-800">IP 台账管理系统</h1></div>
+          <form onSubmit={handleLogin} className="space-y-4"><div><label className="block text-xs font-bold text-slate-500 mb-1">账号</label><input type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none" /></div><div><label className="block text-xs font-bold text-slate-500 mb-1">密码</label><input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none" /></div><button type="submit" disabled={loading} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-lg transition-all flex items-center justify-center text-sm shadow-md shadow-blue-200">{loading ? '登录中...' : '进入系统'}</button></form>
+          <div className="text-center mt-4 text-xs text-slate-400">默认超级管理员: admin / password</div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================================
+// 4. 业务组件 (RackModal, DatacenterModal, etc.)
+// ============================================================================
+
+const RackModal = ({ rack, onClose, onSave, locations, initialDatacenter }) => {
+    const [formData, setFormData] = useState({
+        name: '', code: '', height: 42, datacenter: initialDatacenter || '',
+        pdu_a_power: 0, pdu_b_power: 0, ...rack
+    });
+
+    const handleSubmit = () => {
+        if (!formData.name || !formData.code) return alert('名称和编号必填');
+        onSave(formData);
+    };
+
+    return (
+        <Modal isOpen={true} onClose={onClose} title={rack ? '编辑机柜' : '新增机柜'}>
+            <div className="space-y-4">
+                <FormInput label="机柜名称" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} required placeholder="例如: 业务机柜01" />
+                <FormInput label="机柜编号" value={formData.code} onChange={e => setFormData({...formData, code: e.target.value})} required placeholder="A01" />
+                <div className="grid grid-cols-2 gap-4">
+                    <FormInput label="高度 (U)" type="number" value={formData.height} onChange={e => setFormData({...formData, height: safeInt(e.target.value)})} required />
+                    <div className="mb-4 relative">
+                        <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase">所属机房</label>
+                        <div className="relative">
+                            <select value={formData.datacenter} onChange={e => setFormData({...formData, datacenter: e.target.value})} className="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-sm outline-none appearance-none">
+                                <option value="">选择机房...</option>
+                                {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                            </select>
+                            <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400"><ChevronDown className="w-4 h-4" /></div>
+                        </div>
+                    </div>
+                </div>
+                 <div className="bg-slate-50 p-3 rounded border border-slate-200">
+                    <label className="block text-xs font-bold text-slate-500 mb-2 uppercase">PDU 实测读数 (W)</label>
+                    <div className="grid grid-cols-2 gap-4">
+                         <FormInput label="A路功耗" type="number" value={formData.pdu_a_power} onChange={e => setFormData({...formData, pdu_a_power: safeInt(e.target.value)})} />
+                         <FormInput label="B路功耗" type="number" value={formData.pdu_b_power} onChange={e => setFormData({...formData, pdu_b_power: safeInt(e.target.value)})} />
+                    </div>
+                </div>
+                <div className="flex justify-end pt-4">
+                    <button onClick={handleSubmit} className="px-6 py-2 bg-blue-600 text-white rounded font-bold shadow-lg hover:bg-blue-700">保存</button>
+                </div>
+            </div>
+        </Modal>
+    );
+};
+
+const DatacenterModal = ({ dc, onClose, onSave }) => {
+    const [formData, setFormData] = useState({ name: '', location: '', ...dc });
+    return (
+        <Modal isOpen={true} onClose={onClose} title={dc ? '编辑机房信息' : '新建机房区域'}>
+            <div className="space-y-4">
+                <FormInput label="机房名称" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} required />
+                <FormInput label="物理位置描述" value={formData.location} onChange={e => setFormData({...formData, location: e.target.value})} />
+                <div className="flex justify-end pt-4">
+                    <button onClick={() => onSave(formData)} className="px-6 py-2 bg-blue-600 text-white rounded font-bold shadow-lg hover:bg-blue-700">确认保存</button>
+                </div>
+            </div>
+        </Modal>
+    );
+};
+
+const DeviceModal = ({ device, onClose, onSave, onDelete, optionLists, openOptionManager, historyOptions }) => {
+  const DEFAULT_DEVICE_DATA = {
+      name: '', position: 1, u_height: 1, device_type: 'server', brand: '', model: '', mgmt_ip: '',
+      sn: '', asset_tag: '', status: 'active', purchase_date: '', warranty_date: '', supplier: '',
+      project: '', contact: '', power_usage: 0, typical_power: 0, os_version: '', specs: ''
+  };
+
+  const [formData, setFormData] = useState({ ...DEFAULT_DEVICE_DATA, ...device });
+
+  const isNew = !device.id;
+
+  const handleSubmit = () => {
+      if(!formData.name || !formData.device_type) return alert("必填项缺失: 设备名称和类型是必填的。");
+      onSave({
+          ...formData,
+          position: safeInt(formData.position, 1),
+          u_height: safeInt(formData.u_height, 1),
+          power_usage: safeInt(formData.power_usage, 0),
+          typical_power: safeInt(formData.typical_power, 0),
+      });
+  };
+
+  return (
+    <Modal isOpen={true} onClose={onClose} title={isNew ? '上架新设备' : '编辑设备详情'} size="lg">
+       <div className="space-y-6">
+           <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
+               <h4 className="text-xs font-bold text-blue-600 uppercase mb-3 flex items-center"><MapPin className="w-3 h-3 mr-1" /> 位置与基础信息</h4>
+               <div className="grid grid-cols-12 gap-4">
+                   <div className="col-span-3">
+                       <FormInput label="起始 U 位" type="number" value={formData.position} onChange={e => setFormData({...formData, position: e.target.value})} />
+                   </div>
+                   <div className="col-span-3">
+                       <FormInput label="高度 (U)" type="number" min="1" max="42" value={formData.u_height} onChange={e => setFormData({...formData, u_height: e.target.value})} />
+                   </div>
+                   <div className="col-span-6"><SmartInput label="设备类型" listId="dtype-list" options={optionLists.deviceTypes} value={formData.device_type||''} onChange={e => setFormData({...formData, device_type: e.target.value})} onManage={() => openOptionManager('deviceTypes')} required /></div>
+                   <div className="col-span-6"><FormInput label="设备名称" value={formData.name||''} onChange={e => setFormData({...formData, name: e.target.value})} required placeholder="Core-SW-01" /></div>
+                   <div className="col-span-6"><FormInput label="管理 IP (OOB)" value={formData.mgmt_ip||''} onChange={e => setFormData({...formData, mgmt_ip: e.target.value})} placeholder="192.168.x.x" /></div>
+               </div>
+           </div>
+
+           <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
+               <h4 className="text-xs font-bold text-blue-600 uppercase mb-3 flex items-center"><Zap className="w-3 h-3 mr-1" /> 能耗与配置详情</h4>
+               <div className="grid grid-cols-3 gap-4">
+                   <div className="col-span-1"><SmartInput label="额定功率 (W)" listId="hist-power-rated" options={historyOptions.power_usage} value={formData.power_usage} onChange={e => setFormData({...formData, power_usage: e.target.value})} placeholder="0" /></div>
+                   <div className="col-span-1"><SmartInput label="典型功率 (W)" listId="hist-power-typical" options={historyOptions.typical_power} value={formData.typical_power} onChange={e => setFormData({...formData, typical_power: e.target.value})} placeholder="0" /></div>
+                   <div className="col-span-1"><SmartInput label="负责人" listId="hist-contacts" options={historyOptions.contacts} value={formData.contact||''} onChange={e => setFormData({...formData, contact: e.target.value})} placeholder="自动记忆..." /></div>
+                   <div className="col-span-1"><SmartInput label="所属项目" listId="hist-projects" options={historyOptions.projects} value={formData.project||''} onChange={e => setFormData({...formData, project: e.target.value})} placeholder="自动记忆..." /></div>
+                   <div className="col-span-2"><SmartInput label="OS / 固件版本" listId="hist-os" options={historyOptions.os_versions || []} value={formData.os_version||''} onChange={e => setFormData({...formData, os_version: e.target.value})} placeholder="Version..." /></div>
+                   <div className="col-span-3"><SmartInput label="硬件配置详情" listId="hist-specs" options={historyOptions.specs} value={formData.specs||''} onChange={e => setFormData({...formData, specs: e.target.value})} placeholder="CPU / RAM / Disk ..." /></div>
+               </div>
+           </div>
+
+           <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
+               <h4 className="text-xs font-bold text-blue-600 uppercase mb-3 flex items-center"><Tag className="w-3 h-3 mr-1" /> 资产身份与维保</h4>
+               <div className="grid grid-cols-3 gap-4">
+                   <div className="col-span-1"><SmartInput label="品牌 / 厂商" listId="hist-brands" options={historyOptions.brands || []} value={formData.brand||''} onChange={e => setFormData({...formData, brand: e.target.value})} /></div>
+                   <div className="col-span-1"><SmartInput label="具体型号" listId="hist-models" options={historyOptions.models || []} value={formData.model||''} onChange={e => setFormData({...formData, model: e.target.value})} /></div>
+                   <div className="mb-4"><label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase">设备状态</label><select value={formData.status||'active'} onChange={e => setFormData({...formData, status: e.target.value})} className="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-sm">{Object.keys(DEVICE_STATUS).map(k => <option key={k} value={k}>{DEVICE_STATUS[k].label}</option>)}</select></div>
+                   <div className="col-span-1"><FormInput label="序列号 (S/N)" value={formData.sn||''} onChange={e => setFormData({...formData, sn: e.target.value})} /></div>
+                   <div className="col-span-1"><FormInput label="固资编号" value={formData.asset_tag||''} onChange={e => setFormData({...formData, asset_tag: e.target.value})} /></div>
+                   <div className="col-span-1"><SmartInput label="供应商" listId="hist-suppliers" options={historyOptions.suppliers || []} value={formData.supplier||''} onChange={e => setFormData({...formData, supplier: e.target.value})} /></div>
+                   <div className="col-span-1"><SmartInput label="采购日期" type="date" listId="hist-purchase-date" options={historyOptions.purchase_date} value={formData.purchase_date||''} onChange={e => setFormData({...formData, purchase_date: e.target.value})} /></div>
+                   <div className="col-span-1"><SmartInput label="维保到期" type="date" listId="hist-warranty-date" options={historyOptions.warranty_date} value={formData.warranty_date||''} onChange={e => setFormData({...formData, warranty_date: e.target.value})} /></div>
+               </div>
+           </div>
+
+           <div className="pt-2 flex justify-between border-t border-slate-100 mt-4">
+               {isNew ? <div></div> : <button onClick={() => onDelete(formData.id)} className="px-4 py-2 bg-red-50 text-red-600 rounded hover:bg-red-100 text-xs font-medium flex items-center"><Trash2 className="w-3.5 h-3.5 mr-1" /> 下架设备</button>}
+               <div className="flex-1 flex justify-end space-x-2"><button onClick={onClose} className="px-4 py-2 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 text-xs font-medium">取消</button><button onClick={handleSubmit} className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-xs font-medium flex items-center"><Save className="w-3.5 h-3.5 mr-1" /> 保存信息</button></div>
+           </div>
+       </div>
+    </Modal>
+  )
+};
+
+const IPPoolGrid = ({ subnetId, ips, onIPClick }) => {
+    const gridItems = useMemo(() => {
+        const items = [];
+        for (let i = 1; i <= 254; i++) {
+            const suffix = `.${i}`;
+            const ipData = ips.find(ip => ip.ip_address.endsWith(suffix) && ip.subnet === subnetId);
+            items.push({ suffix, data: ipData, i });
+        }
+        return items;
+    }, [ips, subnetId]);
+
+    return (
+        <div className="p-6 grid grid-cols-8 sm:grid-cols-10 md:grid-cols-12 lg:grid-cols-16 gap-2">
+            {gridItems.map(({ i, data }) => {
+                 let bgColor = 'bg-slate-50 border-slate-200 text-slate-400';
+                 if (data) {
+                     if (data.status === 'online' || data.status === 'active') bgColor = 'bg-green-100 border-green-300 text-green-700 font-bold';
+                     else if (data.status === 'reserved') bgColor = 'bg-blue-100 border-blue-300 text-blue-700';
+                     else if (data.status === 'rogue') bgColor = 'bg-red-100 border-red-300 text-red-700';
+                     else bgColor = 'bg-slate-100 border-slate-300 text-slate-500';
+                 }
+
+                 return (
+                    <div 
+                        key={i} 
+                        onClick={() => onIPClick(data || { ip: `192.168.1.${i}`, status: 'free' })}
+                        className={`aspect-square rounded border flex items-center justify-center text-xs cursor-pointer hover:scale-110 transition-transform shadow-sm ${bgColor}`}
+                        title={data ? `${data.ip_address}\n${data.device_name || '未知设备'}` : `可用 IP`}
+                    >
+                        {i}
+                    </div>
+                 )
+            })}
+        </div>
+    );
+};
+
+const RackElevation = ({ rack, devices, onSelect, onEdit }) => {
+  const totalU = safeInt(rack.height, 42);
+  const slots = [];
+  const renderedUs = new Set(); 
+
+  for (let u = totalU; u >= 1; u--) {
+      if (renderedUs.has(u)) continue;
+
+      const device = devices.find(d => {
+          const top = safeInt(d.position);
+          return top === u;
+      });
+
+      if (device) {
+          const top = safeInt(device.position);
+          const h = Math.max(1, safeInt(device.u_height, 1));
+          const bottom = top - h + 1;
+
+          for (let i = 0; i < h; i++) {
+              const occupiedU = top - i;
+              if (occupiedU >= 1) renderedUs.add(occupiedU);
+          }
+
+          const pixelHeight = (h * 32) + (h - 1);
+          const powerUsage = safeInt(device.power_usage);
+          const isHighPower = powerUsage > 500;
+          const powerColorClass = isHighPower ? "text-yellow-200 font-extrabold" : "text-slate-300 opacity-80";
+
+          slots.push(
+              <div key={u}
+                   className="w-full bg-blue-600 border border-white text-white text-sm font-bold flex flex-col justify-center items-center cursor-pointer hover:bg-blue-500 transition-colors shadow-sm relative group overflow-hidden z-10"
+                   style={{ height: `${pixelHeight}px` }}
+                   onClick={(e) => { e.stopPropagation(); onSelect(rack); onEdit(device); }}
+                   title={`${device.name}\n位置: ${bottom}-${top}U (高${h}U)\nIP: ${device.mgmt_ip}`}
+              >
+                  <span className="truncate px-1 w-full text-center text-xs">{device.name}</span>
+                  <span className={`text-[10px] ${powerColorClass}`}>{powerUsage > 0 ? `${powerUsage}W` : ''}</span>
+              </div>
+          );
+      } else {
+          const deviceOverlapping = devices.find(d => {
+              const top = safeInt(d.position);
+              const h = safeInt(d.u_height, 1);
+              const bottom = top - h + 1;
+              return u <= top && u >= bottom && top > totalU;
+          });
+
+          if (deviceOverlapping && !renderedUs.has(u)) {
+               const top = safeInt(deviceOverlapping.position);
+               const h = safeInt(deviceOverlapping.u_height, 1);
+               const bottom = top - h + 1;
+               const visibleTop = u;
+               const visibleBottom = Math.max(bottom, 1);
+               const visibleHeight = visibleTop - visibleBottom + 1;
+
+               for (let i = 0; i < visibleHeight; i++) renderedUs.add(visibleTop - i);
+
+               const pixelHeight = (visibleHeight * 32) + (visibleHeight - 1);
+
+               slots.push(
+                  <div key={u}
+                       className="w-full bg-blue-600 border border-white text-white text-sm font-bold flex flex-col justify-center items-center cursor-pointer hover:bg-blue-500 transition-colors shadow-sm relative group overflow-hidden z-10"
+                       style={{ height: `${pixelHeight}px` }}
+                       onClick={(e) => { e.stopPropagation(); onSelect(rack); onEdit(deviceOverlapping); }}
+                       title={`${deviceOverlapping.name} (截断显示)\n真实位置: ${bottom}-${top}U`}
+                  >
+                      <span className="absolute top-0 right-0 bg-red-500 text-[8px] px-1 text-white">Top截断</span>
+                      <span className="truncate px-1 w-full text-center text-xs">{deviceOverlapping.name}</span>
+                  </div>
+               );
+          } else {
+              slots.push(
+                  <div key={u} className="w-full h-[32px] border-b border-slate-300 bg-white flex items-center justify-center text-[10px] text-slate-300 hover:bg-blue-50 cursor-pointer"
+                       onClick={(e) => { e.stopPropagation(); onSelect(rack); onEdit({ position: u, u_height: 1, device_type: 'server', name: '' }); }}
+                  >
+                      {u % 5 === 0 ? u : ''}
+                  </div>
+              );
+          }
+      }
+  }
+  return <div className="flex-1 bg-slate-900 p-1 space-y-[1px] relative min-h-[600px]">{slots}</div>;
+};
+
+const RackDetailSidebar = ({ selectedRack, rackDevices, onClose, onEdit, getRackCalculatedPower }) => {
+    if (!selectedRack) return null;
+
+    const stats = getRackCalculatedPower(selectedRack.id);
+    const totalU = safeInt(selectedRack.height, 42);
+    const units = [];
+    const renderedUs = new Set();
+
+    const currentDevices = rackDevices.filter(d => d.rack === selectedRack.id);
+
+    for (let u = totalU; u >= 1; u--) {
+        if (renderedUs.has(u)) continue;
+        const device = currentDevices.find(d => safeInt(d.position) === u);
+
+        if (device) {
+            const top = safeInt(device.position);
+            const h = Math.max(1, safeInt(device.u_height, 1));
+            const bottom = top - h + 1;
+
+            for (let i = 0; i < h; i++) {
+                if (top - i >= 1) renderedUs.add(top - i);
+            }
+
+            const pixelHeight = (h * 34) + (h - 1);
+            const uLabel = h > 1 ? `${bottom}-${top}` : `${top}`;
+
+            units.push(
+                <div key={u} onClick={() => onEdit(device)} className="w-full relative group cursor-pointer transition-all hover:z-10" style={{ height: `${pixelHeight}px` }}>
+                    <div className="absolute inset-0 bg-white border border-slate-300 rounded-sm shadow-sm flex flex-row overflow-hidden hover:ring-2 hover:ring-blue-400 hover:shadow-md transition-all">
+                        <div className={`w-10 h-full flex-shrink-0 flex items-center justify-center text-[10px] font-bold text-white ${device.status === 'active' ? 'bg-emerald-500' : 'bg-amber-500'}`} title={`位置: ${uLabel}U`}>
+                            {uLabel}
+                        </div>
+                        <div className="flex-1 flex flex-col justify-center px-3 py-0.5 min-w-0">
+                            <div className="flex items-center justify-between">
+                                <span className="font-bold text-slate-800 text-sm truncate mr-2 flex items-center">
+                                    {device.device_type === 'server' ? <Server className="w-3.5 h-3.5 mr-1.5 text-slate-400"/> : <HardDrive className="w-3.5 h-3.5 mr-1.5 text-slate-400"/>}
+                                    {device.name}
+                                </span>
+                            </div>
+                            <div className="flex space-x-3 mt-1">
+                                <span className="text-[10px] text-slate-500 flex items-center bg-slate-100 px-1.5 py-0.5 rounded"><Zap className="w-3 h-3 mr-1 text-slate-400"/>{device.power_usage}W</span>
+                                <span className="text-[10px] text-slate-400 flex items-center">{device.mgmt_ip}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        } else {
+             const deviceOverlapping = currentDevices.find(d => {
+                const top = safeInt(d.position);
+                const h = safeInt(d.u_height, 1);
+                const bottom = top - h + 1;
+                return u <= top && u >= bottom && top > totalU;
+            });
+
+            if (deviceOverlapping && !renderedUs.has(u)) {
+                const top = safeInt(deviceOverlapping.position);
+                const h = safeInt(deviceOverlapping.u_height, 1);
+                const bottom = top - h + 1;
+                const visibleHeight = u - Math.max(bottom, 1) + 1;
+
+                for(let i=0; i<visibleHeight; i++) renderedUs.add(u-i);
+
+                const pixelHeight = (visibleHeight * 34) + (visibleHeight - 1);
+                units.push(
+                    <div key={u} onClick={() => onEdit(deviceOverlapping)} className="w-full relative group cursor-pointer transition-all hover:z-10" style={{ height: `${pixelHeight}px` }}>
+                        <div className="absolute inset-0 bg-white border border-red-300 rounded-sm shadow-sm flex flex-row overflow-hidden">
+                             <div className="w-10 h-full bg-red-500 flex items-center justify-center text-white text-[9px]">截断</div>
+                             <div className="flex-1 flex items-center px-3 text-red-500 text-xs">{deviceOverlapping.name} (Top: {top})</div>
+                        </div>
+                    </div>
+                );
+            } else if (!renderedUs.has(u)) {
+                units.push(
+                    <div key={u} onClick={() => onEdit({ position: u, u_height: 1, device_type: 'server', name: '', power_usage: 0, typical_power: 0 })} className="w-full border-b border-slate-200/50 flex items-center justify-between px-3 hover:bg-blue-50/50 cursor-pointer group transition-colors relative" style={{ height: `34px` }}>
+                        <span className="text-[10px] text-slate-300 font-mono select-none w-6 text-center">{u}</span>
+                        <div className="flex-1 border-2 border-dashed border-transparent group-hover:border-blue-200 rounded mx-2 h-6 flex items-center justify-center">
+                            <Plus className="w-3 h-3 text-blue-300 opacity-0 group-hover:opacity-100" />
+                        </div>
+                        <span className="text-[10px] text-slate-300 font-mono select-none w-6 text-center">{u}</span>
+                    </div>
+                );
+            }
+        }
+    }
+
+    return (
+        <>
+            <div className="fixed inset-0 bg-slate-900/20 z-40 backdrop-blur-sm transition-opacity" onClick={onClose}></div>
+            <div className="fixed top-0 right-0 h-full w-[500px] bg-white shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-300 border-l border-slate-200">
+                <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-white shadow-sm z-10">
+                    <div>
+                        <h3 className="font-extrabold text-xl text-slate-800 flex items-center gap-2"><Server className="w-5 h-5 text-blue-600"/> {selectedRack.name}</h3>
+                        <p className="text-xs text-slate-500 font-mono mt-1 ml-7">{selectedRack.code} • {totalU}U 标准机柜</p>
+                    </div>
+                    <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full text-slate-400 hover:text-slate-700 transition-colors"><X className="w-5 h-5"/></button>
+                </div>
+
+                <div className="grid grid-cols-3 gap-0 border-b border-slate-100 bg-slate-50/50">
+                    <div className="p-4 text-center border-r border-slate-100">
+                        <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">额定总负荷</div>
+                        <div className="text-lg font-black text-slate-700">{stats.rated_sum}<span className="text-xs font-normal text-slate-400 ml-0.5">W</span></div>
+                    </div>
+                    <div className="p-4 text-center border-r border-slate-100">
+                        <div className="text-[10px] text-blue-500 uppercase font-bold tracking-wider mb-1">典型运行</div>
+                        <div className="text-lg font-black text-blue-600">{stats.typical_sum}<span className="text-xs font-normal text-blue-300 ml-0.5">W</span></div>
+                    </div>
+                    <div className="p-4 text-center">
+                        <div className="text-[10px] text-emerald-500 uppercase font-bold tracking-wider mb-1">PDU 实测</div>
+                        <div className="text-lg font-black text-emerald-600">{(selectedRack.pdu_a_power||0)+(selectedRack.pdu_b_power||0)}<span className="text-xs font-normal text-emerald-300 ml-0.5">W</span></div>
+                    </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-6 bg-slate-100/50 custom-scrollbar">
+                    <div className="w-full bg-white p-1 rounded-lg border border-slate-200 shadow-sm">
+                        <div className="h-4 bg-slate-200 border-b border-slate-300 rounded-t-md mb-0.5 flex justify-center items-center">
+                            <div className="w-16 h-1 bg-slate-300 rounded-full"></div>
+                        </div>
+                        <div className="bg-slate-100 border-x border-slate-200 space-y-[1px] relative">
+                            {units}
+                        </div>
+                        <div className="h-6 bg-slate-200 border-t border-slate-300 rounded-b-md mt-0.5 flex justify-between px-4 items-center">
+                            <div className="w-2 h-2 rounded-full bg-slate-400"></div>
+                            <div className="w-2 h-2 rounded-full bg-slate-400"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="p-5 border-t border-slate-100 bg-white z-10">
+                    <button onClick={() => onEdit({ position: 1, u_height: 1, device_type: 'server', name: '' })} className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-sm shadow-lg shadow-blue-200 transition-all flex items-center justify-center hover:-translate-y-0.5 active:translate-y-0">
+                        <Plus className="w-4 h-4 mr-2" /> 在此机柜上架新设备
+                    </button>
+                </div>
+            </div>
+        </>
+    );
+};
+
+// ============================================================================
+// 0.2 全局错误边界
+// ============================================================================
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("Critical Error caught by boundary:", error, errorInfo);
+    this.setState({ errorInfo });
+  }
+
+  handleClearCacheAndReload = () => {
+    localStorage.clear();
+    window.location.reload();
+  };
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4 font-sans">
+          <div className="bg-white p-6 rounded-xl shadow-2xl max-w-2xl w-full border border-red-200">
+            <div className="flex items-center gap-3 mb-4 text-red-600 border-b border-red-100 pb-3">
+              <AlertTriangle size={32} />
+              <h2 className="text-xl font-bold">系统发生运行时错误 (Runtime Error)</h2>
+            </div>
+
+            <p className="text-sm text-slate-600 mb-4">React 渲染过程中遇到了未捕获的异常。这通常是由于本地缓存数据结构不匹配或网络请求返回了非预期的数据。</p>
+
+            <div className="bg-slate-900 text-red-300 p-4 rounded-lg text-xs font-mono overflow-auto max-h-60 mb-6 shadow-inner">
+              <p className="font-bold border-b border-red-900/50 pb-2 mb-2">{this.state.error?.toString()}</p>
+              <pre className="whitespace-pre-wrap opacity-70">{this.state.errorInfo?.componentStack}</pre>
+            </div>
+
+            <div className="flex gap-4">
+               <button
+                 onClick={this.handleClearCacheAndReload}
+                 className="flex-1 px-4 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold transition-all shadow-md active:scale-95 flex items-center justify-center"
+               >
+                 <Trash2 size={16} className="mr-2"/> 清除缓存并重启 (推荐)
+               </button>
+               <button
+                 onClick={() => window.location.reload()}
+                 className="flex-1 px-4 py-3 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg font-bold transition-all active:scale-95"
+               >
+                 仅刷新页面
+               </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// ============================================================================
+// 5. App 主组件 (Logic Shell)
+// ============================================================================
+function MainApp() {
+  const [isLoggedIn, setIsLoggedIn] = useState(() => localStorage.getItem('isLoggedIn') === 'true');
+  const [currentUser, setCurrentUser] = useState(() => localStorage.getItem('current_user') || '');
+  const [activeTab, setActiveTab] = useState('list');
+  const [ipViewMode, setIpViewMode] = useState('list');
+  const [dcimViewMode, setDcimViewMode] = useState('list');
+  const [elevationLayout, setElevationLayout] = useState('horizontal');
+  const fileInputRef = useRef(null);
+
+  const [isImporting, setIsImporting] = useState(false);
+  const [debugLogs, setDebugLogs] = useState([]);
+  const [isDebugOpen, setIsDebugOpen] = useState(false);
+
+  const [roleMap, setRoleMap] = useState(() => {
+    try {
+      const saved = localStorage.getItem('user_role_map');
+      return saved ? JSON.parse(saved) : { 'admin': 'admin' };
+    } catch {
+      return { 'admin': 'admin' };
+    }
+  });
+
+  const currentRole = currentUser === 'admin' ? 'admin' : (roleMap[currentUser] || 'guest');
+  const currentPermissions = ROLE_DEFINITIONS[currentRole]?.permissions || [];
+
+  const LOGOUT_TIMEOUT = 30 * 60 * 1000;
+  const logoutTimerRef = useRef(null);
+
+  const handleLogout = useCallback(async () => {
+    try { await safeFetch('/api/logout/', { method: 'POST' }); } catch(e) {}
+    localStorage.removeItem('isLoggedIn');
+    localStorage.removeItem('current_user');
+    setIsLoggedIn(false);
+    setCurrentUser('');
+  }, []);
+
+  const resetLogoutTimer = useCallback(() => {
+    if (!isLoggedIn) return;
+    if (logoutTimerRef.current) clearTimeout(logoutTimerRef.current);
+    logoutTimerRef.current = setTimeout(() => {
+      alert("由于长时间未操作，您已自动退出登录。");
+      handleLogout();
+    }, LOGOUT_TIMEOUT);
+  }, [isLoggedIn, handleLogout]);
+
+  useEffect(() => {
+    if (isLoggedIn) {
+      const events = ['mousedown', 'keydown', 'scroll', 'touchstart', 'mousemove'];
+      events.forEach(e => window.addEventListener(e, resetLogoutTimer));
+      resetLogoutTimer();
+      return () => {
+         events.forEach(e => window.removeEventListener(e, resetLogoutTimer));
+         if (logoutTimerRef.current) clearTimeout(logoutTimerRef.current);
+      };
+    }
+  }, [isLoggedIn, resetLogoutTimer]);
+
+  useEffect(() => {
+    if (isLoggedIn && !currentPermissions.includes(activeTab)) {
+      const firstAllowed = Object.keys(TAB_CONFIG).find(key => currentPermissions.includes(key));
+      if (firstAllowed) {
+        setActiveTab(firstAllowed);
+      }
+    }
+  }, [activeTab, currentPermissions, isLoggedIn]);
+
+  const addDebugLog = (action, content, type = 'info') => {
+    const entry = { id: Date.now(), time: new Date().toLocaleTimeString(), action, content, type };
+    setDebugLogs(prev => [entry, ...prev].slice(0, 50));
+    console.log(`[Debug/${action}]`, content);
+  };
+
+  const [optionLists, setOptionLists] = useState(() => {
+    try {
+      const saved = localStorage.getItem('ipam_options');
+      return saved ? JSON.parse(saved) : DEFAULT_OPTIONS;
+    } catch(e) {
+      return DEFAULT_OPTIONS;
+    }
+  });
+
+  const [historyOptions, setHistoryOptions] = useState(() => {
+      try {
+          const saved = localStorage.getItem('app_history_options');
+          const parsed = saved ? JSON.parse(saved) : {};
+          const initialHistory = {};
+          HISTORY_TRACKED_FIELDS.forEach(key => {
+              initialHistory[key] = parsed[key] || [];
+          });
+          return initialHistory;
+      } catch(e) {
+          const initialHistory = {};
+          HISTORY_TRACKED_FIELDS.forEach(key => initialHistory[key] = []);
+          return initialHistory;
+      }
+  });
+
+  useEffect(() => { localStorage.setItem('ipam_options', JSON.stringify(optionLists)); }, [optionLists]);
+
+  const updateHistory = (formData) => {
+      setHistoryOptions(prev => {
+          const newHistory = { ...prev };
+          const updateList = (list, item) => {
+              if (!item || item === 0 || item === '0') return list;
+              const strItem = String(item).trim();
+              if (!strItem) return list;
+              const newList = [strItem, ...(list || []).filter(i => String(i) !== strItem)].slice(0, 5);
+              return newList;
+          };
+          HISTORY_TRACKED_FIELDS.forEach(key => {
+             if(formData[key]) newHistory[key] = updateList(prev[key], formData[key]);
+          });
+          localStorage.setItem('app_history_options', JSON.stringify(newHistory));
+          return newHistory;
+      });
+  };
+
+  const [sections, setSections] = useState([]);
+  const [subnets, setSubnets] = useState([]);
+  const [ips, setIps] = useState([]);
+  const [backups, setBackups] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [loginLogs, setLoginLogs] = useState([]);
+  const [blocklist, setBlocklist] = useState([]);
+  const [datacenters, setDatacenters] = useState([]);
+  const [racks, setRacks] = useState([]);
+  const [rackDevices, setRackDevices] = useState([]);
+
+  const [activeLocation, setActiveLocation] = useState(null);
+  const [selectedRack, setSelectedRack] = useState(null);
+  const [selectedSubnetId, setSelectedSubnetId] = useState(null);
+  const [expandedSections, setExpandedSections] = useState({});
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isScanning, setIsScanning] = useState(false);
+  const [isDataLoading, setIsDataLoading] = useState(false);
+
+  const [isIPModalOpen, setIsIPModalOpen] = useState(false);
+  const [isSubnetModalOpen, setIsSubnetModalOpen] = useState(false);
+  const [isSectionModalOpen, setIsSectionModalOpen] = useState(false);
+  const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [isBlockModalOpen, setIsBlockModalOpen] = useState(false);
+  const [isRackModalOpen, setIsRackModalOpen] = useState(false);
+  const [isDcModalOpen, setIsDcModalOpen] = useState(false);
+  const [managingOptionKey, setManagingOptionKey] = useState(null);
+
+  const [editingIP, setEditingIP] = useState(null);
+  const [ipFormData, setIpFormData] = useState({});
+  const [subnetFormData, setSubnetFormData] = useState({});
+  const [sectionFormData, setSectionFormData] = useState({});
+  const [userFormData, setUserFormData] = useState({});
+  const [resetTarget, setResetTarget] = useState({});
+  const [blockFormData, setBlockFormData] = useState({});
+  const [currentRackForm, setCurrentRackForm] = useState(null);
+  const [currentDcForm, setCurrentDcForm] = useState(null);
+  const [editingDevice, setEditingDevice] = useState(null);
+
+  const elevationScrollRef = useRef(null);
+  const elevationContentRef = useRef(null);
+  const elevationDragInfo = useRef({ isDown: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0 });
+  const [viewState, setViewState] = useState({ scale: 1 });
+
+  const handleZoomIn = () => setViewState(prev => ({ ...prev, scale: Math.min(prev.scale + 0.1, 2) }));
+  const handleZoomOut = () => setViewState(prev => ({ ...prev, scale: Math.max(prev.scale - 0.1, 0.5) }));
+  const handleZoomReset = () => setViewState({ scale: 1 });
+
+  const getRackCalculatedPower = (rackId) => {
+      if (!Array.isArray(rackDevices)) return { rated_sum: 0, typical_sum: 0 };
+      const devicesInRack = rackDevices.filter(d => d.rack === rackId);
+      return devicesInRack.reduce((acc, dev) => ({ rated_sum: acc.rated_sum + (safeInt(dev.power_usage) || 0), typical_sum: acc.typical_sum + (safeInt(dev.typical_power) || 0) }), { rated_sum: 0, typical_sum: 0 });
+  };
+
+  const currentRacks = useMemo(() => racks.filter(r => r.datacenter == activeLocation), [racks, activeLocation]);
+  const currentSubnet = subnets.find(s => s.id === selectedSubnetId) || {};
+  const filteredIPs = useMemo(() => {
+    return ips.filter(ip => {
+      const matchSubnet = ip.subnet === selectedSubnetId;
+      const matchSearch = searchQuery ? JSON.stringify(ip).toLowerCase().includes(searchQuery.toLowerCase()) : true;
+      return matchSubnet && matchSearch;
+    });
+  }, [ips, selectedSubnetId, searchQuery]);
+
+  const datacenterPowerStats = useMemo(() => {
+      return currentRacks.reduce((acc, rack) => {
+          const rackStats = getRackCalculatedPower(rack.id);
+          return { total_rated: acc.total_rated + rackStats.rated_sum, total_typical: acc.total_typical + rackStats.typical_sum, total_pdu: acc.total_pdu + (safeInt(rack.pdu_a_power) || 0) + (safeInt(rack.pdu_b_power) || 0) };
+      }, { total_rated: 0, total_typical: 0, total_pdu: 0 });
+  }, [currentRacks, rackDevices]);
+
+  const handleElevationMouseDown = (e) => {
+    const ele = elevationScrollRef.current;
+    if (!ele) return;
+    elevationDragInfo.current.isDown = true;
+    elevationDragInfo.current.startX = e.pageX - ele.offsetLeft;
+    elevationDragInfo.current.startY = e.pageY - ele.offsetTop;
+    elevationDragInfo.current.scrollLeft = ele.scrollLeft;
+    elevationDragInfo.current.scrollTop = ele.scrollTop;
+    ele.style.cursor = 'grabbing';
+  };
+
+  const handleElevationMouseLeave = () => {
+    elevationDragInfo.current.isDown = false;
+    if (elevationScrollRef.current) elevationScrollRef.current.style.cursor = 'grab';
+  };
+
+  const handleElevationMouseUp = () => {
+    elevationDragInfo.current.isDown = false;
+    if (elevationScrollRef.current) elevationScrollRef.current.style.cursor = 'grab';
+  };
+
+  const handleElevationMouseMove = (e) => {
+    if (!elevationDragInfo.current.isDown) return;
+    e.preventDefault();
+    const ele = elevationScrollRef.current;
+    const x = e.pageX - ele.offsetLeft;
+    const y = e.pageY - ele.offsetTop;
+    const walkX = (x - elevationDragInfo.current.startX) * 1.2;
+    const walkY = (y - elevationDragInfo.current.startY) * 1.2;
+    ele.scrollLeft = elevationDragInfo.current.scrollLeft - walkX;
+    ele.scrollTop = elevationDragInfo.current.scrollTop - walkY;
+  };
+
+  const handleExport = () => { window.open('/api/export-excel/', '_blank'); };
+
+  const handleFileChange = async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    if (f.size > 5 * 1024 * 1024) return alert("文件大小不能超过 5MB");
+    const fd = new FormData();
+    fd.append('file', f);
+    setIsImporting(true);
+    try {
+      const res = await safeFetch('/api/import-excel/', { method: 'POST', body: fd });
+      if (res.ok) { alert("导入成功！"); refreshData(); } else { alert(`导入失败`); }
+    } catch(err) { alert("网络请求失败"); } finally { e.target.value = null; setIsImporting(false); }
+  };
+
+  const handleImportClick = () => fileInputRef.current.click();
+  const handleDownloadTemplate = () => {
+      const bom = "\uFEFF";
+      const headers = ['所属机房', '机柜编号', '设备名称', '设备类型(server/switch/router)', '起始U位', '高度(U)', '管理IP', '负责人', '额定功率(W)', '典型功率(W)', '所属项目', '品牌', '型号', '状态(active/offline)', '序列号', '资产编号', '供应商', '采购日期(YYYY-MM-DD)', '维保到期(YYYY-MM-DD)', 'OS版本', '硬件配置'];
+      const rows = [['7F 核心机房', 'A01', 'Core-SW-01', 'switch_core', '40', '2', '192.168.1.1', '张三', '500', '300', '核心改造', 'Huawei', 'S12700', 'active', 'SN123456', 'ZC001', '集成商A', '2023-01-01', '2026-01-01', 'V800R010', '双主控/双电源']];
+      const csvContent = bom + [headers, ...rows].map(e => e.join(",")).join("\n");
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `资产导入模板_请另存为xlsx.csv`;
+      link.click();
+      alert("⚠️ 注意：下载的是 CSV 格式模板。\n\n请务必用 Excel 打开它，填好数据后，点击【文件 -> 另存为 -> Excel 工作簿 (*.xlsx)】格式再上传！");
+  };
+
+  const handleExportHtml = () => {
+    if (dcimViewMode !== 'elevation') return;
+    let tableHTML = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>机柜排位图</title><style>body{font-family:'Microsoft YaHei',sans-serif;margin:20px;background-color:#f0f2f5}table{border-collapse:separate;border-spacing:0;font-size:12px;margin:0 auto}th,td{padding:4px;text-align:center;vertical-align:middle;border:1px solid #666}.rack-header{background-color:#8db4e2;font-size:16px;font-weight:bold;height:35px;color:#000;border:2px solid #000}.u-ruler{background-color:#ffffff;font-weight:bold;width:30px;color:#000;border:1px solid #000}.device-cell{background-color:#4472c4;color:#ffffff;font-weight:bold;font-size:12px;padding:5px;width:220px;border:2px solid #000}.device-name{font-size:13px;display:block;margin-bottom:3px}.device-info{font-size:11px;display:block;font-weight:normal;opacity:0.9}.device-power{font-size:11px;color:#ffd700;display:block;margin-top:2px;font-weight:bold}.empty-cell{background-color:#dbe5f1;border:1px solid #999}.spacer-col{border:none;width:30px;background-color:transparent}.status-maintenance{background-color:#e26b0a}.status-offline{background-color:#7f7f7f}</style></head><body><h2 style="text-align:center;margin-bottom:20px">机房机柜设备排位图</h2><table>`;
+    tableHTML += `<tr>`;
+    currentRacks.forEach((rack, index) => {
+        tableHTML += `<td colspan="3" class="rack-header">${rack.name}</td>`;
+        if (index < currentRacks.length - 1) tableHTML += `<td class="spacer-col"></td>`;
+    });
+    tableHTML += `</tr>`;
+
+    const maxU = currentRacks.length > 0 ? Math.max(...currentRacks.map(r => safeInt(r.height, 42))) : 42;
+
+    for (let u = maxU; u >= 1; u--) {
+        tableHTML += `<tr>`;
+        currentRacks.forEach((rack, index) => {
+            const currentRackHeight = safeInt(rack.height, 42);
+            if (u > currentRackHeight) {
+                tableHTML += `<td style="border:none"></td><td style="border:none"></td><td style="border:none"></td>`;
+            } else {
+                const devicesInRack = rackDevices.filter(d => d.rack === rack.id);
+                const device = devicesInRack.find(d => {
+                    const top = safeInt(d.position);
+                    return top === u;
+                });
+
+                tableHTML += `<td class="u-ruler">${u}</td>`;
+
+                if (device) {
+                    const height = safeInt(device.u_height, 1);
+                    let statusClass = '';
+                    if (device.status === 'maintenance') statusClass = 'status-maintenance';
+                    else if (device.status === 'offline') statusClass = 'status-offline';
+
+                    const cYellow = '#ffd700';
+                    const content = `<span style="font-size: 11pt; color: #ffffff; font-weight: bold;">${device.name}</span><br/><span style="font-size: 9pt; color: #e6eef7;">${device.mgmt_ip || ''}</span><br/><span style="font-size: 10pt; color: ${cYellow}; font-weight: bold;">${(safeInt(device.power_usage) || 0) > 0 ? device.power_usage + 'W' : ''}</span>`;
+                    tableHTML += `<td rowspan="${height}" class="device-cell ${statusClass}" valign="middle">${content}</td>`;
+                } else {
+                    const deviceOverlapping = devicesInRack.find(d => {
+                        const top = safeInt(d.position);
+                        const h = safeInt(d.u_height, 1);
+                        const bottom = top - h + 1;
+                        return u < top && u >= bottom;
+                    });
+
+                    if (!deviceOverlapping) {
+                        tableHTML += `<td class="empty-cell"></td>`;
+                    }
+                }
+                tableHTML += `<td class="u-ruler">${u}</td>`;
+            }
+            if (index < currentRacks.length - 1) tableHTML += `<td class="spacer-col"></td>`;
+        });
+        tableHTML += `</tr>`;
+    }
+    tableHTML += `</table></body></html>`;
+    const blob = new Blob([tableHTML], { type: 'text/html;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `机房排位图_工程蓝版_${new Date().toISOString().slice(0, 10)}.html`;
+    link.click();
+  };
+
+  const handleExportExcel = () => {
+    if (dcimViewMode !== 'elevation') return;
+    const maxU = currentRacks.length > 0 ? Math.max(...currentRacks.map(r => safeInt(r.height, 42))) : 42;
+    const styleBorder = 'border: 1px solid #666666;';
+    const styleCenter = 'text-align: center; vertical-align: middle;';
+    const styleWrap = 'white-space: normal; word-wrap: break-word; mso-data-placement:same-cell;';
+    const cBlueDeep = '#4472c4'; const cBlueLight = '#8db4e2'; const cYellow = '#ffd700'; const cGrayLight = '#e6eef7'; const cOrange = '#e26b0a'; const cGray = '#7f7f7f';
+    let tableHTML = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>机柜排位图</x:Name><x:WorksheetOptions><x:DisplayGridlines/><x:FrozenNoSplit/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--><style>td { font-family: 'Microsoft YaHei', Arial, sans-serif; font-size: 10pt; } br { mso-data-placement:same-cell; }</style></head><body><table border="1" style="border-collapse: separate; border-spacing: 0;">`;
+    tableHTML += `<tr>`;
+    currentRacks.forEach((rack, index) => {
+        tableHTML += `<td colspan="3" style="${styleBorder} ${styleCenter} background-color: ${cBlueLight}; font-size: 14pt; font-weight: bold; height: 40px; color: #000000;">${rack.name}<br/><span style="font-size: 9pt; font-weight: normal;">(${rack.code})</span></td>`;
+        if (index < currentRacks.length - 1) tableHTML += `<td style="border: none; width: 20px;"></td>`;
+    });
+    tableHTML += '</tr>';
+    for (let u = maxU; u >= 1; u--) {
+        tableHTML += `<tr style="height: 45px;">`;
+        currentRacks.forEach((rack, index) => {
+            const currentRackHeight = safeInt(rack.height, 42);
+            if (u > currentRackHeight) {
+                tableHTML += `<td style="border: none;"></td><td style="border: none;"></td><td style="border: none;"></td>`;
+            } else {
+                const devicesInRack = rackDevices.filter(d => d.rack === rack.id);
+                const device = devicesInRack.find(d => {
+                    const top = safeInt(d.position);
+                    return top === u;
+                });
+
+                tableHTML += `<td style="${styleCenter} background-color: #ffffff; border: 1px solid #000000; width: 30px;"><b>${u}</b></td>`;
+
+                if (device) {
+                    const height = safeInt(device.u_height, 1);
+                    let bgColor = cBlueDeep;
+                    if (device.status === 'maintenance') bgColor = cOrange; else if (device.status === 'offline') bgColor = cGray; else if ((safeInt(device.power_usage) || 0) > 800) bgColor = '#c00000';
+                    const content = `<span style="font-size: 11pt; color: #ffffff; font-weight: bold;">${device.name}</span><br/><span style="font-size: 9pt; color: #e6eef7;">${device.mgmt_ip || ''}</span><br/><span style="font-size: 10pt; color: ${cYellow}; font-weight: bold;">${(safeInt(device.power_usage) || 0) > 0 ? device.power_usage + 'W' : ''}</span>`;
+                    tableHTML += `<td rowspan="${height}" style="${styleBorder} ${styleWrap} ${styleCenter} background-color: ${bgColor}; width: 220px; color: #ffffff;" valign="middle">${content}</td>`;
+                } else {
+                    const deviceOccupying = devicesInRack.find(d => {
+                        const top = safeInt(d.position);
+                        const h = safeInt(d.u_height, 1);
+                        const bottom = top - h + 1;
+                        return u < top && u >= bottom;
+                    });
+
+                    if (!deviceOccupying) {
+                        tableHTML += `<td style="${styleBorder} background-color: ${cGrayLight};"></td>`;
+                    }
+                }
+                tableHTML += `<td style="${styleCenter} background-color: #ffffff; border: 1px solid #000000; width: 30px;"><b>${u}</b></td>`;
+            }
+            if (index < currentRacks.length - 1) tableHTML += `<td style="border: none;"></td>`;
+        });
+        tableHTML += `</tr>`;
+    }
+    tableHTML += '</table></body></html>';
+    const blob = new Blob([tableHTML], { type: 'application/vnd.ms-excel' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `机房排位图_工程版_${new Date().toISOString().slice(0, 10)}.xls`;
+    link.click();
+  };
+
+  const handleExportImage = async () => {
+    if (dcimViewMode !== 'elevation') return;
+    const content = elevationContentRef.current;
+    if (!content) return;
+    try {
+        if (!window.html2canvas) {
+            const script = document.createElement('script');
+            script.src = "https://html2canvas.hertzen.com/dist/html2canvas.min.js";
+            document.head.appendChild(script);
+            await new Promise((resolve) => script.onload = resolve);
+        }
+        const originalTransform = content.style.transform;
+        content.style.transform = 'scale(1)';
+        const canvas = await window.html2canvas(content, { scale: 2, useCORS: true, backgroundColor: '#f8fafc', logging: false });
+        content.style.transform = originalTransform;
+        const link = document.createElement('a');
+        link.download = `机房排位图_${elevationLayout === 'vertical' ? '长图_' : ''}${new Date().toISOString().slice(0, 10)}.png`;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+    } catch (error) { console.error('导出失败:', error); alert('导出图片失败，请稍后重试'); }
+  };
+
+  const refreshData = async () => {
+    setIsDataLoading(true);
+    try {
+      const [resSec, resSub, resIp, resUser, resBk, resLog, resBlock, resDc, resRack, resDev] = await Promise.all([
+        safeFetch('/api/sections/'), safeFetch('/api/subnets/'), safeFetch('/api/ips/'), safeFetch('/api/users/'),
+        safeFetch('/api/list-backups/'), safeFetch('/api/logs/'), safeFetch('/api/blocklist/'),
+        safeFetch('/api/datacenters/'), safeFetch('/api/racks/'), safeFetch('/api/rack-devices/')
+      ]);
+      if(resSec.ok) setSections(await resSec.json() || []);
+      if(resSub.ok) { const d=await resSub.json() || []; setSubnets(d); if(!selectedSubnetId && d.length>0) setSelectedSubnetId(d[0].id); }
+      if(resIp.ok) setIps(await resIp.json() || []);
+      if(resUser.ok) setUsers(await resUser.json() || []);
+      if(resBk.ok) setBackups(await resBk.json() || []);
+      if(resLog.ok) setLoginLogs(await resLog.json() || []);
+      if(resBlock.ok) setBlocklist(await resBlock.json() || []);
+      if(resDc.ok) { const d=await resDc.json() || []; setDatacenters(d); if(!activeLocation && d.length>0) setActiveLocation(d[0].id); }
+      if(resRack.ok) setRacks(await resRack.json() || []);
+      if(resDev.ok) {
+          const rawDevices = await resDev.json() || [];
+          const metaRegex = /__META__:({.*})$/;
+          const processedDevices = rawDevices.map(d => {
+              const cleanD = {
+                  ...d,
+                  position: safeInt(d.position, 1),
+                  u_height: safeInt(d.u_height, 1),
+                  power_usage: safeInt(d.power_usage, 0),
+                  typical_power: safeInt(d.typical_power, 0)
+              };
+
+              if (cleanD.specs && metaRegex.test(cleanD.specs)) {
+                  try {
+                      const match = cleanD.specs.match(metaRegex);
+                      const meta = JSON.parse(match[1]);
+                      return { ...cleanD, ...meta, specs: cleanD.specs.replace(metaRegex, '').trim() };
+                  } catch(e) { return cleanD; }
+              }
+              return cleanD;
+          });
+          setRackDevices(processedDevices);
+          if (processedDevices.length > 0) {
+              addDebugLog('数据刷新-字段修复后检查', {
+                  sample_name: processedDevices[0].name,
+                  restored_typical_power: processedDevices[0].typical_power,
+                  restored_model: processedDevices[0].model
+              }, 'info');
+          }
+      }
+    } catch (err) { console.error("Data load failed", err); }
+    finally { setIsDataLoading(false); }
+  };
+
+  useEffect(() => { if (isLoggedIn) refreshData(); }, [isLoggedIn]);
+
+  // Handlers
+  const handleSaveIP = async () => {
+    if(!ipFormData.ip_address) return alert("IP必填");
+    const url = editingIP ? `/api/ips/${editingIP.id}/` : '/api/ips/';
+    const method = editingIP ? 'PUT' : 'POST';
+    const payload = { ...ipFormData, subnet: selectedSubnetId, nat_type: ipFormData.nat_type || 'none' };
+    try {
+        const res = await safeFetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        if(res.ok) {
+            alert("保存成功");
+            setIsIPModalOpen(false);
+            refreshData();
+        } else {
+            let errorMsg = "保存失败";
+            try { const data = await res.json(); errorMsg = JSON.stringify(data); } catch(e) { errorMsg = await res.text(); }
+            alert(`保存失败: ${errorMsg}`);
+        }
+    } catch(e){ alert("系统错误: " + e.message); }
+  };
+
+  const handleDeleteIP = async (id) => { if(!confirm("删除?")) return; try { const res = await safeFetch(`/api/ips/${id}/`, { method: 'DELETE' }); if(res.ok) refreshData(); } catch(e){} };
+  const openOptionManager = (key) => setManagingOptionKey(key);
+
+  const handleSaveUser = async () => {
+    try { const res = await safeFetch('/api/users/', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(userFormData) }); if (res.ok) { alert("成功"); setIsUserModalOpen(false); refreshData(); } } catch(e){}
+    if (userFormData.username && userFormData.role) {
+      const newRoleMap = { ...roleMap, [userFormData.username]: userFormData.role };
+      setRoleMap(newRoleMap);
+      localStorage.setItem('user_role_map', JSON.stringify(newRoleMap));
+    }
+  };
+
+  const handleDeleteUser = async (id) => { if(!confirm("删除?")) return; try { const res = await safeFetch(`/api/users/${id}/`, { method: 'DELETE' }); if(res.ok) refreshData(); } catch(e){} };
+  const handleResetConfirm = async () => { try { const res = await safeFetch(`/api/users/${resetTarget.id}/`, { method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({password:resetTarget.password}) }); if (res.ok) { alert("成功"); setIsResetModalOpen(false); } } catch(e){} };
+
+  const handleSaveSubnet = async () => {
+      if(!subnetFormData.name) return alert("网段名必填");
+      const url = !!subnetFormData.id ? `/api/subnets/${subnetFormData.id}/` : '/api/subnets/';
+      const payload = { ...subnetFormData, vlan_id: (subnetFormData.vlan_id && subnetFormData.vlan_id !== "") ? parseInt(subnetFormData.vlan_id) : null };
+      try {
+          const res = await safeFetch(url, {method: !!subnetFormData.id ? 'PUT' : 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+          if(res.ok){
+              alert("保存成功");
+              setIsSubnetModalOpen(false);
+              refreshData();
+          } else { const err = await res.json(); alert("操作失败:\n" + JSON.stringify(err, null, 2)); }
+      } catch(e){ alert("网络错误: " + e.message); }
+  };
+  const handleSaveSection = async () => { if(!sectionFormData.name) return alert("名称必填"); try{ const res = await safeFetch('/api/sections/', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(sectionFormData)}); if(res.ok){ alert("成功"); setIsSectionModalOpen(false); refreshData(); setSectionFormData({}); } else { alert("操作失败 (状态码 " + res.status + ")"); } } catch(e){ alert("系统错误: " + e.message); } };
+  const handleDeleteSection = async (id) => { if(!confirm("删除?")) return; try{ const res = await safeFetch(`/api/sections/${id}/`, {method:'DELETE'}); if(res.ok) refreshData(); } catch(e){} };
+  const handleDeleteSubnet = async (id) => { if(!confirm("删除?")) return; try{ const res = await safeFetch(`/api/subnets/${id}/`, {method:'DELETE'}); if(res.ok){ setSelectedSubnetId(null); refreshData(); } } catch(e){} };
+  const handleSaveDatacenter = async (formData) => { const url = formData.id ? `/api/datacenters/${formData.id}/` : '/api/datacenters/'; try { const res = await safeFetch(url, { method: formData.id?'PUT':'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(formData) }); if(res.ok) { alert("成功"); setIsDcModalOpen(false); refreshData(); } else { alert("操作失败 (状态码 " + res.status + ")"); } } catch(e){ alert("系统错误: " + e.message); } };
+  const handleDeleteDatacenter = async (id) => { if(!confirm("删除?")) return; try { const res = await safeFetch(`/api/datacenters/${id}/`, { method: 'DELETE' }); if(res.ok) { refreshData(); if(activeLocation==id) setActiveLocation(null); } } catch(e){} };
+  const handleSaveRack = async (formData) => { const url = formData.id ? `/api/racks/${formData.id}/` : '/api/racks/'; const payload = { ...formData, datacenter: activeLocation }; try { const res = await safeFetch(url, { method: formData.id?'PUT':'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) }); if(res.ok) { alert("成功"); setIsRackModalOpen(false); refreshData(); } else { alert("操作失败 (状态码 " + res.status + ")"); } } catch(e){ alert("系统错误: " + e.message); } };
+  const handleDeleteRack = async (id, e) => { e.stopPropagation(); if(!confirm("删除?")) return; try { const res = await safeFetch(`/api/racks/${id}/`, { method: 'DELETE' }); if(res.ok) { if(selectedRack?.id===id) setSelectedRack(null); refreshData(); } } catch(e){} };
+
+  const handleSaveDevice = async (deviceData) => {
+      addDebugLog('设备保存-请求', deviceData, 'req');
+      const url = deviceData.id ? `/api/rack-devices/${deviceData.id}/` : '/api/rack-devices/';
+
+      const cleanData = { ...deviceData };
+
+      // 1. 日期清洗
+      if (!cleanData.purchase_date) cleanData.purchase_date = null;
+      if (!cleanData.warranty_date) cleanData.warranty_date = null;
+
+      // 2. 数值清洗
+      cleanData.power_usage = safeInt(cleanData.power_usage);
+      cleanData.typical_power = safeInt(cleanData.typical_power);
+      cleanData.position = safeInt(cleanData.position, 1);
+      cleanData.u_height = safeInt(cleanData.u_height, 1);
+
+      // 3. 隐写术
+      const metaData = { model: cleanData.model, typical_power: cleanData.typical_power };
+      const metaRegex = /__META__:({.*})$/;
+      let baseSpecs = (cleanData.specs || '').replace(metaRegex, '').trim();
+      cleanData.specs = `${baseSpecs}\n__META__:${JSON.stringify(metaData)}`;
+
+      const payload = { ...cleanData, rack: selectedRack.id };
+
+      try {
+          const res = await safeFetch(url, { method: deviceData.id?'PUT':'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+          if(res.ok) {
+              const resData = await res.json();
+              addDebugLog('设备保存-成功', resData, 'success');
+              updateHistory(deviceData);
+              alert("操作成功！");
+              setEditingDevice(null);
+              refreshData();
+          } else {
+              let errorMsg = "未知错误";
+              try { const data = await res.json(); errorMsg = JSON.stringify(data, null, 2); } catch (e) { const text = await res.text(); errorMsg = text ? text.substring(0, 200) : "无响应内容"; }
+              addDebugLog('设备保存-失败', `状态码: ${res.status}\n${errorMsg}`, 'error');
+              alert(`保存失败！\n状态码: ${res.status}\n错误详情:\n${errorMsg}`);
+          }
+      } catch(e) {
+          addDebugLog('设备保存-网络异常', e.message, 'error');
+          alert(`网络或系统异常: ${e.message}`);
+      }
+  };
+
+  const handleDeleteDevice = async (id) => { if(!confirm("删除?")) return; try { const res = await safeFetch(`/api/rack-devices/${id}/`, { method: 'DELETE' }); if(res.ok) { setEditingDevice(null); refreshData(); } } catch(e){} };
+  const handleScanSubnet = async () => { if (!selectedSubnetId) return; if(!confirm("扫描?")) return; setIsScanning(true); try { const res = await safeFetch('/api/scan/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subnet_id: selectedSubnetId }) }); if (res.ok) { alert((await res.json()).message); refreshData(); } } catch(e){} finally { setIsScanning(false); } };
+  const handleManualBackup = async () => { try { const res = await safeFetch('/api/trigger-backup/', { method: 'POST' }); const data = await res.json(); if (res.ok) { alert(`备份成功: ${data.filename}`); refreshData(); } } catch(e){} };
+  const handleBlockIP = async () => { if(!blockFormData.ip_address) return alert("IP required"); try { const res = await safeFetch('/api/blocklist/', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(blockFormData) }); if(res.ok) { alert("Blocked"); setIsBlockModalOpen(false); refreshData(); } } catch(e) {} };
+  const handleUnblockIP = async (id) => { if(confirm("Unblock?")) { try { const res = await safeFetch(`/api/blocklist/${id}/`, { method: 'DELETE' }); if(res.ok) refreshData(); } catch(e) {} } };
+  const handlePoolIPClick = (item) => { setEditingIP(null); setIpFormData({ ip_address: item.ip, status: item.status === 'free' ? 'offline' : item.status }); setIsIPModalOpen(true); };
+
+  if (!isLoggedIn) return <LoginScreen onLogin={(user) => {
+      localStorage.setItem('isLoggedIn', 'true');
+      localStorage.setItem('current_user', user);
+      setIsLoggedIn(true);
+      setCurrentUser(user);
+  }} />;
+
+  return (
+    <div className="flex h-screen bg-slate-50 text-slate-800 font-sans overflow-hidden"
+         onMouseUp={handleElevationMouseUp}
+         onMouseLeave={handleElevationMouseLeave}
+         onMouseMove={handleElevationMouseMove}>
+      <aside className="w-64 bg-white border-r border-slate-200 flex flex-col flex-shrink-0 z-20 shadow-sm">
+        <div className="h-16 flex items-center px-6 border-b border-slate-100"><ShieldCheck className="w-7 h-7 text-blue-600 mr-3" /><div><h1 className="font-bold text-slate-800 text-sm tracking-tight">IP 台账管理系统</h1><p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">Operation Center</p></div></div>
+
+        {/* 权限控制的侧边栏 */}
+        <nav className="flex-1 p-4 space-y-1">
+          {Object.entries(TAB_CONFIG).map(([key, config]) => {
+            if (currentPermissions.includes(key)) {
+              return (
+                <button
+                  key={key}
+                  onClick={() => setActiveTab(key)}
+                  className={`w-full flex items-center px-3 py-2.5 text-sm rounded-lg transition-colors ${activeTab === key ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-50'}`}
+                >
+                  <config.icon className="w-4 h-4 mr-3" /> {config.label}
+                </button>
+              );
+            }
+            return null;
+          })}
+        </nav>
+
+        <div className="p-4 border-t border-slate-100">
+            <div className="flex items-center mb-4 px-2">
+                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-xs font-bold text-blue-600 mr-3">{currentUser.substring(0,2).toUpperCase()}</div>
+                <div>
+                    <div className="text-sm font-bold text-slate-700">{currentUser}</div>
+                    <div className="text-[10px] text-slate-400">{ROLE_DEFINITIONS[currentRole]?.label || '未知角色'}</div>
+                </div>
+            </div>
+            <button onClick={handleLogout} className="flex items-center text-xs text-slate-400 hover:text-red-600 transition-colors w-full px-2 py-2 rounded hover:bg-red-50"><LogOut className="w-4 h-4 mr-2" /> 退出系统</button>
+        </div>
+      </aside>
+
+      <main className="flex-1 flex flex-col min-w-0 bg-slate-50">
+        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 z-10 shadow-sm">
+           <div className="flex items-center text-sm text-slate-500 font-medium"><LayoutGrid className="w-4 h-4 mr-2" /> 资产管理工作台</div>
+           <div className="flex items-center space-x-2">
+             <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".xlsx, .xls, .csv" className="hidden" />
+             {/* 排查日志按钮 */}
+             <button onClick={() => setIsDebugOpen(true)} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 hover:bg-slate-200 hover:text-blue-600 transition-colors" title="打开排查日志">
+               <Terminal className="w-4 h-4" />
+             </button>
+             <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-xs font-bold text-blue-600 border border-blue-200">OP</div>
+           </div>
+        </header>
+
+        <div className="flex-1 overflow-hidden relative">
+          {activeTab === 'list' && (
+             <div className="flex h-full animate-in fade-in duration-300">
+              <div className="w-72 bg-white border-r border-slate-200 overflow-y-auto p-4 custom-scrollbar">
+                <div className="text-xs font-bold text-slate-400 uppercase mb-4 flex justify-between items-center px-2">业务网段列表 <button onClick={() => { setSectionFormData({}); setIsSectionModalOpen(true); }} className="p-1 hover:bg-slate-100 rounded text-blue-600"><Plus className="w-4 h-4" /></button></div>
+                {sections.map(section => (
+                  <div key={section.id} className="mb-2 group">
+                    <div className="flex items-center justify-between w-full px-2 py-2 text-sm text-slate-700 hover:bg-slate-50 rounded font-medium cursor-pointer" onClick={() => setExpandedSections(p => ({...p, [section.id]: !p[section.id]}))}>
+                      <div className="flex items-center truncate">{expandedSections[section.id] ? <ChevronDown className="w-3.5 h-3.5 mr-2 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 mr-2 text-slate-400" />}<Folder className="w-4 h-4 mr-2 text-blue-500" /> {section.name}</div>
+                      <div className="hidden group-hover:flex items-center space-x-1"><button onClick={(e) => { e.stopPropagation(); setSubnetFormData({ section: section.id }); setIsSubnetModalOpen(true); }} className="p-1 hover:bg-slate-200 rounded text-emerald-600"><Plus className="w-3 h-3" /></button><button onClick={(e) => { e.stopPropagation(); handleDeleteSection(section.id); }} className="p-1 hover:bg-slate-200 rounded text-red-500"><Trash2 className="w-3 h-3" /></button></div>
+                    </div>
+                    {expandedSections[section.id] && (
+                      <div className="ml-6 mt-1 border-l-2 border-slate-100 pl-2 space-y-1">
+                        {subnets.filter(s => s.section === section.id).map(sub => (
+                          <div key={sub.id} onClick={() => setSelectedSubnetId(sub.id)} className={`flex justify-between items-center w-full text-left px-3 py-2 text-xs rounded transition-all group/sub ${selectedSubnetId === sub.id ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-500 hover:text-slate-900 cursor-pointer'}`}>
+                            <div className="truncate"><div className="font-mono mb-0.5">{sub.cidr}</div><div className="text-[10px] opacity-70 truncate">{sub.name}</div></div>
+                            <button onClick={(e) => { e.stopPropagation(); handleDeleteSubnet(sub.id); }} className="hidden group-hover/sub:block p-1 text-red-400 hover:text-red-600"><Trash2 className="w-3 h-3" /></button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="flex-1 flex flex-col min-w-0 bg-slate-50 overflow-hidden">
+                    {/* IP List Right Pane Content */}
+                    {currentSubnet.id ? (
+                      <div className="bg-white border-b border-slate-200 p-6 shadow-sm z-10 flex-shrink-0">
+                          <div className="flex justify-between items-start mb-4">
+                            <h2 className="text-2xl font-bold text-slate-800 tracking-tight"><span className="font-mono text-blue-600 mr-2">{currentSubnet.cidr}</span> {currentSubnet.name}</h2>
+                            <div className="flex space-x-3">
+                              <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 mr-2">
+                                  <button onClick={() => setIpViewMode('list')} className={`p-1.5 rounded-md transition-all ${ipViewMode==='list'?'bg-white text-blue-600 shadow-sm':'text-slate-400 hover:text-slate-600'}`} title="列表视图"><ListIcon className="w-4 h-4"/></button>
+                                  <button onClick={() => setIpViewMode('pool')} className={`p-1.5 rounded-md transition-all ${ipViewMode==='pool'?'bg-white text-blue-600 shadow-sm':'text-slate-400 hover:text-slate-600'}`} title="地址池视图"><GridIcon className="w-4 h-4"/></button>
+                              </div>
+                              <button onClick={handleScanSubnet} disabled={isScanning} className={`px-4 py-2 ${isScanning?'bg-slate-100 text-slate-400':'bg-white border border-slate-300 text-slate-600 hover:bg-slate-50'} text-xs font-bold rounded-lg flex items-center shadow-sm`}>{isScanning ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />} 扫描存活</button>
+                              <button onClick={() => { setIpFormData({}); setEditingIP(null); setIsIPModalOpen(true); }} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-lg shadow-md flex items-center transition-all hover:-translate-y-0.5"><Plus className="w-4 h-4 mr-2" /> 新增 IP</button>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-4 gap-4 text-sm text-slate-600 bg-slate-50 p-4 rounded-xl border border-slate-100 relative group">
+                              <button onClick={() => { setSubnetFormData(currentSubnet); setIsSubnetModalOpen(true); }} className="absolute top-3 right-3 text-blue-600 hover:text-blue-800 text-xs flex items-center bg-white px-3 py-1.5 rounded-full border border-blue-100 shadow-sm opacity-0 group-hover:opacity-100 transition-all"><Edit2 className="w-3 h-3 mr-1" /> 编辑网段信息</button>
+                              <div><span className="text-[10px] text-slate-400 block font-bold uppercase mb-1">运营商</span>{currentSubnet.isp || '-'}</div>
+                              <div><span className="text-[10px] text-slate-400 block font-bold uppercase mb-1">带宽容量</span>{currentSubnet.bandwidth || '-'}</div>
+                              <div><span className="text-[10px] text-slate-400 block font-bold uppercase mb-1">VLAN ID</span>{currentSubnet.vlan_id || '-'}</div>
+                              <div><span className="text-[10px] text-slate-400 block font-bold uppercase mb-1">物理位置</span>{currentSubnet.location || '-'}</div>
+                          </div>
+                      </div>
+                  ) : (
+                      <div className="flex flex-col items-center justify-center h-full text-slate-300"><Folder className="w-20 h-20 mb-4 opacity-20" /><p className="font-bold text-lg">请从左侧选择业务网段</p></div>
+                  )}
+                  <div className="flex-1 flex flex-col overflow-hidden bg-white">
+                    {ipViewMode === 'list' ? (
+                        <div className="flex-1 overflow-y-auto custom-scrollbar">
+                          <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center flex-shrink-0">
+                              <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" /><input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="搜索 IP / 设备..." className="bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-lg pl-10 pr-4 py-2 w-80 shadow-inner outline-none focus:ring-2 focus:ring-blue-100" /></div>
+                              <div className="flex space-x-2">
+                                <button onClick={handleDownloadTemplate} className="p-2 bg-slate-50 text-slate-600 rounded-lg hover:bg-slate-100 border border-slate-200" title="下载模板"><FileText className="w-4 h-4" /></button>
+                                <button onClick={handleImportClick} disabled={isImporting} className="p-2 bg-slate-50 text-slate-600 rounded-lg hover:bg-slate-100 border border-slate-200 flex items-center gap-1" title="导入数据">
+                                  {isImporting ? <Loader2 className="w-4 h-4 animate-spin"/> : <Upload className="w-4 h-4" />}
+                                </button>
+                                <button onClick={handleExport} className="p-2 bg-slate-50 text-slate-600 rounded-lg hover:bg-slate-100 border border-slate-200" title="导出 Excel"><Download className="w-4 h-4" /></button>
+                              </div>
+                          </div>
+                          <table className="w-full text-sm text-left text-slate-600 border-collapse">
+                            <thead className="text-xs text-slate-400 uppercase bg-slate-50 sticky top-0 z-10 border-b border-slate-100"><tr><th className="px-6 py-3 font-bold">IP 地址</th><th className="px-6 py-3 font-bold">状态</th><th className="px-6 py-3 font-bold">设备名称</th><th className="px-6 py-3 font-bold">设备类型</th><th className="px-6 py-3 font-bold">负责人</th><th className="px-6 py-3 font-bold">NAT</th><th className="px-6 py-3 font-bold text-right px-8">操作</th></tr></thead>
+                            <tbody className="divide-y divide-slate-50">
+                              {filteredIPs.map(ip => (
+                                <tr key={ip.id} className="hover:bg-blue-50/30 transition-colors group">
+                                  <td className="px-6 py-4 font-mono font-bold text-slate-800">{ip.ip_address}</td>
+                                  <td className="px-6 py-4"><StatusBadge status={ip.status} /></td>
+                                  <td className="px-6 py-4"><div className="font-bold text-slate-900">{ip.device_name}</div><div className="text-[10px] text-slate-400 truncate max-w-[200px]">{ip.description}</div></td>
+                                  <td className="px-6 py-4 text-xs font-medium text-slate-500">{optionLists.deviceTypes.find(t=>t.value===ip.device_type)?.label || ip.device_type}</td>
+                                  <td className="px-6 py-4 text-slate-500">{ip.owner}</td>
+                                  <td className="px-6 py-4">{ip.nat_type && ip.nat_type !== 'none' && <div className="flex items-center text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100" title={`映射到: ${ip.nat_ip} (${ip.nat_port})`}><ArrowRightLeft className="w-3 h-3 mr-1"/> {ip.nat_ip || 'NAT'}</div>}</td>
+                                  <td className="px-6 py-4 text-right px-8"><div className="flex justify-end space-x-1 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => { setEditingIP(ip); setIpFormData(ip); setIsIPModalOpen(true); }} className="p-1.5 text-blue-600 hover:bg-blue-100 rounded-md"><Edit2 className="w-4 h-4" /></button><button onClick={() => handleDeleteIP(ip.id)} className="p-1.5 text-red-600 hover:bg-red-100 rounded-md"><Trash2 className="w-4 h-4" /></button></div></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                    ) : (
+                        <div className="flex-1 overflow-y-auto custom-scrollbar">
+                            <IPPoolGrid ips={ips} subnetId={currentSubnet.id} onIPClick={handlePoolIPClick} />
+                        </div>
+                    )}
+                  </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'dcim' && (
+             <div className="flex h-full overflow-hidden animate-in fade-in duration-300">
+               {/* Left Nav */}
+               <div className="w-64 bg-white border-r border-slate-200 flex flex-col z-10 flex-shrink-0">
+                  <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                     <span className="font-bold text-slate-700 text-sm flex items-center"><MapPin className="w-4 h-4 mr-2 text-blue-500"/>机房区域</span>
+                     <button onClick={() => { setCurrentDcForm(null); setIsDcModalOpen(true); }} className="p-1.5 bg-blue-50 hover:bg-blue-100 rounded-md text-blue-600 transition-colors"><Plus className="w-4 h-4"/></button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
+                     {datacenters.map(loc => (
+                        <div key={loc.id} onClick={() => setActiveLocation(loc.id)} className={`group relative p-3 rounded-xl cursor-pointer transition-all border ${activeLocation == loc.id ? 'bg-blue-50 border-blue-200 shadow-sm ring-1 ring-blue-200' : 'bg-white border-transparent hover:bg-slate-50 hover:border-slate-200'}`}>
+                           <div className="flex justify-between items-start mb-1">
+                               <span className={`font-bold text-sm ${activeLocation == loc.id ? 'text-blue-700' : 'text-slate-700'}`}>{loc.name}</span>
+                               <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-mono">{loc.count || 0}</span>
+                           </div>
+                           <div className="text-xs text-slate-400 truncate pr-6">{loc.location || '无位置信息'}</div>
+                           <div className="absolute right-2 bottom-2 hidden group-hover:flex space-x-1">
+                               <button onClick={(e) => { e.stopPropagation(); setCurrentDcForm(loc); setIsDcModalOpen(true); }} className="p-1 hover:bg-white rounded text-blue-500"><Edit2 className="w-3 h-3"/></button>
+                               <button onClick={(e) => { e.stopPropagation(); handleDeleteDatacenter(loc.id); }} className="p-1 hover:bg-white rounded text-red-500"><Trash2 className="w-3 h-3"/></button>
+                           </div>
+                        </div>
+                     ))}
+                     {datacenters.length === 0 && <div className="text-center py-10 text-slate-400 text-xs">暂无机房数据<br/>请点击右上角添加</div>}
+                  </div>
+               </div>
+
+               {/* Right Content */}
+               <div className="flex-1 flex flex-col min-w-0 bg-slate-50/50 relative">
+                  {activeLocation ? (
+                     <>
+                       <div className="p-6 pb-0 flex-shrink-0">
+                          <div className="flex justify-between items-center mb-6">
+                              <div>
+                                  <h2 className="text-2xl font-bold text-slate-800 tracking-tight">{datacenters.find(d=>d.id==activeLocation)?.name}</h2>
+                                  <p className="text-xs text-slate-400 mt-1 flex items-center">机房电力负载概览</p>
+                              </div>
+                              <div className="flex gap-3">
+                                  {/* View Toggles */}
+                                  <div className="bg-white p-1 rounded-lg border border-slate-200 flex shadow-sm">
+                                      <button onClick={() => setDcimViewMode('list')} className={`px-3 py-1.5 text-xs font-bold rounded flex items-center gap-2 transition-all ${dcimViewMode==='list' ? 'bg-blue-50 text-blue-600' : 'text-slate-500 hover:bg-slate-50'}`}>
+                                          <GridIcon className="w-3.5 h-3.5"/> 卡片视图
+                                      </button>
+                                      <button onClick={() => setDcimViewMode('elevation')} className={`px-3 py-1.5 text-xs font-bold rounded flex items-center gap-2 transition-all ${dcimViewMode==='elevation' ? 'bg-blue-50 text-blue-600' : 'text-slate-500 hover:bg-slate-50'}`}>
+                                          <AlignLeft className="w-3.5 h-3.5"/> 排位图视图
+                                      </button>
+                                  </div>
+                                  {dcimViewMode === 'elevation' && (
+                                      <>
+                                          <div className="bg-white p-1 rounded-lg border border-slate-200 flex shadow-sm ml-2">
+                                              <button onClick={() => setElevationLayout('horizontal')} className={`p-1.5 rounded transition-all ${elevationLayout==='horizontal' ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:text-slate-600'}`} title="横向布局 (电脑)"><Columns className="w-4 h-4"/></button>
+                                              <button onClick={() => setElevationLayout('vertical')} className={`p-1.5 rounded transition-all ${elevationLayout==='vertical' ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:text-slate-600'}`} title="纵向布局 (生成长图)"><AlignJustify className="w-4 h-4"/></button>
+                                          </div>
+                                          <button onClick={handleDownloadTemplate} className="px-4 py-2 bg-white text-slate-600 border border-slate-200 text-sm font-bold rounded-xl shadow-sm flex items-center hover:bg-slate-50 transition-all ml-2" title="下载导入模板"><FileText className="w-4 h-4"/></button>
+                                          <button onClick={handleImportClick} disabled={isImporting} className="px-4 py-2 bg-white text-slate-600 border border-slate-200 text-sm font-bold rounded-xl shadow-sm flex items-center hover:bg-slate-50 transition-all" title="批量导入设备">{isImporting ? <Loader2 className="w-4 h-4 animate-spin"/> : <Upload className="w-4 h-4"/>}</button>
+                                          <button onClick={handleExportExcel} className="px-4 py-2 bg-white text-green-700 border border-green-200 text-sm font-bold rounded-xl shadow-sm flex items-center hover:bg-green-50 transition-all"><FileText className="w-4 h-4 mr-2"/> 导出 Excel</button>
+                                          <button onClick={handleExportHtml} className="px-4 py-2 bg-white text-blue-600 border border-blue-200 text-sm font-bold rounded-xl shadow-sm flex items-center hover:bg-blue-50 transition-all"><Code className="w-4 h-4 mr-2"/> 导出 HTML</button>
+                                          <button onClick={handleExportImage} className="px-4 py-2 bg-white text-slate-600 border border-slate-200 text-sm font-bold rounded-xl shadow-sm flex items-center hover:bg-slate-50 transition-all"><ImageIcon className="w-4 h-4 mr-2"/> {elevationLayout === 'vertical' ? '导出长图' : '导出图片'}</button>
+                                      </>
+                                  )}
+                                  <button onClick={() => { setCurrentRackForm(null); setIsRackModalOpen(true); }} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl shadow-lg flex items-center transition-all hover:-translate-y-0.5 ml-2"><Plus className="w-4 h-4 mr-2"/> 新增机柜</button>
+                              </div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-4 mb-6">
+                              {/* Stats Cards */}
+                              <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm flex items-center"><div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 mr-3"><Calculator className="w-5 h-5" /></div><div><div className="text-xs text-slate-400 uppercase font-bold tracking-wider">设计总负荷</div><div className="text-lg font-bold text-slate-800">{datacenterPowerStats.total_rated} <span className="text-xs font-normal text-slate-400">W</span></div></div></div>
+                              <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm flex items-center"><div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 mr-3"><Activity className="w-5 h-5" /></div><div><div className="text-xs text-slate-400 uppercase font-bold tracking-wider">典型运行功耗</div><div className="text-lg font-bold text-slate-800">{datacenterPowerStats.total_typical} <span className="text-xs font-normal text-slate-400">W</span></div></div></div>
+                              <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm flex items-center"><div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600 mr-3"><Zap className="w-5 h-5" /></div><div><div className="text-xs text-slate-400 uppercase font-bold tracking-wider">PDU 实测总值</div><div className="text-lg font-bold text-slate-800">{datacenterPowerStats.total_pdu} <span className="text-xs font-normal text-slate-400">W</span></div></div></div>
+                           </div>
+                       </div>
+
+                       {dcimViewMode === 'list' && (
+                           <div className="flex-1 flex overflow-hidden">
+                               <div className="flex-1 p-6 pt-0 overflow-y-auto custom-scrollbar">
+                                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5 gap-6 pb-10">
+                                   {currentRacks.map(rack => {
+                                       const rackStats = getRackCalculatedPower(rack.id);
+                                       return (
+                                           <div key={rack.id} onClick={() => setSelectedRack(rack)} className={`group relative bg-white rounded-xl border transition-all cursor-pointer overflow-hidden ${selectedRack?.id === rack.id ? 'border-blue-500 shadow-md ring-2 ring-blue-100' : 'border-slate-100 hover:border-blue-300 hover:shadow-lg hover:-translate-y-1'}`}>
+                                               <div className="p-5">
+                                                   <div className="flex justify-between items-center mb-4"><div className="flex items-center space-x-2"><span className="bg-slate-100 text-slate-600 text-xs font-bold px-2 py-1 rounded font-mono">{rack.code}</span><span className="font-bold text-slate-800 text-sm truncate">{rack.name}</span></div><div className="flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={(e) => { e.stopPropagation(); setCurrentRackForm(rack); setIsRackModalOpen(true); }} className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-blue-600"><Edit2 className="w-3.5 h-3.5"/></button><button onClick={(e) => handleDeleteRack(rack.id, e)} className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5"/></button></div></div>
+                                                   <div className="mb-4"><div className="flex justify-between text-[10px] text-slate-400 mb-1.5"><span>空间占用</span><span className="font-medium text-slate-600">{rack.load}%</span></div><div className="h-1.5 w-full bg-slate-50 rounded-full overflow-hidden"><div className={`h-full rounded-full ${rack.load > 80 ? 'bg-red-500' : 'bg-blue-500'}`} style={{width: `${rack.load}%`}}></div></div></div>
+                                                   <div className="flex justify-between items-center text-xs pt-2 border-t border-slate-50"><div className="flex items-center gap-1.5 text-slate-500" title="额定功率"><Calculator className="w-3 h-3"/> {rackStats.rated_sum}W</div><div className="flex items-center gap-1.5 text-blue-600 font-medium" title="典型功率"><Activity className="w-3 h-3"/> {rackStats.typical_sum}W</div></div>
+                                               </div>
+                                           </div>
+                                       );
+                                   })}
+                                   <div onClick={() => { setCurrentRackForm(null); setIsRackModalOpen(true); }} className="border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center justify-center text-slate-400 text-xs cursor-pointer hover:bg-slate-50 hover:border-blue-300 transition-all min-h-[180px]"><Plus className="w-8 h-8 mb-2 opacity-30" /><span>添加新机柜</span></div>
+                                   </div>
+                               </div>
+                               <RackDetailSidebar selectedRack={selectedRack} rackDevices={rackDevices} onClose={() => setSelectedRack(null)} onEdit={(d) => setEditingDevice(d)} getRackCalculatedPower={getRackCalculatedPower} />
+                           </div>
+                       )}
+
+                       {dcimViewMode === 'elevation' && (
+                           <div className="flex-1 relative flex flex-col overflow-hidden bg-slate-50/50">
+                               <div className="absolute top-4 right-6 z-10 flex flex-col gap-2 bg-white border border-slate-200 p-1.5 rounded-lg shadow-md">
+                                   <button onClick={handleZoomIn} className="p-1.5 hover:bg-slate-100 rounded text-slate-600" title="放大"><ZoomIn className="w-4 h-4" /></button>
+                                   <button onClick={handleZoomOut} className="p-1.5 hover:bg-slate-100 rounded text-slate-600" title="缩小"><ZoomOut className="w-4 h-4" /></button>
+                                   <button onClick={handleZoomReset} className="p-1.5 hover:bg-slate-100 rounded text-slate-600" title="复位"><Maximize className="w-4 h-4" /></button>
+                               </div>
+
+                               <div className="flex-1 overflow-auto custom-scrollbar p-6 cursor-grab active:cursor-grabbing" ref={elevationScrollRef} onMouseDown={handleElevationMouseDown} onMouseLeave={handleElevationMouseLeave} onMouseUp={handleElevationMouseUp} onMouseMove={handleElevationMouseMove}>
+                                   <div className={`p-20 min-w-max min-h-max origin-top-left transition-transform duration-200 ${elevationLayout === 'vertical' ? 'flex flex-col gap-10 items-center' : 'flex gap-16'}`} style={{ transform: `scale(${viewState.scale})` }}>
+                                       {elevationLayout === 'vertical' && (
+                                           <div className="w-full max-w-2xl bg-white border-2 border-slate-800 rounded-lg p-6 mb-4 shadow-lg">
+                                               <div className="flex justify-between items-center mb-4 border-b-2 border-slate-100 pb-4">
+                                                   <div><h1 className="text-2xl font-black text-slate-900">机房电力负载快照</h1><p className="text-sm text-slate-500 mt-1">生成时间: {new Date().toLocaleString()}</p></div>
+                                                   <div className="text-right"><div className="text-3xl font-black text-indigo-600">{datacenterPowerStats.total_rated} <span className="text-sm font-normal text-slate-400">W</span></div><div className="text-xs font-bold text-slate-400 uppercase">总设计负荷</div></div>
+                                               </div>
+                                               <div className="grid grid-cols-2 gap-4">
+                                                   <div className="bg-slate-50 p-3 rounded border border-slate-200 flex justify-between items-center"><span className="text-sm font-bold text-slate-600">典型运行功耗</span><span className="text-lg font-bold text-blue-600">{datacenterPowerStats.total_typical} W</span></div>
+                                                   <div className="bg-slate-50 p-3 rounded border border-slate-200 flex justify-between items-center"><span className="text-sm font-bold text-slate-600">PDU 实测总值</span><span className="text-lg font-bold text-emerald-600">{datacenterPowerStats.total_pdu} W</span></div>
+                                               </div>
+                                           </div>
+                                       )}
+                                       <div ref={elevationContentRef} className={`${elevationLayout === 'vertical' ? 'flex flex-col gap-10' : 'flex gap-16'}`}>
+                                           {currentRacks.map(rack => (
+                                               <div key={rack.id} className="flex-shrink-0 w-72 bg-white border-2 border-slate-300 flex flex-col shadow-2xl rounded-sm overflow-hidden">
+                                                   <div className="bg-slate-800 border-b border-slate-600 p-3 text-center"><div className="font-bold text-white text-base tracking-wide">{rack.name}</div><div className="text-xs text-slate-400 font-mono mt-0.5 opacity-80">{rack.code}</div></div>
+                                                   <div className="flex-1 bg-slate-900 p-1 space-y-[1px] relative min-h-[600px]">
+                                                     <RackElevation
+                                                       rack={rack}
+                                                       devices={rackDevices.filter(d => d.rack === rack.id)}
+                                                       onSelect={setSelectedRack}
+                                                       onEdit={(d) => setEditingDevice(d)}
+                                                     />
+                                                   </div>
+                                                   <div className="bg-slate-800 border-t border-slate-600 p-2 text-xs text-center text-slate-400 font-mono flex justify-between px-4"><span>Total Load:</span><span className="text-emerald-400 font-bold">{(rack.pdu_a_power||0) + (rack.pdu_b_power||0)} W</span></div>
+                                               </div>
+                                           ))}
+                                       </div>
+                                       {currentRacks.length === 0 && <div className="flex items-center justify-center w-[500px] h-[300px] text-slate-400 text-lg">暂无机柜数据，请点击右上角添加</div>}
+                                   </div>
+                               </div>
+                           </div>
+                       )}
+                     </>
+                  ) : (
+                     <div className="flex flex-col items-center justify-center h-full text-slate-300"><Folder className="w-20 h-20 mb-4 opacity-20" /><p className="font-bold text-lg">请从左侧选择业务网段</p></div>
+                  )}
+               </div>
+            </div>
+          )}
+
+          {activeTab === 'security' && (
+             <div className="h-full overflow-y-auto p-8 animate-in fade-in duration-500">
+               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 max-w-7xl mx-auto">
+                 <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-[600px]">
+                   <div className="px-6 py-4 border-b border-slate-50 bg-slate-50/50 flex justify-between items-center"><h3 className="font-bold text-slate-800 flex items-center"><Activity className="w-4 h-4 mr-2 text-blue-500"/> 系统登录审计日志</h3></div>
+                   <div className="flex-1 overflow-y-auto custom-scrollbar">
+                     <table className="w-full text-sm text-left text-slate-600"><thead className="text-[10px] text-slate-400 uppercase bg-white border-b border-slate-50 sticky top-0 z-10"><tr><th className="px-6 py-3 font-bold">时间</th><th className="px-6 py-3 font-bold">用户</th><th className="px-6 py-3 font-bold">登录IP</th><th className="px-6 py-3 font-bold">状态</th></tr></thead><tbody className="divide-y divide-slate-50">{loginLogs.map(log => (<tr key={log.id} className="hover:bg-slate-50/50 transition-colors"><td className="px-6 py-4 text-xs font-mono">{new Date(log.timestamp).toLocaleString()}</td><td className="px-6 py-4 font-bold text-slate-800">{log.username}</td><td className="px-6 py-4 font-mono text-slate-400">{log.ip_address}</td><td className="px-6 py-4"><span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${log.status==='Success'?'bg-emerald-50 text-emerald-600 border border-emerald-100':'bg-red-50 text-red-600 border border-red-100'}`}>{log.status}</span></td></tr>))}</tbody></table>
+                   </div>
+                 </div>
+                 <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-[600px]">
+                   <div className="px-6 py-4 border-b border-slate-50 bg-slate-50/50 flex justify-between items-center"><h3 className="font-bold text-slate-800 flex items-center"><ShieldCheck className="w-4 h-4 mr-2 text-red-500"/> 异常/恶意 IP 黑名单</h3><button onClick={() => setIsBlockModalOpen(true)} className="px-3 py-1 bg-red-600 text-white text-[11px] font-bold rounded-full hover:bg-red-700 flex items-center shadow-lg shadow-red-200"><Plus className="w-3.5 h-3.5 mr-1"/> 添加封禁</button></div>
+                   <div className="flex-1 overflow-y-auto custom-scrollbar">
+                     <table className="w-full text-sm text-left text-slate-600"><thead className="text-[10px] text-slate-400 uppercase bg-white border-b border-slate-50 sticky top-0 z-10"><tr><th className="px-6 py-3 font-bold">被封禁 IP</th><th className="px-6 py-3 font-bold">封禁理由</th><th className="px-6 py-3 font-bold text-right px-8">操作</th></tr></thead><tbody className="divide-y divide-slate-50">{blocklist.map(block => (<tr key={block.id} className="hover:bg-red-50/20 transition-colors"><td className="px-6 py-4 font-mono font-bold text-red-600">{block.ip_address}</td><td className="px-6 py-4 text-xs italic text-slate-400">{block.reason || '无描述'}</td><td className="px-6 py-4 text-right px-8"><button onClick={() => handleUnblockIP(block.id)} className="text-blue-600 hover:underline font-bold text-xs">解封</button></td></tr>))}</tbody></table>
+                   </div>
+                 </div>
+               </div>
+             </div>
+          )}
+
+          {activeTab === 'backup' && <div className="h-full overflow-y-auto p-8 animate-in slide-in-from-bottom duration-500"><div className="max-w-4xl mx-auto space-y-6"><div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-xl flex items-center justify-between"><div className="flex items-center"><div className="w-14 h-14 bg-indigo-50 rounded-2xl flex items-center justify-center mr-6 text-indigo-600"><Database className="w-8 h-8" /></div><div><h3 className="text-xl font-extrabold text-slate-900 tracking-tight">MySQL 核心数据库备份</h3><p className="text-sm text-slate-500 mt-1 font-medium">使用 <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-blue-600 text-xs">mysqldump</code> 进行物理隔离备份。</p></div></div><button onClick={handleManualBackup} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl flex items-center text-sm font-bold shadow-xl">立即备份</button></div><div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden"><table className="w-full text-sm text-left"><thead className="text-[10px] text-slate-400 uppercase bg-white border-b border-slate-50"><tr><th className="px-6 py-3 font-bold">文件名</th><th className="px-6 py-3 font-bold">备份时间</th><th className="px-6 py-3 font-bold">大小</th><th className="px-6 py-3 font-bold">类型</th></tr></thead><tbody className="divide-y divide-slate-50">{backups.map((bk, i) => (<tr key={i} className="hover:bg-slate-50/80"><td className="px-6 py-4 font-mono font-bold text-slate-800">{bk.filename}</td><td className="px-6 py-4 text-xs text-slate-500">{bk.time}</td><td className="px-6 py-4 text-xs font-bold text-slate-400">{bk.size}</td><td className="px-6 py-4"><span className="px-2 py-0.5 rounded bg-slate-100 text-[10px] font-bold text-slate-500">{bk.type}</span></td></tr>))}</tbody></table></div></div></div>}
+
+          {activeTab === 'users' && (
+             <div className="h-full overflow-y-auto p-8 animate-in fade-in duration-500">
+               <div className="max-w-5xl mx-auto space-y-6">
+                 <div className="flex justify-between items-center"><h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">系统用户与权限控制</h2><button onClick={() => { setUserFormData({}); setIsUserModalOpen(true); }} className="flex items-center px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl shadow-lg transition-all hover:-translate-y-0.5"><Plus className="w-5 h-5 mr-2" /> 创建管理员</button></div>
+                 <div className="bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden">
+                   <table className="w-full text-sm text-left text-slate-600 border-collapse"><thead className="text-[10px] text-slate-400 uppercase bg-slate-50 border-b border-slate-100"><tr><th className="px-6 py-3 font-bold">用户名</th><th className="px-6 py-3 font-bold">系统角色</th><th className="px-6 py-3 font-bold">角色权限</th><th className="px-6 py-3 font-bold">上次登录</th><th className="px-6 py-3 font-bold">状态</th><th className="px-6 py-3 font-bold text-right px-8">操作</th></tr></thead>
+                   <tbody className="divide-y divide-slate-50">{users.map(u => (
+                     <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
+                       <td className="px-6 py-4 font-bold text-slate-900">{u.username}</td>
+                       <td className="px-6 py-4"><span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border bg-blue-50 text-blue-600 border-blue-100`}>{roleMap[u.username] ? ROLE_DEFINITIONS[roleMap[u.username]].label : (u.is_staff ? '超级管理员' : '普通用户')}</span></td>
+                       <td className="px-6 py-4"><span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border ${u.is_staff ? 'bg-purple-50 text-purple-600 border-purple-100' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>{u.is_staff ? 'Full Access' : 'Limited'}</span></td>
+                       <td className="px-6 py-4 text-xs text-slate-400">{u.last_login ? new Date(u.last_login).toLocaleString() : '从未登录'}</td>
+                       <td className="px-6 py-4"><StatusBadge status={u.is_active ? 'active' : 'offline'} /></td>
+                       <td className="px-6 py-4 text-right px-8"><div className="flex justify-end space-x-4"><button onClick={() => { setResetTarget(u); setIsResetModalOpen(true); }} className="text-blue-600 hover:underline font-bold text-xs">重置密码</button><button onClick={() => handleDeleteUser(u.id)} className="text-red-500 hover:underline font-bold text-xs">移除</button></div></td>
+                     </tr>
+                   ))}</tbody></table>
+                 </div>
+               </div>
+             </div>
+          )}
+        </div>
+      </main>
+
+      {/* --- 全局模态框定义 (Modals) --- */}
+      {managingOptionKey && <OptionManagerModal title={managingOptionKey} options={optionLists[managingOptionKey]} onClose={()=>setManagingOptionKey(null)} onSave={(l)=>setOptionLists({...optionLists, [managingOptionKey]: l})} />}
+      {isSectionModalOpen && <Modal isOpen={isSectionModalOpen} onClose={() => setIsSectionModalOpen(false)} title="新建业务区域"><div className="space-y-4"><FormInput label="区域名称" value={sectionFormData.name || ''} onChange={e => setSectionFormData({...sectionFormData, name: e.target.value})} required /><FormInput label="描述" value={sectionFormData.description || ''} onChange={e => setSectionFormData({...sectionFormData, description: e.target.value})} /><button onClick={handleSaveSection} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-blue-700">确认创建</button></div></Modal>}
+      {/* ... Other Modals ... */}
+      {isSubnetModalOpen && (
+        <Modal isOpen={isSubnetModalOpen} onClose={() => setIsSubnetModalOpen(false)} title="编辑网段 / 专线档案">
+          <div className="grid grid-cols-2 gap-5">
+            <div className="col-span-2"><FormInput label="网段名称" value={subnetFormData.name || ''} onChange={e => setSubnetFormData({...subnetFormData, name: e.target.value})} required /></div>
+            <SmartInput label="运营商 / ISP" listId="isp-list" options={optionLists.isp} value={subnetFormData.isp || ''} onChange={e => setSubnetFormData({...subnetFormData, isp: e.target.value})} onManage={()=>openOptionManager('isp')} />
+            <SmartInput label="带宽" listId="bw-list" options={optionLists.bandwidth} value={subnetFormData.bandwidth || ''} onChange={e => setSubnetFormData({...subnetFormData, bandwidth: e.target.value})} onManage={()=>openOptionManager('bandwidth')} />
+            <FormInput label="电路编号" value={subnetFormData.circuit_id || ''} onChange={e => setSubnetFormData({...subnetFormData, circuit_id: e.target.value})} />
+            <FormInput label="VLAN ID" value={subnetFormData.vlan_id || ''} onChange={e => setSubnetFormData({...subnetFormData, vlan_id: e.target.value})} placeholder="数字格式" />
+            <FormInput label="CIDR (掩码位)" value={subnetFormData.cidr || ''} onChange={e => setSubnetFormData({...subnetFormData, cidr: e.target.value})} required />
+            <FormInput label="网关地址" value={subnetFormData.gateway || ''} onChange={e => setSubnetFormData({...subnetFormData, gateway: e.target.value})} />
+            <div className="col-span-2"><SmartInput label="物理部署位置" listId="loc-list" options={optionLists.location} value={subnetFormData.location || ''} onChange={e => setSubnetFormData({...subnetFormData, location: e.target.value})} onManage={()=>openOptionManager('location')} /></div>
+            <div className="col-span-2"><SmartInput label="核心用途" listId="func-list" options={optionLists.function} value={subnetFormData.function_usage || ''} onChange={e => setSubnetFormData({...subnetFormData, function_usage: e.target.value})} onManage={()=>openOptionManager('function')} /></div>
+          </div>
+          <div className="mt-8 flex justify-end space-x-3 pt-5 border-t border-slate-100">
+            <button onClick={() => setIsSubnetModalOpen(false)} className="px-5 py-2.5 text-sm text-slate-400 hover:bg-slate-50 rounded-xl font-bold transition-colors">取消</button>
+            <button onClick={handleSaveSubnet} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-lg font-bold flex items-center transition-all active:scale-95"><Save className="w-4 h-4 mr-2" /> 保存变更</button>
+          </div>
+        </Modal>
+      )}
+
+      {isIPModalOpen && (
+        <Modal isOpen={isIPModalOpen} onClose={() => setIsIPModalOpen(false)} title="编辑 IP 资产详情">
+          <div className="space-y-6">
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                <h4 className="text-xs font-bold text-blue-600 uppercase mb-3 flex items-center"><Network className="w-3 h-3 mr-1" /> 基础网络信息</h4>
+                <div className="grid grid-cols-2 gap-4">
+                    <FormInput label="IP 地址" value={ipFormData.ip_address || ''} onChange={e => setIpFormData({...ipFormData, ip_address: e.target.value})} required placeholder="例如: 10.128.1.10" />
+                    <SmartInput label="使用状态" listId="st-list" options={['online', 'offline', 'rogue', 'reserved']} value={ipFormData.status || 'online'} onChange={e => setIpFormData({...ipFormData, status: e.target.value})} required />
+                    <div className="col-span-2"><FormInput label="设备名称 / 主机名" value={ipFormData.device_name || ''} onChange={e => setIpFormData({...ipFormData, device_name: e.target.value})} required /></div>
+                    <div className="col-span-1">
+                        <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest flex justify-between items-center">设备类型 <button onClick={()=>openOptionManager('deviceTypes')} className="text-blue-500 hover:underline"><Settings className="w-3 h-3"/></button></label>
+                        <select value={ipFormData.device_type || ''} onChange={e => setIpFormData({...ipFormData, device_type: e.target.value})} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:ring-2 focus:ring-blue-100 outline-none">
+                            <option value="">-- 未分类 --</option>{optionLists.deviceTypes.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                        </select>
+                    </div>
+                    <FormInput label="责任人 / 部门" value={ipFormData.owner || ''} onChange={e => setIpFormData({...ipFormData, owner: e.target.value})} />
+                </div>
+            </div>
+
+            <div className="bg-orange-50 p-4 rounded-xl border border-orange-100">
+                <h4 className="text-xs font-bold text-orange-600 uppercase mb-3 flex items-center"><ArrowRightLeft className="w-3 h-3 mr-1" /> NAT 地址映射 (可选)</h4>
+                <div className="grid grid-cols-3 gap-4">
+                    <div className="col-span-1">
+                        <label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest">映射类型</label>
+                        <select value={ipFormData.nat_type || 'none'} onChange={e => setIpFormData({...ipFormData, nat_type: e.target.value})} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:ring-2 focus:ring-orange-100 outline-none">
+                            <option value="none">无映射</option>
+                            <option value="dnat">DNAT (入站)</option>
+                            <option value="snat">SNAT (出站)</option>
+                        </select>
+                    </div>
+                    <div className="col-span-2">
+                        <FormInput label="映射公网/目标 IP" value={ipFormData.nat_ip || ''} onChange={e => setIpFormData({...ipFormData, nat_ip: e.target.value})} placeholder="例如: 120.236.x.x" />
+                    </div>
+                    <div className="col-span-3">
+                        <FormInput label="端口映射规则" value={ipFormData.nat_port || ''} onChange={e => setIpFormData({...ipFormData, nat_port: e.target.value})} placeholder="例如: 80->8080, 443->8443 (留空代表全端口)" />
+                    </div>
+                </div>
+            </div>
+
+            <div className="col-span-2"><label className="block text-[10px] font-bold text-slate-400 mb-1.5 uppercase tracking-widest">备注说明</label><textarea value={ipFormData.description || ''} onChange={e => setIpFormData({...ipFormData, description: e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 focus:ring-2 focus:ring-blue-100 outline-none h-24 resize-none" placeholder="..." /></div>
+          </div>
+          <div className="mt-8 flex justify-end space-x-3 pt-5 border-t border-slate-100">
+            <button onClick={() => setIsIPModalOpen(false)} className="px-5 py-2.5 text-sm text-slate-400 font-bold rounded-xl hover:bg-slate-50">取消</button>
+            <button onClick={handleSaveIP} className="px-8 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-lg font-bold">同步数据库</button>
+          </div>
+        </Modal>
+      )}
+
+      {editingDevice && <DeviceModal device={editingDevice} onClose={() => setEditingDevice(null)} onSave={handleSaveDevice} onDelete={handleDeleteDevice} optionLists={optionLists} openOptionManager={openOptionManager} historyOptions={historyOptions} />}
+      {isRackModalOpen && <RackModal rack={currentRackForm} onClose={() => setIsRackModalOpen(false)} onSave={handleSaveRack} locations={datacenters} initialDatacenter={activeLocation} />}
+      {isDcModalOpen && <DatacenterModal dc={currentDcForm} onClose={() => setIsDcModalOpen(false)} onSave={handleSaveDatacenter} />}
+
+      {isUserModalOpen && <Modal isOpen={isUserModalOpen} onClose={() => setIsUserModalOpen(false)} title="新增用户"><div className="space-y-5">
+          <FormInput label="登录账号" value={userFormData.username || ''} onChange={e => setUserFormData({...userFormData, username: e.target.value})} required />
+          <FormInput label="初始密码" type="password" value={userFormData.password || ''} onChange={e => setUserFormData({...userFormData, password: e.target.value})} required />
+          <div className="mb-4 relative"><label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase">分配角色权限</label><div className="relative"><select value={userFormData.role || 'guest'} onChange={e => setUserFormData({...userFormData, role: e.target.value})} className="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-sm focus:border-blue-500 outline-none appearance-none">{Object.keys(ROLE_DEFINITIONS).map(key => <option key={key} value={key}>{ROLE_DEFINITIONS[key].label}</option>)}</select><div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400"><ChevronDown className="w-4 h-4" /></div></div></div>
+          <button onClick={handleSaveUser} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold shadow-lg mt-4">创建并授权</button>
+      </div></Modal>}
+
+      {isResetModalOpen && <Modal isOpen={isResetModalOpen} onClose={() => setIsResetModalOpen(false)} title="重置密码"><div className="space-y-5"><FormInput label="新密码" type="password" value={resetTarget.password || ''} onChange={e => setResetTarget({...resetTarget, password: e.target.value})} required /><p className="text-[10px] text-slate-400 bg-amber-50 p-3 rounded-lg border border-amber-100 flex items-center"><AlertTriangle className="w-3 h-3 mr-2" /> 警告：修改后用户将立即被强制登出。</p><button onClick={handleResetConfirm} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold shadow-lg">确认重置</button></div></Modal>}
+      {isBlockModalOpen && <Modal isOpen={isBlockModalOpen} onClose={() => setIsBlockModalOpen(false)} title="新增黑名单"><div className="space-y-4"><div className="p-3 bg-red-50 border border-red-100 rounded-xl flex items-start"><Shield className="w-4 h-4 text-red-600 mr-3 mt-0.5 flex-shrink-0" /><div className="text-[11px] text-red-800 leading-tight">注意：被列入黑名单的 IP 将被系统防火墙拦截。</div></div><FormInput label="封禁 IP" value={blockFormData.ip_address || ''} onChange={e => setBlockFormData({...blockFormData, ip_address: e.target.value})} required placeholder="183.10.x.x" /><FormInput label="封禁原因" value={blockFormData.reason || ''} onChange={e => setBlockFormData({...blockFormData, reason: e.target.value})} /><button onClick={handleBlockIP} className="w-full bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl font-bold shadow-lg">立即封禁</button></div></Modal>}
+      {/* 调试日志弹窗 */}
+      <DebugModal isOpen={isDebugOpen} onClose={() => setIsDebugOpen(false)} logs={debugLogs} onClear={() => setDebugLogs([])} />
+    </div>
+  );
+}
+
+// ============================================================================
+// 6. App Wrapper with Error Boundary
+// ============================================================================
+export default function AppWrapper() {
+  return (
+    <ErrorBoundary>
+      <MainApp />
+    </ErrorBoundary>
+  );
+}

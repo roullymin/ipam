@@ -1,0 +1,9 @@
+django>=4.2
+gunicorn
+pymysql
+cryptography
+djangorestframework
+pandas
+openpyxl
+qrcode[pil]
+reportlab
