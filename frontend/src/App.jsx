@@ -29,9 +29,12 @@ import ResidentManagementView from './components/ResidentManagementView';
 import SecurityCenterView from './components/SecurityCenterView';
 import UserManagementView from './components/UserManagementView';
 import { DebugModal, FormInput, Modal, OptionManagerModal, SmartInput, StatusBadge } from './components/common/UI';
-import { changePasswordRequest, safeFetch } from './lib/api';
-import { buildDcimExportPayload, exportDcimHtmlReport, exportDcimImageReport } from './lib/dcimExport';
+import { safeFetch } from './lib/api';
+import { BRAND } from './lib/brand';
 import { useAuthSession } from './hooks/useAuthSession';
+import { useAppDataLoader } from './hooks/useAppDataLoader';
+import { useImportExportHandlers } from './hooks/useImportExportHandlers';
+import { useUserManagementHandlers } from './hooks/useUserManagementHandlers';
 
 // ============================================================================
 // 1. Base constants and configuration
@@ -68,13 +71,13 @@ const ROLE_DEFINITIONS = {
 };
 
 const TAB_CONFIG = {
-  dashboard: { icon: LayoutDashboard, label: '\u5168\u666f\u6982\u89c8' },
-  list: { icon: Server, label: 'IP \u8d44\u4ea7\u53f0\u8d26' },
-  dcim: { icon: Box, label: '\u673a\u623f\u57fa\u7840\u8bbe\u65bd' },
-  resident: { icon: Users, label: '\u9a7b\u573a\u4eba\u5458\u7ba1\u7406' },
-  security: { icon: Shield, label: '\u5b89\u5168\u76d1\u63a7\u4e2d\u5fc3' },
-  backup: { icon: Database, label: '\u6570\u636e\u5907\u4efd\u6062\u590d' },
-  users: { icon: Users, label: '\u7cfb\u7edf\u7528\u6237\u7ba1\u7406' }
+  dashboard: { icon: LayoutDashboard, label: BRAND.navigation.dashboard },
+  list: { icon: Server, label: BRAND.navigation.list },
+  dcim: { icon: Box, label: BRAND.navigation.dcim },
+  resident: { icon: Users, label: BRAND.navigation.resident },
+  security: { icon: Shield, label: BRAND.navigation.security },
+  backup: { icon: Database, label: BRAND.navigation.backup },
+  users: { icon: Users, label: BRAND.navigation.users }
 };
 
 const HISTORY_TRACKED_FIELDS = [
@@ -122,7 +125,7 @@ const safeInt = (val, def = 0) => {
     return isNaN(parsed) ? def : parsed;
 };
 
-const extractResponseMessage = async (response, fallback = '鎿嶄綔澶辫触') => {
+const extractResponseMessage = async (response, fallback = 'Operation failed') => {
   try {
     const data = await response.clone().json();
     if (typeof data === 'string') return data;
@@ -153,14 +156,8 @@ function MainApp() {
   const [ipViewMode, setIpViewMode] = useState('list');
   const [dcimViewMode, setDcimViewMode] = useState('list');
   const [elevationLayout, setElevationLayout] = useState('horizontal');
-  const fileInputRef = useRef(null);
-
-  const [isImporting, setIsImporting] = useState(false);
   const [debugLogs, setDebugLogs] = useState([]);
   const [isDebugOpen, setIsDebugOpen] = useState(false);
-  const [importWizardOpen, setImportWizardOpen] = useState(false);
-  const [pendingFile, setPendingFile] = useState(null);
-  const [importContext, setImportContext] = useState('ipam');
   const [tagFilter, setTagFilter] = useState('');
   const currentRole = currentUserInfo?.role || (currentUser === 'admin' ? 'admin' : 'guest');
   const currentPermissions = ROLE_DEFINITIONS[currentRole]?.permissions || [];
@@ -242,27 +239,12 @@ function MainApp() {
       });
   };
 
-  const [sections, setSections] = useState([]);
-  const [subnets, setSubnets] = useState([]);
-  const [ips, setIps] = useState([]);
-  const [backups, setBackups] = useState([]);
-  const [backupSummary, setBackupSummary] = useState(null);
-  const [users, setUsers] = useState([]);
-  const [residentStaff, setResidentStaff] = useState([]);
-  const [loginLogs, setLoginLogs] = useState([]);
-  const [auditLogs, setAuditLogs] = useState([]);
-  const [blocklist, setBlocklist] = useState([]);
-  const [datacenters, setDatacenters] = useState([]);
-  const [racks, setRacks] = useState([]);
-  const [rackDevices, setRackDevices] = useState([]);
-
   const [activeLocation, setActiveLocation] = useState(null);
   const [selectedRack, setSelectedRack] = useState(null);
   const [selectedSubnetId, setSelectedSubnetId] = useState(null);
   const [expandedSections, setExpandedSections] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
   const [isScanning, setIsScanning] = useState(false);
-  const [isDataLoading, setIsDataLoading] = useState(false);
 
   const [isIPModalOpen, setIsIPModalOpen] = useState(false);
   const [isSubnetModalOpen, setIsSubnetModalOpen] = useState(false);
@@ -366,6 +348,32 @@ function MainApp() {
       return devicesInRack.reduce((acc, dev) => ({ rated_sum: acc.rated_sum + (safeInt(dev.power_usage) || 0), typical_sum: acc.typical_sum + (safeInt(dev.typical_power) || 0) }), { rated_sum: 0, typical_sum: 0 });
   };
 
+  const {
+    sections,
+    subnets,
+    ips,
+    backups,
+    backupSummary,
+    users,
+    residentStaff,
+    loginLogs,
+    auditLogs,
+    blocklist,
+    datacenters,
+    racks,
+    rackDevices,
+    isDataLoading,
+    refreshData,
+  } = useAppDataLoader({
+    activeTab,
+    isLoggedIn,
+    activeLocation,
+    setActiveLocation,
+    selectedSubnetId,
+    setSelectedSubnetId,
+    safeInt,
+  });
+
   const currentRacks = useMemo(() => racks.filter(r => String(r.datacenter) === String(activeLocation)), [racks, activeLocation]);
   const currentSubnet = useMemo(() => subnets.find(s => String(s.id) === String(selectedSubnetId)) || {}, [subnets, selectedSubnetId]);
   
@@ -432,324 +440,35 @@ function MainApp() {
     ele.scrollTop = elevationDragInfo.current.scrollTop - walkY;
   };
 
-  const handleExport = () => { window.open('/api/export-excel/', '_blank'); };
-
-  const handleFileChange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    if (importContext === 'dcim') {
-      setIsImporting(true);
-      const formData = new FormData();
-      formData.append('file', file);
-
-      try {
-        const response = await safeFetch('/api/dcim/import-excel/', { method: 'POST', body: formData });
-        if (!response.ok) {
-          throw new Error(await extractResponseMessage(response, 'DCIM asset import failed'));
-        }
-
-        const data = await response.json();
-        alert(data.message || 'DCIM asset import completed.');
-        refreshData();
-      } catch (error) {
-        alert(`DCIM asset import failed: ${error.message}`);
-      } finally {
-        setIsImporting(false);
-        e.target.value = null;
-      }
-      return;
-    }
-
-    setPendingFile(file);
-    setImportWizardOpen(true);
-    e.target.value = null;
-  };
-
-  const handleConfirmImport = async (config) => {
-    if (!pendingFile) return;
-
-    setIsImporting(true);
-    setImportWizardOpen(false);
-
-    const formData = new FormData();
-    formData.append('file', pendingFile);
-    formData.append('config', JSON.stringify(config || {}));
-
-    try {
-      const response = await safeFetch('/api/import-excel/', { method: 'POST', body: formData });
-      if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Import failed'));
-      }
-
-      const data = await response.json();
-      alert(data.message || 'Import completed.');
-      refreshData();
-    } catch (error) {
-      alert(`Import failed: ${error.message}`);
-    } finally {
-      setPendingFile(null);
-      setIsImporting(false);
-    }
-  };
-  const handleImportClick = (context = 'ipam') => {
-    setImportContext(context);
-    fileInputRef.current?.click();
-  };
-  const handleDownloadTemplate = (context = 'ipam') => {
-    if (context === 'dcim') {
-      window.open('/api/dcim/download-template/', '_blank');
-      return;
-    }
-    window.open('/api/download-template/', '_blank');
-  };
-
-  const handleExportHtml = () => {
-    try {
-      const snapshot = buildDcimExportPayload({
-        datacenters,
-        activeLocation,
-        racks: currentRacks,
-        datacenterPowerStats,
-        getRackCalculatedPower,
-      });
-      exportDcimHtmlReport(snapshot);
-    } catch (error) {
-      alert(`闂傚倸鍊搁崐鎼佸磹瀹勬噴褰掑炊椤掑鏅悷婊冪Ч濠€渚€姊虹紒妯虹伇婵☆偄瀚板鍛婄瑹閳ь剟寮婚悢鍏尖拻閻庨潧澹婂Σ顕€姊虹粙鑳潶闁告柨閰ｉ獮澶愬箹娴ｅ憡顥濋柣鐘充航閸斿秴鈻?HTML 婵犵數濮烽弫鍛婃叏閻戣棄鏋侀柛娑橈攻閸欏繐霉閸忓吋缍戦柛銊ュ€圭换娑橆啅椤旇崵鐩庣紒鐐劤濞硷繝寮婚妶鍚ゅ湱鈧綆鍋呴悵鏃堟⒑閹肩偛濡界紒璇茬墦瀵鈽夐姀鐘殿啋濠德板€愰崑鎾绘倵濮樼厧澧寸€殿喗鎮傚畷鎺楁倷缁瀚奸梻浣告贡椤牏鈧稈鏅濈划鍫ュ焵椤掑嫭鈷戠紒瀣皡瀹搞儳绱撳鍜冨伐妞?{error.message}`);
-    }
-  };
-
-  const handleExportExcel = (context = 'ipam') => {
-    window.open(context === 'dcim' ? '/api/dcim/export-excel/' : '/api/export-excel/', '_blank');
-  };
-
-  const handleExportImage = async () => {
-    try {
-      const snapshot = buildDcimExportPayload({
-        datacenters,
-        activeLocation,
-        racks: currentRacks,
-        datacenterPowerStats,
-        getRackCalculatedPower,
-      });
-      exportDcimImageReport(snapshot);
-    } catch (error) {
-      alert(`闂傚倸鍊搁崐鎼佸磹瀹勬噴褰掑炊椤掑鏅悷婊冪Ч濠€渚€姊虹紒妯虹伇婵☆偄瀚板鍛婄瑹閳ь剟寮婚悢鍏尖拻閻庨潧澹婂Σ顕€姊虹粙鑳潶闁告柨閰ｉ獮澶愬箹娴ｅ憡顥濋柣鐘充航閸斿秴鈻撴ィ鍐┾拺婵懓娲ら悘鈺侇熆閻熷府韬€殿噮鍋婂畷鍫曨敆娴ｅ搫甯鹃梻濠庡亜濞诧箑煤閺嵮勬瘎闂傚倷鑳堕…鍫ユ晝閿曞倸纾婚柕鍫濇媼濞兼牗绻涘顔荤盎鐎瑰憡绻傞埞鎴︽偐閹绘帗娈梺浼欏閸忔ê顫忓ú顏勫窛濠电姴鍊搁～搴ㄦ⒑缁嬫鍎愰柟鍛婄摃椤ｉ箖姊洪崜鎻掍簼缂佹椽绠栧銊︾鐎ｎ偆鍘藉┑顔筋殔濡寮稿☉銏＄厽闊浄绲奸柇顖炴煛鐏炲墽鈯曢柟顖涙婵″爼宕ㄩ浣烘綎闂傚倷绀侀幉锛勬暜濡ゅ啯鏆滈柍銉ョ－閺嗭附绻濇繝鍌涳紞婵℃彃銈稿娲传閵夈儛銏′繆椤愶絿绠炵€殿喖顭锋俊鎼佸煛娴ｇ绁梻浣虹帛閸旀牜绮婇幘顔肩；闁规儳绠嶆禍褰掓煙閻戞ê鐏╅柡?{error.message}`);
-    }
-  };
-
-  const refreshData = async (targetTab = activeTab) => {
-    const parseIps = (items = []) => {
-      const tagRegex = /__TAG__:(.*)$/m;
-      const lockRegex = /__LOCKED__:(true|false)/m;
-
-      return items.map((ip) => {
-        let tag = ip.tag || '';
-        let desc = ip.description || '';
-        let is_locked = false;
-
-        const lockMatch = desc.match(lockRegex);
-        if (lockMatch) {
-          is_locked = lockMatch[1] === 'true';
-          desc = desc.replace(lockRegex, '').trim();
-        }
-
-        const tagMatch = desc.match(tagRegex);
-        if (tagMatch) {
-          tag = tagMatch[1];
-          desc = desc.replace(tagRegex, '').trim();
-        }
-
-        return {
-          ...ip,
-          description: desc,
-          tag,
-          is_locked,
-          status: is_locked ? 'online' : ip.status,
-        };
-      });
-    };
-
-    const parseRacks = (items = []) => {
-      const pduMetaRegex = /__PDU_META__:({.*})$/m;
-      return items.map((rack) => {
-        let description = rack.description || '';
-        let pdu_count = 2;
-        let pdu_power = 0;
-
-        const match = description.match(pduMetaRegex);
-        if (match) {
-          try {
-            const meta = JSON.parse(match[1]);
-            pdu_count = safeInt(meta.count, 2);
-            pdu_power = safeInt(meta.power, 0);
-          } catch (error) {
-            console.warn('Failed to parse rack PDU metadata', error);
-          }
-          description = description.replace(pduMetaRegex, '').trim();
-        }
-
-        return {
-          ...rack,
-          description,
-          pdu_count,
-          pdu_power,
-        };
-      });
-    };
-
-    const parseDevices = (items = []) => {
-      const metaRegex = /__META__:({.*})$/;
-      return items.map((device) => {
-        const cleanDevice = {
-          ...device,
-          position: safeInt(device.position, 1),
-          u_height: safeInt(device.u_height, 1),
-          power_usage: safeInt(device.power_usage, 0),
-          typical_power: safeInt(device.typical_power, 0),
-        };
-
-        if (cleanDevice.specs && metaRegex.test(cleanDevice.specs)) {
-          try {
-            const match = cleanDevice.specs.match(metaRegex);
-            const meta = JSON.parse(match[1]);
-            return {
-              ...cleanDevice,
-              ...meta,
-              specs: cleanDevice.specs.replace(metaRegex, '').trim(),
-            };
-          } catch (error) {
-            console.warn('Failed to parse device metadata', error);
-          }
-        }
-
-        return cleanDevice;
-      });
-    };
-
-    setIsDataLoading(true);
-    try {
-      const requests = [];
-      const addRequest = (key, url) => requests.push([key, safeFetch(url)]);
-
-      if (targetTab === 'dashboard') {
-        addRequest('ips', '/api/ips/');
-        addRequest('residentStaff', '/api/resident-staff/');
-        addRequest('loginLogs', '/api/logs/');
-        addRequest('datacenters', '/api/datacenters/');
-        addRequest('racks', '/api/racks/');
-        addRequest('rackDevices', '/api/rack-devices/');
-      }
-
-      if (targetTab === 'list') {
-        addRequest('sections', '/api/sections/');
-        addRequest('subnets', '/api/subnets/');
-        addRequest('ips', '/api/ips/');
-      }
-
-      if (targetTab === 'dcim') {
-        addRequest('datacenters', '/api/datacenters/');
-        addRequest('racks', '/api/racks/');
-        addRequest('rackDevices', '/api/rack-devices/');
-      }
-
-      if (targetTab === 'security') {
-        addRequest('loginLogs', '/api/logs/');
-        addRequest('auditLogs', '/api/audit-logs/');
-        addRequest('blocklist', '/api/blocklist/');
-      }
-
-      if (targetTab === 'resident') {
-        addRequest('residentStaff', '/api/resident-staff/');
-      }
-
-      if (targetTab === 'backup') {
-        addRequest('backups', '/api/list-backups/');
-        addRequest('backupSummary', '/api/backup/summary/');
-      }
-
-      if (targetTab === 'users') {
-        addRequest('users', '/api/users/');
-      }
-
-      const responses = Object.fromEntries(
-        await Promise.all(
-          requests.map(async ([key, promise]) => [key, await promise])
-        )
-      );
-
-      if (responses.sections?.ok) {
-        setSections(await responses.sections.json() || []);
-      }
-
-      if (responses.subnets?.ok) {
-        const subnetData = await responses.subnets.json() || [];
-        setSubnets(subnetData);
-        if (!selectedSubnetId && subnetData.length > 0) {
-          setSelectedSubnetId(subnetData[0].id);
-        }
-      }
-
-      if (responses.ips?.ok) {
-        setIps(parseIps(await responses.ips.json() || []));
-      }
-
-      if (responses.users?.ok) {
-        setUsers(await responses.users.json() || []);
-      }
-
-      if (responses.residentStaff?.ok) {
-        setResidentStaff(await responses.residentStaff.json() || []);
-      }
-
-      if (responses.backups?.ok) {
-        setBackups(await responses.backups.json() || []);
-      }
-
-      if (responses.backupSummary?.ok) {
-        setBackupSummary(await responses.backupSummary.json() || null);
-      }
-
-      if (responses.loginLogs?.ok) {
-        setLoginLogs(await responses.loginLogs.json() || []);
-      }
-
-      if (responses.auditLogs?.ok) {
-        setAuditLogs(await responses.auditLogs.json() || []);
-      }
-
-      if (responses.blocklist?.ok) {
-        setBlocklist(await responses.blocklist.json() || []);
-      }
-
-      if (responses.datacenters?.ok) {
-        const datacenterData = await responses.datacenters.json() || [];
-        setDatacenters(datacenterData);
-        if (!activeLocation && datacenterData.length > 0) {
-          setActiveLocation(datacenterData[0].id);
-        }
-      }
-
-      if (responses.racks?.ok) {
-        setRacks(parseRacks(await responses.racks.json() || []));
-      }
-
-      if (responses.rackDevices?.ok) {
-        setRackDevices(parseDevices(await responses.rackDevices.json() || []));
-      }
-    } catch (err) {
-      console.error('Data load failed', err);
-    } finally {
-      setIsDataLoading(false);
-    }
-  };
+  const {
+    fileInputRef,
+    isImporting,
+    importWizardOpen,
+    pendingFile,
+    handleExport,
+    handleFileChange,
+    handleConfirmImport,
+    handleImportClick,
+    handleDownloadTemplate,
+    handleExportHtml,
+    handleExportExcel,
+    handleExportImage,
+    closeImportWizard,
+  } = useImportExportHandlers({
+    activeLocation,
+    alert,
+    currentRacks,
+    datacenterPowerStats,
+    datacenters,
+    extractResponseMessage,
+    getRackCalculatedPower,
+    refreshData,
+  });
 
   const handleJumpToDc = (dcId) => {
     setActiveTab('dcim');
     setActiveLocation(dcId);
   };
-
-  useEffect(() => { if (isLoggedIn) refreshData(activeTab); }, [isLoggedIn, activeTab]);
 
   const handleSaveIP = async () => {
     if (!ipFormData.ip_address) {
@@ -813,190 +532,34 @@ function MainApp() {
 
   const openOptionManager = (key) => setManagingOptionKey(key);
 
-  const closeUserModal = () => {
-    setIsUserModalOpen(false);
-    setUserModalMode('create');
-    setUserFormData({});
-  };
-
-  const handleOpenCreateUser = () => {
-    setUserModalMode('create');
-    setUserFormData({
-      role: 'guest',
-      is_active: true,
-      must_change_password: true,
-      department: '',
-      phone: '',
-      title: '',
-      display_name: '',
-    });
-    setIsUserModalOpen(true);
-  };
-
-  const handleOpenEditUser = (user) => {
-    setUserModalMode('edit');
-    setUserFormData({
-      id: user.id,
-      username: user.username,
-      display_name: user.display_name || user.username,
-      department: user.department || '',
-      phone: user.phone || '',
-      title: user.title || '',
-      role: user.role || 'guest',
-      is_active: user.is_active,
-      must_change_password: !!user.must_change_password,
-    });
-    setIsUserModalOpen(true);
-  };
-
-  const handleSaveUser = async () => {
-    const isEditingUser = userModalMode === 'edit' && userFormData.id;
-    if (!userFormData.username) {
-      alert('Username is required.');
-      return;
-    }
-    if (!isEditingUser && !userFormData.password) {
-      alert('Password is required when creating a user.');
-      return;
-    }
-
-    const payload = {
-      username: userFormData.username,
-      display_name: userFormData.display_name || userFormData.username,
-      department: userFormData.department || '',
-      phone: userFormData.phone || '',
-      title: userFormData.title || '',
-      role: userFormData.role || 'guest',
-      is_active: userFormData.is_active ?? true,
-      must_change_password: userFormData.must_change_password ?? true,
-    };
-    if (!isEditingUser) {
-      payload.password = userFormData.password;
-    }
-
-    try {
-      const url = isEditingUser ? `/api/users/${userFormData.id}/` : '/api/users/';
-      const method = isEditingUser ? 'PATCH' : 'POST';
-      const response = await safeFetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to save user'));
-      }
-      alert(isEditingUser ? 'User updated.' : 'User created.');
-      closeUserModal();
-      refreshData();
-    } catch (error) {
-      alert(`Failed to save user: ${error.message}`);
-    }
-  };
-
-  const handleDeleteUser = async (user) => {
-    if (!confirm(`Delete user ${user.username}?`)) return;
-    try {
-      const response = await safeFetch(`/api/users/${user.id}/`, { method: 'DELETE' });
-      if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to delete user'));
-      }
-      refreshData();
-    } catch (error) {
-      alert(`Failed to delete user: ${error.message}`);
-    }
-  };
-
-  const handleToggleUserActive = async (user) => {
-    if (user.username === currentUserInfo?.username) {
-      alert('You cannot disable the currently logged-in user.');
-      return;
-    }
-
-    const nextActive = !user.is_active;
-    if (!confirm(`${nextActive ? 'Enable' : 'Disable'} user ${user.username}?`)) return;
-
-    try {
-      const response = await safeFetch(`/api/users/${user.id}/`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ is_active: nextActive }),
-      });
-      if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to update user status'));
-      }
-      refreshData();
-    } catch (error) {
-      alert(`Failed to update user status: ${error.message}`);
-    }
-  };
-
-  const handleUnlockUser = async (userId) => {
-    try {
-      const response = await safeFetch(`/api/users/${userId}/unlock/`, { method: 'POST' });
-      if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to unlock user'));
-      }
-      alert('User unlocked.');
-      refreshData();
-    } catch (error) {
-      alert(`Failed to unlock user: ${error.message}`);
-    }
-  };
-
-  const handleResetConfirm = async () => {
-    if (!resetTarget.password) {
-      alert('New password is required.');
-      return;
-    }
-
-    try {
-      const response = await safeFetch(`/api/users/${resetTarget.id}/`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          password: resetTarget.password,
-          must_change_password: resetTarget.must_change_password ?? true,
-        }),
-      });
-      if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to reset password'));
-      }
-      alert('Password reset completed.');
-      setIsResetModalOpen(false);
-      setResetTarget({});
-      refreshData();
-    } catch (error) {
-      alert(`Failed to reset password: ${error.message}`);
-    }
-  };
-
-  const handleChangeOwnPassword = async () => {
-    if (!passwordFormData.current_password || !passwordFormData.new_password) {
-      alert('Current password and new password are required.');
-      return;
-    }
-    if (passwordFormData.new_password !== passwordFormData.confirm_password) {
-      alert('The new password confirmation does not match.');
-      return;
-    }
-
-    try {
-      const response = await changePasswordRequest({
-        current_password: passwordFormData.current_password,
-        new_password: passwordFormData.new_password,
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to change password');
-      }
-      updateCurrentUserInfo(data.user);
-      setPasswordFormData({ current_password: '', new_password: '', confirm_password: '' });
-      setIsPasswordChangeModalOpen(false);
-      alert('Password changed successfully.');
-    } catch (error) {
-      alert(`Failed to change password: ${error.message}`);
-    }
-  };
+  const {
+    closeUserModal,
+    handleOpenCreateUser,
+    handleOpenEditUser,
+    handleSaveUser,
+    handleDeleteUser,
+    handleToggleUserActive,
+    handleUnlockUser,
+    handleResetConfirm,
+    handleChangeOwnPassword,
+  } = useUserManagementHandlers({
+    alert,
+    currentUserInfo,
+    extractResponseMessage,
+    passwordFormData,
+    refreshData,
+    resetTarget,
+    setIsPasswordChangeModalOpen,
+    setIsResetModalOpen,
+    setIsUserModalOpen,
+    setPasswordFormData,
+    setResetTarget,
+    setUserFormData,
+    setUserModalMode,
+    updateCurrentUserInfo,
+    userFormData,
+    userModalMode,
+  });
 
   const handleSaveSubnet = async () => {
     if (!subnetFormData.name) {
@@ -1242,14 +805,14 @@ function MainApp() {
         throw new Error(data.message || 'Manual backup failed');
       }
       alert(`Backup created: ${data.filename}`);
-      refreshData();
+      refreshData('backup');
     } catch (error) {
       alert(`Manual backup failed: ${error.message}`);
     }
   };
 
   const handleDownloadBackup = (filename) => {
-    window.open(`/api/download-backup/?filename=${encodeURIComponent(filename)}`, '_blank');
+    window.open(`/api/backup/download/?filename=${encodeURIComponent(filename)}`, '_blank');
   };
 
   const handleBlockIP = async () => {
@@ -1302,7 +865,7 @@ function MainApp() {
   };
 
   if (isAuthChecking) {
-      return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500 text-sm">濠电姷鏁告慨鐑藉极閸涘﹥鍙忛柣銏犲閺佸﹪鏌″搴″箹缂佹劖顨嗘穱濠囧Χ閸涱厽娈查悗瑙勬礃閻擄繝寮婚悢鍏肩劷闁挎洍鍋撻柡瀣〒缁辨帡鐓幓鎺嗗亾濠靛钃熼柨鏇楀亾閾伙絽銆掑鐓庣仭妞ゅ骸妫濆娲嚃閳轰緡鏆柣搴ｇ懗閸ヮ灛锕傛煕閺囥劌鏋ら柣銈傚亾闂備礁婀遍崑鎾愁焽濞嗘搩鏁佹繛鎴炃氶弨浠嬫煟閹邦垰鐨哄褋鍨介弻锟犲椽娴ｉ晲鍠婇梺绯曟杹閸嬫挸顪冮妶鍡楀潑闁稿鎹囬弻娑樜熼懡銈囩厜閻庤娲橀崹鍧楃嵁濡偐纾兼俊顖滃帶楠炲牓姊绘担绛嬫綈婵犮垺锕㈠畷銉╁焵椤掑倻纾奸柕濞垮劚閹垿鏌曢崶褍顏い銏℃礋婵偓闁宠泛鐏曢崟顒€寮挎繝鐢靛Т閹冲繘顢旈悩缁樼厵濠靛倸顦禍婵嬫煙椤栨稒顥堥柛鈺佸瀹曟鎹勯妸褜妲搁梻鍌氬€烽悞锕傚箖閸洖纾归柡宥庡幗閸嬶紕鎲歌箛鎾愶綁骞囬弶璺啋闂佸綊顣︾粈渚€骞冮幋锔解拺闁告稑锕ｇ欢閬嶆煕閵娿儳啸妞わ箑缍婇弻鈥崇暆閳ь剟宕伴弽顓溾偓浣糕枎閹寸偛鏋傞梺鍛婃处閸撴稖銇愮€ｎ喗鈷掑ù锝勮閺€鐗堢箾閸涱喗绀堥柛鎺撳笚閹棃濡搁妷褏宕跺┑鐘垫暩婵瓨瀵奸敐澶嬪亜闁告稑锕ら～锟犳⒑閸濆嫷妲规い鎴炵懃铻?..</div>;
+      return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500 text-sm">Checking your session...</div>;
   }
 
   if (isDcOverviewMode) {
@@ -1333,8 +896,9 @@ function MainApp() {
 
         <main className="flex-1 flex flex-col min-w-0 bg-transparent">
           <AppHeader
-            activeLabel={TAB_CONFIG[activeTab]?.label || 'Current tab'}
+            activeLabel={TAB_CONFIG[activeTab]?.label || BRAND.navigation.dashboard}
             currentUser={currentUserDisplay}
+            currentRoleLabel={ROLE_DEFINITIONS[currentRole]?.label}
             onOpenDebug={() => setIsDebugOpen(true)}
             onOpenPasswordChange={() => setIsPasswordChangeModalOpen(true)}
           />
@@ -1502,7 +1066,7 @@ function MainApp() {
       {importWizardOpen && pendingFile && (
         <ImportWizardModal 
           file={pendingFile} 
-          onClose={() => { setImportWizardOpen(false); setPendingFile(null); }}
+          onClose={closeImportWizard}
           onConfirm={handleConfirmImport}
         />
       )}

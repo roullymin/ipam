@@ -1,6 +1,10 @@
-﻿import React, { useState } from 'react';
-import { ShieldCheck } from 'lucide-react';
+import React, { useState } from 'react';
+import { CheckCircle2, Layers3, Radar, ShieldCheck } from 'lucide-react';
+
+import BrandLockup from './BrandLockup';
+import { BRAND } from '../lib/brand';
 import { loginRequest } from '../lib/api';
+
 
 export default function LoginScreen({ onLogin }) {
   const [username, setUsername] = useState('');
@@ -28,53 +32,124 @@ export default function LoginScreen({ onLogin }) {
   };
 
   return (
-    <div className="login-stage min-h-screen flex items-center justify-center px-6 py-10">
+    <div className="login-stage min-h-screen px-5 py-8 md:px-8 md:py-10">
       <div className="ambient-orb ambient-orb-a"></div>
       <div className="ambient-orb ambient-orb-b"></div>
-      <div className="login-card relative z-10 w-full max-w-sm rounded-[28px] p-8">
-        <div className="mb-8 text-center">
-          <div className="mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-sky-600 text-white shadow-lg shadow-sky-200">
-            <ShieldCheck className="h-7 w-7" />
-          </div>
-          <h1 className="text-2xl font-bold text-slate-900">IP 台账管理系统</h1>
-          <p className="mt-2 text-sm text-slate-500">
-            让地址、机房和资产台账稳定地运行在同一套工作台里。
-          </p>
-        </div>
 
-        <form onSubmit={handleLogin} className="space-y-4">
-          <div>
-            <label className="mb-1 block text-xs font-bold text-slate-500">账号</label>
-            <input
-              type="text"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm outline-none transition-all focus:border-sky-300 focus:ring-4 focus:ring-sky-100"
-            />
+      <div className="login-shell relative z-10 mx-auto grid w-full max-w-6xl overflow-hidden rounded-[36px] border border-white/12">
+        <section className="login-hero px-6 py-8 md:px-10 md:py-12">
+          <BrandLockup inverse size="lg" showTagline />
+
+          <div className="mt-8 max-w-xl">
+            <div className="inline-flex items-center rounded-full border border-cyan-300/18 bg-cyan-300/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-100/80">
+              {BRAND.consoleLabel}
+            </div>
+            <h1 className="mt-4 text-3xl font-black tracking-tight text-white md:text-5xl">
+              {BRAND.loginHeadline}
+            </h1>
+            <p className="mt-4 max-w-lg text-sm leading-7 text-slate-200/82 md:text-base">
+              {BRAND.loginDescription}
+            </p>
           </div>
 
-          <div>
-            <label className="mb-1 block text-xs font-bold text-slate-500">密码</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm outline-none transition-all focus:border-sky-300 focus:ring-4 focus:ring-sky-100"
-            />
+          <div className="mt-8 grid gap-4 md:grid-cols-3">
+            <div className="login-feature-card">
+              <Radar className="h-5 w-5 text-cyan-300" />
+              <div className="mt-3 text-sm font-bold text-white">统一态势入口</div>
+              <div className="mt-1 text-xs leading-5 text-slate-300/78">
+                把 IP、机房、人员与审计放进同一个工作面板。
+              </div>
+            </div>
+            <div className="login-feature-card">
+              <ShieldCheck className="h-5 w-5 text-emerald-300" />
+              <div className="mt-3 text-sm font-bold text-white">审计可追溯</div>
+              <div className="mt-1 text-xs leading-5 text-slate-300/78">
+                围绕高风险操作保留审计上下文和角色边界。
+              </div>
+            </div>
+            <div className="login-feature-card">
+              <Layers3 className="h-5 w-5 text-amber-300" />
+              <div className="mt-3 text-sm font-bold text-white">多模块联动</div>
+              <div className="mt-1 text-xs leading-5 text-slate-300/78">
+                支持 IPAM、DCIM、驻场运营与备份恢复协同运行。
+              </div>
+            </div>
           </div>
+        </section>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="flex w-full items-center justify-center rounded-2xl bg-sky-600 py-3 text-sm font-bold text-white shadow-lg shadow-sky-200 transition-all hover:bg-sky-700"
-          >
-            {loading ? '登录中...' : '进入系统'}
-          </button>
-        </form>
+        <section className="login-panel px-6 py-8 md:px-10 md:py-12">
+          <div className="mx-auto w-full max-w-md">
+            <div className="mb-8">
+              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+                Secure Sign In
+              </div>
+              <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-950">进入控制台</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-500">
+                使用平台账号进入 {BRAND.shortName}，继续处理网络地址、机房设备和运营流程。
+              </p>
+            </div>
 
-        <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-xs leading-5 text-slate-500">
-          当前版本会优先保留现有账号和业务数据，再逐步补齐更适合生产环境的认证、角色、审计和强制改密能力。
-        </div>
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+                  账号
+                </label>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  className="login-input w-full px-4 py-3.5 text-sm outline-none"
+                  placeholder="请输入用户名"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+                  密码
+                </label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className="login-input w-full px-4 py-3.5 text-sm outline-none"
+                  placeholder="请输入密码"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="login-button flex w-full items-center justify-center py-3.5 text-sm font-bold text-white transition-all"
+              >
+                {loading ? '登录中...' : '进入 AtlasOps'}
+              </button>
+            </form>
+
+            <div className="mt-6 rounded-[24px] border border-slate-200/80 bg-slate-50/90 p-4">
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                当前版本已统一品牌和入口壳层
+              </div>
+              <div className="mt-2 text-xs leading-6 text-slate-500">
+                下一步建议继续重做总览页、网络地址页和机房设备页的信息层级，让页面行为更接近真实运维驾驶舱。
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div className="mx-auto mt-5 max-w-6xl px-1 text-xs text-slate-500">
+        <span className="font-semibold text-slate-700">{BRAND.name}</span> · {BRAND.tagline}
+      </div>
+      <div className="mx-auto mt-3 max-w-6xl px-1 text-[11px] leading-5 text-slate-400">
+        当前版本优先保留现有账号与业务数据，同时逐步补齐更适合生产环境的认证、角色、审计和恢复能力。
+      </div>
+      <div className="mx-auto mt-3 flex max-w-6xl items-center gap-2 px-1 text-[11px] uppercase tracking-[0.22em] text-slate-400">
+        <span>AtlasOps</span>
+        <span className="text-slate-300">/</span>
+        <span>Infrastructure Operations</span>
+        <span className="text-slate-300">/</span>
+        <span>Control Plane</span>
       </div>
     </div>
   );

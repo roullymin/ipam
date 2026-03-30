@@ -1,30 +1,48 @@
 import React from 'react';
-import { KeyRound, LayoutGrid, ShieldCheck, Terminal } from 'lucide-react';
+import { Activity, KeyRound, ShieldCheck, Sparkles, Terminal } from 'lucide-react';
+
+import BrandLockup from './BrandLockup';
+import { BRAND } from '../lib/brand';
 
 export default function AppHeader({
   activeLabel,
   currentUser,
+  currentRoleLabel,
   onOpenDebug,
   onOpenPasswordChange,
 }) {
   return (
-    <header className="app-topbar z-10 flex h-20 items-center justify-between px-8">
-      <div>
-        <div className="flex items-center text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-          <LayoutGrid className="mr-2 h-3.5 w-3.5" />
-          资产管理工作台
+    <header className="app-topbar z-10 flex min-h-24 items-center justify-between px-5 py-4 md:px-8">
+      <div className="min-w-0">
+        <div className="mb-2 hidden md:block">
+          <BrandLockup size="sm" className="opacity-95" />
         </div>
-        <div className="mt-1 text-xl font-bold text-slate-900">{activeLabel}</div>
+        <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+          <Sparkles className="h-3.5 w-3.5 text-cyan-600" />
+          {BRAND.workspaceLabel}
+        </div>
+        <div className="mt-1 text-2xl font-black tracking-tight text-slate-950">{activeLabel}</div>
+        <div className="mt-1 text-sm text-slate-500">
+          {BRAND.englishName} · {BRAND.consoleLabel}
+        </div>
       </div>
 
-      <div className="flex items-center gap-3">
-        <div className="hidden items-center gap-2 rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 text-xs text-slate-600 shadow-sm md:flex">
+      <div className="flex items-center gap-2 md:gap-3">
+        <div className="topbar-chip hidden items-center gap-2 rounded-2xl px-3 py-2 text-xs md:flex">
           <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
-          数据安全优先
+          审计在线
+        </div>
+        <div className="topbar-chip hidden items-center gap-2 rounded-2xl px-3 py-2 text-xs lg:flex">
+          <Activity className="h-3.5 w-3.5 text-cyan-600" />
+          运营控制面
+        </div>
+        <div className="hidden min-w-[8.5rem] rounded-[22px] border border-slate-200/80 bg-white/80 px-3 py-2 shadow-sm md:block">
+          <div className="truncate text-xs font-bold text-slate-800">{currentUser}</div>
+          <div className="truncate text-[11px] text-slate-500">{currentRoleLabel || '未分配角色'}</div>
         </div>
         <button
           onClick={onOpenPasswordChange}
-          className="flex h-10 items-center justify-center rounded-2xl border border-slate-200 bg-white/80 px-3 text-xs font-semibold text-slate-600 shadow-sm transition-colors hover:border-blue-200 hover:text-blue-600"
+          className="flex h-10 items-center justify-center rounded-2xl border border-slate-200 bg-white/85 px-3 text-xs font-semibold text-slate-600 shadow-sm transition-colors hover:border-cyan-200 hover:text-cyan-700"
           title="修改个人密码"
           type="button"
         >
@@ -33,13 +51,13 @@ export default function AppHeader({
         </button>
         <button
           onClick={onOpenDebug}
-          className="flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white/80 text-slate-600 shadow-sm transition-colors hover:border-sky-200 hover:text-sky-600"
+          className="flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white/85 text-slate-600 shadow-sm transition-colors hover:border-cyan-200 hover:text-cyan-700"
           title="打开调试日志"
           type="button"
         >
           <Terminal className="h-4 w-4" />
         </button>
-        <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-sky-200 bg-sky-100 text-xs font-bold text-sky-700">
+        <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-cyan-200 bg-cyan-50 text-xs font-bold text-cyan-700 shadow-sm">
           {(currentUser || 'U').substring(0, 2).toUpperCase()}
         </div>
       </div>

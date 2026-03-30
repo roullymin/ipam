@@ -45,6 +45,8 @@ from .models import (
     Subnet,
     UserProfile,
 )
+from .pagination import OptionalPaginationMixin
+from .permissions import DcimAccessPermission, DcimWritePermission, IpamAccessPermission, IpamWritePermission, ResidentAccessPermission
 from .serializers import (
     AuditLogSerializer,
     BlocklistSerializer,
@@ -391,6 +393,40 @@ def _build_resident_export_rows(queryset):
                 }
             )
     return rows
+
+
+def _build_resident_lookup_maps(grouped_rows):
+    registration_codes = []
+    companies = set()
+    names = set()
+    phones = set()
+
+    for grouped in grouped_rows.values():
+        resident_data = grouped['resident']
+        registration_code = resident_data.get('registration_code')
+        if registration_code:
+            registration_codes.append(registration_code)
+        companies.add(resident_data['company'])
+        names.add(resident_data['name'])
+        phones.add(resident_data['phone'])
+
+    registration_map = {}
+    if registration_codes:
+        registration_map = {
+            resident.registration_code: resident
+            for resident in ResidentStaff.objects.filter(registration_code__in=registration_codes)
+        }
+
+    identity_map = {}
+    if companies and names and phones:
+        for resident in ResidentStaff.objects.filter(
+            company__in=companies,
+            name__in=names,
+            phone__in=phones,
+        ):
+            identity_map[(resident.company, resident.name, resident.phone)] = resident
+
+    return registration_map, identity_map
 
 
 def _get_resident_registration_url(request):
@@ -873,22 +909,27 @@ class BaseViewSet(viewsets.ModelViewSet):
         instance.delete()
 
 
-class NetworkSectionViewSet(BaseViewSet):
+class NetworkSectionViewSet(OptionalPaginationMixin, BaseViewSet):
     audit_module = 'network_section'
+    permission_classes = [IpamAccessPermission]
     queryset = NetworkSection.objects.all()
     serializer_class = NetworkSectionSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name', 'description']
 
 
-class SubnetViewSet(BaseViewSet):
+class SubnetViewSet(OptionalPaginationMixin, BaseViewSet):
     audit_module = 'subnet'
+    permission_classes = [IpamAccessPermission]
     queryset = Subnet.objects.select_related('section').all()
     serializer_class = SubnetSerializer
     filter_backends = [filters.SearchFilter]
     search_fields = ['name', 'cidr', 'location', 'circuit_id']
 
 
-class IPAddressViewSet(BaseViewSet):
+class IPAddressViewSet(OptionalPaginationMixin, BaseViewSet):
     audit_module = 'ip_address'
+    permission_classes = [IpamAccessPermission]
     queryset = IPAddress.objects.select_related('subnet').all()
     serializer_class = IPAddressSerializer
     filter_backends = [filters.SearchFilter]
@@ -949,6 +990,12 @@ class LoginLogViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAdminUser]
     queryset = LoginLog.objects.all().order_by('-timestamp')
     serializer_class = LoginLogSerializer
+    pagination_class = OptionalPaginationMixin.pagination_class
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['username', 'ip_address', 'action', 'status']
+
+    def list(self, request, *args, **kwargs):
+        return OptionalPaginationMixin.list(self, request, *args, **kwargs)
 
 
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
@@ -956,39 +1003,53 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAdminUser]
     queryset = AuditLog.objects.all().order_by('-created_at')
     serializer_class = AuditLogSerializer
+    pagination_class = OptionalPaginationMixin.pagination_class
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['actor_name', 'module', 'action', 'target_display', 'detail', 'ip_address']
+
+    def list(self, request, *args, **kwargs):
+        return OptionalPaginationMixin.list(self, request, *args, **kwargs)
 
 
-class BlocklistViewSet(BaseViewSet):
+class BlocklistViewSet(OptionalPaginationMixin, BaseViewSet):
     audit_module = 'blocklist'
     permission_classes = [IsAdminUser]
     queryset = Blocklist.objects.all()
     serializer_class = BlocklistSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['ip_address', 'reason']
 
 
-class DatacenterViewSet(BaseViewSet):
+class DatacenterViewSet(OptionalPaginationMixin, BaseViewSet):
     audit_module = 'datacenter'
+    permission_classes = [DcimAccessPermission]
     queryset = Datacenter.objects.prefetch_related('racks').all()
     serializer_class = DatacenterSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name', 'location', 'contact_phone']
 
 
-class RackViewSet(BaseViewSet):
+class RackViewSet(OptionalPaginationMixin, BaseViewSet):
     audit_module = 'rack'
+    permission_classes = [DcimAccessPermission]
     queryset = Rack.objects.select_related('datacenter').prefetch_related('devices').all()
     serializer_class = RackSerializer
     filter_backends = [filters.SearchFilter]
-    search_fields = ['code', 'name']
+    search_fields = ['code', 'name', 'datacenter__name', 'description']
 
 
-class RackDeviceViewSet(BaseViewSet):
+class RackDeviceViewSet(OptionalPaginationMixin, BaseViewSet):
     audit_module = 'rack_device'
+    permission_classes = [DcimAccessPermission]
     queryset = RackDevice.objects.select_related('rack', 'rack__datacenter').all()
     serializer_class = RackDeviceSerializer
     filter_backends = [filters.SearchFilter]
-    search_fields = ['name', 'brand', 'sn', 'asset_tag', 'mgmt_ip']
+    search_fields = ['name', 'brand', 'sn', 'asset_tag', 'mgmt_ip', 'project', 'contact', 'rack__code', 'rack__datacenter__name']
 
 
-class ResidentStaffViewSet(BaseViewSet):
+class ResidentStaffViewSet(OptionalPaginationMixin, BaseViewSet):
     audit_module = 'resident_staff'
+    permission_classes = [ResidentAccessPermission]
     queryset = ResidentStaff.objects.all().prefetch_related('devices')
     serializer_class = ResidentStaffSerializer
     filter_backends = [filters.SearchFilter]
@@ -1271,6 +1332,7 @@ class ResidentStaffViewSet(BaseViewSet):
 
         created_count = 0
         updated_count = 0
+        registration_map, identity_map = _build_resident_lookup_maps(grouped_rows)
 
         for grouped in grouped_rows.values():
             resident_data = grouped['resident']
@@ -1279,13 +1341,9 @@ class ResidentStaffViewSet(BaseViewSet):
 
             resident = None
             if registration_code:
-                resident = ResidentStaff.objects.filter(registration_code=registration_code).first()
+                resident = registration_map.get(registration_code)
             if resident is None:
-                resident = ResidentStaff.objects.filter(
-                    company=resident_data['company'],
-                    name=resident_data['name'],
-                    phone=resident_data['phone'],
-                ).first()
+                resident = identity_map.get((resident_data['company'], resident_data['name'], resident_data['phone']))
 
             if resident is None:
                 resident = ResidentStaff(**resident_data)
@@ -1293,6 +1351,11 @@ class ResidentStaffViewSet(BaseViewSet):
                 if request.user.is_authenticated:
                     resident.created_by = request.user
                 resident.save()
+                if registration_code:
+                    resident.registration_code = registration_code
+                    resident.save(update_fields=['registration_code'])
+                registration_map[resident.registration_code] = resident
+                identity_map[(resident.company, resident.name, resident.phone)] = resident
                 created_count += 1
             else:
                 for field, value in resident_data.items():
@@ -1301,6 +1364,9 @@ class ResidentStaffViewSet(BaseViewSet):
                     resident.created_by = request.user
                 resident.intake_source = 'manual'
                 resident.save()
+                if registration_code:
+                    registration_map[registration_code] = resident
+                identity_map[(resident.company, resident.name, resident.phone)] = resident
                 updated_count += 1
 
             if devices:
@@ -1459,7 +1525,7 @@ def api_resident_intake_export_pdf(request):
 
 @api_view(['POST'])
 @authentication_classes([SessionAuthentication, BasicAuthentication])
-@permission_classes([IsAuthenticated])
+@permission_classes([IpamWritePermission])
 def scan_subnet(request):
     subnet_id = request.data.get('subnet_id')
     try:
@@ -1501,6 +1567,8 @@ def scan_subnet(request):
             obj.last_online = now
             obj.save(update_fields=['status', 'last_online'])
 
+        detail = f'扫描网段 {subnet.cidr}，发现 {len(found_ips)} 个在线地址，新增 {created_num} 条，更新 {updated} 条'
+        record_audit(request, 'ip_address', 'scan', subnet, detail=detail)
         return Response(
             {
                 'status': 'success',
@@ -1521,7 +1589,7 @@ def scan_subnet(request):
 
 @api_view(['GET'])
 @authentication_classes([SessionAuthentication, BasicAuthentication])
-@permission_classes([IsAuthenticated])
+@permission_classes([IpamAccessPermission])
 def subnet_usage_matrix(request, pk=None):
     try:
         subnet = Subnet.objects.get(id=pk)
@@ -1562,7 +1630,7 @@ def subnet_usage_matrix(request, pk=None):
 @authentication_classes([SessionAuthentication, BasicAuthentication])
 @permission_classes([IsAdminUser])
 def list_backups(request):
-    backup_dir = '/app/backups'
+    backup_dir = _get_backup_dir()
     try:
         if not os.path.exists(backup_dir):
             return Response([])
@@ -1850,7 +1918,7 @@ def _dcim_import_sheets(file_obj):
 
 @api_view(['GET'])
 @authentication_classes([SessionAuthentication, BasicAuthentication])
-@permission_classes([IsAuthenticated])
+@permission_classes([DcimAccessPermission])
 def download_dcim_template(request):
     rack_template = pd.DataFrame(
         [
@@ -1910,7 +1978,7 @@ def download_dcim_template(request):
 
 @api_view(['GET'])
 @authentication_classes([SessionAuthentication, BasicAuthentication])
-@permission_classes([IsAuthenticated])
+@permission_classes([DcimAccessPermission])
 def export_dcim_excel(request):
     rack_rows = []
     for rack in Rack.objects.select_related('datacenter').all().order_by('datacenter__name', 'code'):
@@ -1976,7 +2044,7 @@ def export_dcim_excel(request):
 @api_view(['POST'])
 @parser_classes([MultiPartParser])
 @authentication_classes([SessionAuthentication, BasicAuthentication])
-@permission_classes([IsAuthenticated])
+@permission_classes([DcimWritePermission])
 def import_dcim_excel(request):
     file_obj = request.FILES.get('file')
     if not file_obj:
@@ -2084,7 +2152,7 @@ def import_dcim_excel(request):
 
 @api_view(['GET'])
 @authentication_classes([SessionAuthentication, BasicAuthentication])
-@permission_classes([IsAuthenticated])
+@permission_classes([IpamAccessPermission])
 def download_template(request):
     data = [
         {
@@ -2106,7 +2174,7 @@ def download_template(request):
 
 @api_view(['GET'])
 @authentication_classes([SessionAuthentication, BasicAuthentication])
-@permission_classes([IsAuthenticated])
+@permission_classes([IpamAccessPermission])
 def export_excel(request):
     try:
         ips = IPAddress.objects.all().select_related('subnet')
@@ -2142,7 +2210,7 @@ def export_excel(request):
 @api_view(['POST'])
 @parser_classes([MultiPartParser])
 @authentication_classes([SessionAuthentication, BasicAuthentication])
-@permission_classes([IsAuthenticated])
+@permission_classes([IpamWritePermission])
 def import_excel(request):
     file_obj = request.FILES.get('file')
     if not file_obj:
@@ -2237,6 +2305,11 @@ def import_excel(request):
             )
             success_count += 1
 
+        detail = (
+            f'批量导入 IP 台账：成功/更新 {success_count} 条，跳过 {skipped_count} 条，'
+            f'冲突策略 {conflict_mode}，工作表映射 {sheet_mapping}'
+        )
+        record_audit(request, 'ip_address', 'import', detail=detail)
         return Response(
             {
                 'status': 'success',

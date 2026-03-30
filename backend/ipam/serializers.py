@@ -18,6 +18,10 @@ from .models import (
 )
 
 
+def get_prefetched_related(instance, relation_name):
+    return getattr(instance, '_prefetched_objects_cache', {}).get(relation_name)
+
+
 def get_or_create_profile(user):
     defaults = {'role': 'admin' if user.is_staff else 'guest'}
     profile, _ = UserProfile.objects.get_or_create(user=user, defaults=defaults)
@@ -40,7 +44,7 @@ class RackSerializer(serializers.ModelSerializer):
     def get_load(self, obj):
         if not obj.height:
             return 0
-        devices = getattr(obj, '_prefetched_objects_cache', {}).get('devices', obj.devices.all())
+        devices = get_prefetched_related(obj, 'devices') or obj.devices.all()
         used_u = sum(device.u_height for device in devices if device.u_height)
         return min(int((used_u / obj.height) * 100), 100)
 
@@ -53,7 +57,7 @@ class DatacenterSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
     def get_count(self, obj):
-        prefetched_racks = getattr(obj, '_prefetched_objects_cache', {}).get('racks')
+        prefetched_racks = get_prefetched_related(obj, 'racks')
         if prefetched_racks is not None:
             return len(prefetched_racks)
         return obj.racks.count()
@@ -287,6 +291,9 @@ class ResidentStaffSerializer(serializers.ModelSerializer):
         ]
 
     def get_device_count(self, obj):
+        prefetched_devices = get_prefetched_related(obj, 'devices')
+        if prefetched_devices is not None:
+            return len(prefetched_devices)
         return obj.devices.count()
 
     def get_days_remaining(self, obj):
