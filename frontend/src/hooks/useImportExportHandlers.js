@@ -36,14 +36,14 @@ export function useImportExportHandlers({
       try {
         const response = await safeFetch('/api/dcim/import-excel/', { method: 'POST', body: formData });
         if (!response.ok) {
-          throw new Error(await extractResponseMessage(response, 'DCIM asset import failed'));
+          throw new Error(await extractResponseMessage(response, '机房设备导入失败'));
         }
 
         const data = await response.json();
-        alert(data.message || 'DCIM asset import completed.');
+        alert(data.message || '机房设备导入完成。');
         refreshData('dcim');
       } catch (error) {
-        alert(`DCIM asset import failed: ${error.message}`);
+        alert(`机房设备导入失败：${error.message}`);
       } finally {
         setIsImporting(false);
         event.target.value = null;
@@ -69,14 +69,14 @@ export function useImportExportHandlers({
     try {
       const response = await safeFetch('/api/import-excel/', { method: 'POST', body: formData });
       if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Import failed'));
+        throw new Error(await extractResponseMessage(response, '导入失败'));
       }
 
       const data = await response.json();
-      alert(data.message || 'Import completed.');
+      alert(data.message || '导入完成。');
       refreshData('list');
     } catch (error) {
-      alert(`Import failed: ${error.message}`);
+      alert(`导入失败：${error.message}`);
     } finally {
       setPendingFile(null);
       setIsImporting(false);
@@ -104,7 +104,7 @@ export function useImportExportHandlers({
       });
       exportDcimHtmlReport(snapshot);
     } catch (error) {
-      alert(`DCIM HTML export failed: ${error.message}`);
+      alert(`机房设备 HTML 导出失败：${error.message}`);
     }
   };
 
@@ -123,7 +123,7 @@ export function useImportExportHandlers({
       });
       exportDcimImageReport(snapshot);
     } catch (error) {
-      alert(`DCIM image export failed: ${error.message}`);
+      alert(`机房设备图片导出失败：${error.message}`);
     }
   };
 

@@ -5,7 +5,6 @@ import BrandLockup from './BrandLockup';
 import { BRAND } from '../lib/brand';
 import { loginRequest } from '../lib/api';
 
-
 export default function LoginScreen({ onLogin }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -57,7 +56,7 @@ export default function LoginScreen({ onLogin }) {
               <Radar className="h-5 w-5 text-cyan-300" />
               <div className="mt-3 text-sm font-bold text-white">统一态势入口</div>
               <div className="mt-1 text-xs leading-5 text-slate-300/78">
-                把 IP、机房、人员与审计放进同一个工作面板。
+                将 IP、机房、人员与审计放进同一张工作台。
               </div>
             </div>
             <div className="login-feature-card">
@@ -81,7 +80,7 @@ export default function LoginScreen({ onLogin }) {
           <div className="mx-auto w-full max-w-md">
             <div className="mb-8">
               <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
-                Secure Sign In
+                安全登录
               </div>
               <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-950">进入控制台</h2>
               <p className="mt-2 text-sm leading-6 text-slate-500">
@@ -147,9 +146,9 @@ export default function LoginScreen({ onLogin }) {
       <div className="mx-auto mt-3 flex max-w-6xl items-center gap-2 px-1 text-[11px] uppercase tracking-[0.22em] text-slate-400">
         <span>AtlasOps</span>
         <span className="text-slate-300">/</span>
-        <span>Infrastructure Operations</span>
+        <span>基础设施运营</span>
         <span className="text-slate-300">/</span>
-        <span>Control Plane</span>
+        <span>控制台</span>
       </div>
     </div>
   );

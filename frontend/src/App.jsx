@@ -484,7 +484,7 @@ function MainApp() {
 
   const handleSaveIP = async () => {
     if (!ipFormData.ip_address) {
-      alert('IP address is required.');
+      alert('IP 地址不能为空。');
       return;
     }
 
@@ -521,24 +521,24 @@ function MainApp() {
       if (ipFormData.tag) {
         updateHistory({ tag: ipFormData.tag });
       }
-      alert(editingIP ? 'IP record updated.' : 'IP record created.');
+      alert(editingIP ? 'IP 记录已更新。' : 'IP 记录已创建。');
       setIsIPModalOpen(false);
       refreshData();
     } catch (error) {
-      alert(`Failed to save IP record: ${error.message}`);
+      alert(`保存 IP 记录失败：${error.message}`);
     }
   };
 
   const handleDeleteIP = async (id) => {
-    if (!confirm('Delete this IP record?')) return;
+    if (!confirm('确定删除这条 IP 记录吗？')) return;
     try {
       const response = await safeFetch(`/api/ips/${id}/`, { method: 'DELETE' });
       if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to delete IP record'));
+        throw new Error(await extractResponseMessage(response, '删除 IP 记录失败'));
       }
       refreshData();
     } catch (error) {
-      alert(`Failed to delete IP record: ${error.message}`);
+      alert(`删除 IP 记录失败：${error.message}`);
     }
   };
 
@@ -575,7 +575,7 @@ function MainApp() {
 
   const handleSaveSubnet = async () => {
     if (!subnetFormData.name) {
-      alert('Subnet name is required.');
+      alert('子网名称不能为空。');
       return;
     }
 
@@ -594,19 +594,19 @@ function MainApp() {
         body: JSON.stringify(payload),
       });
       if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to save subnet'));
+        throw new Error(await extractResponseMessage(response, '保存子网失败'));
       }
-      alert(subnetFormData.id ? 'Subnet updated.' : 'Subnet created.');
+      alert(subnetFormData.id ? '子网已更新。' : '子网已创建。');
       setIsSubnetModalOpen(false);
       refreshData();
     } catch (error) {
-      alert(`Failed to save subnet: ${error.message}`);
+      alert(`保存子网失败：${error.message}`);
     }
   };
 
   const handleSaveSection = async () => {
     if (!sectionFormData.name) {
-      alert('Section name is required.');
+      alert('网络分区名称不能为空。');
       return;
     }
 
@@ -617,41 +617,41 @@ function MainApp() {
         body: JSON.stringify(sectionFormData),
       });
       if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to save section'));
+        throw new Error(await extractResponseMessage(response, '保存网络分区失败'));
       }
-      alert('Section created.');
+      alert('网络分区已创建。');
       setIsSectionModalOpen(false);
       setSectionFormData({});
       refreshData();
     } catch (error) {
-      alert(`Failed to save section: ${error.message}`);
+      alert(`保存网络分区失败：${error.message}`);
     }
   };
 
   const handleDeleteSection = async (id) => {
-    if (!confirm('Delete this network section?')) return;
+    if (!confirm('确定删除这个网络分区吗？')) return;
     try {
       const response = await safeFetch(`/api/sections/${id}/`, { method: 'DELETE' });
       if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to delete section'));
+        throw new Error(await extractResponseMessage(response, '删除网络分区失败'));
       }
       refreshData();
     } catch (error) {
-      alert(`Failed to delete section: ${error.message}`);
+      alert(`删除网络分区失败：${error.message}`);
     }
   };
 
   const handleDeleteSubnet = async (id) => {
-    if (!confirm('Delete this subnet?')) return;
+    if (!confirm('确定删除这个子网吗？')) return;
     try {
       const response = await safeFetch(`/api/subnets/${id}/`, { method: 'DELETE' });
       if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to delete subnet'));
+        throw new Error(await extractResponseMessage(response, '删除子网失败'));
       }
       setSelectedSubnetId(null);
       refreshData();
     } catch (error) {
-      alert(`Failed to delete subnet: ${error.message}`);
+      alert(`删除子网失败：${error.message}`);
     }
   };
 
@@ -664,27 +664,27 @@ function MainApp() {
         body: JSON.stringify(formData),
       });
       if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to save datacenter'));
+        throw new Error(await extractResponseMessage(response, '保存机房失败'));
       }
-      alert(formData.id ? 'Datacenter updated.' : 'Datacenter created.');
+      alert(formData.id ? '机房已更新。' : '机房已创建。');
       setIsDcModalOpen(false);
       refreshData();
     } catch (error) {
-      alert(`Failed to save datacenter: ${error.message}`);
+      alert(`保存机房失败：${error.message}`);
     }
   };
 
   const handleDeleteDatacenter = async (id) => {
-    if (!confirm('Delete this datacenter?')) return;
+    if (!confirm('确定删除这个机房吗？')) return;
     try {
       const response = await safeFetch(`/api/datacenters/${id}/`, { method: 'DELETE' });
       if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to delete datacenter'));
+        throw new Error(await extractResponseMessage(response, '删除机房失败'));
       }
       if (activeLocation === id) setActiveLocation(null);
       refreshData();
     } catch (error) {
-      alert(`Failed to delete datacenter: ${error.message}`);
+      alert(`删除机房失败：${error.message}`);
     }
   };
 
@@ -716,28 +716,28 @@ function MainApp() {
         body: JSON.stringify(payload),
       });
       if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to save rack'));
+        throw new Error(await extractResponseMessage(response, '保存机柜失败'));
       }
-      alert(formData.id ? 'Rack updated.' : 'Rack created.');
+      alert(formData.id ? '机柜已更新。' : '机柜已创建。');
       setIsRackModalOpen(false);
       refreshData();
     } catch (error) {
-      alert(`Failed to save rack: ${error.message}`);
+      alert(`保存机柜失败：${error.message}`);
     }
   };
 
   const handleDeleteRack = async (id, e) => {
     e.stopPropagation();
-    if (!confirm('Delete this rack?')) return;
+    if (!confirm('确定删除这个机柜吗？')) return;
     try {
       const response = await safeFetch(`/api/racks/${id}/`, { method: 'DELETE' });
       if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to delete rack'));
+        throw new Error(await extractResponseMessage(response, '删除机柜失败'));
       }
       if (selectedRack?.id === id) setSelectedRack(null);
       refreshData();
     } catch (error) {
-      alert(`Failed to delete rack: ${error.message}`);
+      alert(`删除机柜失败：${error.message}`);
     }
   };
 
@@ -760,34 +760,34 @@ function MainApp() {
         body: JSON.stringify(payload),
       });
       if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to save device'));
+        throw new Error(await extractResponseMessage(response, '保存设备失败'));
       }
       updateHistory(deviceData);
-      alert(deviceData.id ? 'Device updated.' : 'Device created.');
+      alert(deviceData.id ? '设备已更新。' : '设备已创建。');
       setEditingDevice(null);
       refreshData();
     } catch (error) {
-      alert(`Failed to save device: ${error.message}`);
+      alert(`保存设备失败：${error.message}`);
     }
   };
 
   const handleDeleteDevice = async (id) => {
-    if (!confirm('Delete this device?')) return;
+    if (!confirm('确定删除这台设备吗？')) return;
     try {
       const response = await safeFetch(`/api/rack-devices/${id}/`, { method: 'DELETE' });
       if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to delete device'));
+        throw new Error(await extractResponseMessage(response, '删除设备失败'));
       }
       setEditingDevice(null);
       refreshData();
     } catch (error) {
-      alert(`Failed to delete device: ${error.message}`);
+      alert(`删除设备失败：${error.message}`);
     }
   };
 
   const handleScanSubnet = async () => {
     if (!selectedSubnetId) return;
-    if (!confirm('Start subnet scan now?')) return;
+    if (!confirm('确定立即开始子网扫描吗？')) return;
 
     setIsScanning(true);
     try {
@@ -797,13 +797,13 @@ function MainApp() {
         body: JSON.stringify({ subnet_id: selectedSubnetId }),
       });
       if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Subnet scan failed'));
+        throw new Error(await extractResponseMessage(response, '子网扫描失败'));
       }
       const data = await response.json();
-      alert(data.message || 'Subnet scan completed.');
+      alert(data.message || '子网扫描完成。');
       refreshData();
     } catch (error) {
-      alert(`Subnet scan failed: ${error.message}`);
+      alert(`子网扫描失败：${error.message}`);
     } finally {
       setIsScanning(false);
     }
@@ -814,12 +814,12 @@ function MainApp() {
       const response = await safeFetch('/api/trigger-backup/', { method: 'POST' });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(data.message || 'Manual backup failed');
+        throw new Error(data.message || '手动备份失败');
       }
-      alert(`Backup created: ${data.filename}`);
+      alert(`备份已创建：${data.filename}`);
       refreshData('backup');
     } catch (error) {
-      alert(`Manual backup failed: ${error.message}`);
+      alert(`手动备份失败：${error.message}`);
     }
   };
 
@@ -829,7 +829,7 @@ function MainApp() {
 
   const handleBlockIP = async () => {
     if (!blockFormData.ip_address) {
-      alert('IP address is required.');
+      alert('IP 地址不能为空。');
       return;
     }
     try {
@@ -839,26 +839,26 @@ function MainApp() {
         body: JSON.stringify(blockFormData),
       });
       if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to add blocklist entry'));
+        throw new Error(await extractResponseMessage(response, '添加黑名单失败'));
       }
-      alert('Blocklist entry created.');
+      alert('黑名单记录已创建。');
       setIsBlockModalOpen(false);
       refreshData();
     } catch (error) {
-      alert(`Failed to add blocklist entry: ${error.message}`);
+      alert(`添加黑名单失败：${error.message}`);
     }
   };
 
   const handleUnblockIP = async (id) => {
-    if (!confirm('Remove this blocklist entry?')) return;
+    if (!confirm('确定移除这条黑名单记录吗？')) return;
     try {
       const response = await safeFetch(`/api/blocklist/${id}/`, { method: 'DELETE' });
       if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to remove blocklist entry'));
+        throw new Error(await extractResponseMessage(response, '移除黑名单失败'));
       }
       refreshData();
     } catch (error) {
-      alert(`Failed to remove blocklist entry: ${error.message}`);
+      alert(`移除黑名单失败：${error.message}`);
     }
   };
 
@@ -877,7 +877,7 @@ function MainApp() {
   };
 
   if (isAuthChecking) {
-      return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500 text-sm">Checking your session...</div>;
+      return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500 text-sm">正在检查登录状态...</div>;
   }
 
   if (isDcOverviewMode) {

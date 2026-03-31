@@ -58,11 +58,11 @@ export function useUserManagementHandlers({
   const handleSaveUser = async () => {
     const isEditingUser = userModalMode === 'edit' && userFormData.id;
     if (!userFormData.username) {
-      alert('Username is required.');
+      alert('用户名不能为空。');
       return;
     }
     if (!isEditingUser && !userFormData.password) {
-      alert('Password is required when creating a user.');
+      alert('创建用户时必须填写密码。');
       return;
     }
 
@@ -89,37 +89,37 @@ export function useUserManagementHandlers({
         body: JSON.stringify(payload),
       });
       if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to save user'));
+        throw new Error(await extractResponseMessage(response, '保存用户失败'));
       }
-      alert(isEditingUser ? 'User updated.' : 'User created.');
+      alert(isEditingUser ? '用户已更新。' : '用户已创建。');
       closeUserModal();
       refreshData('users');
     } catch (error) {
-      alert(`Failed to save user: ${error.message}`);
+      alert(`保存用户失败：${error.message}`);
     }
   };
 
   const handleDeleteUser = async (user) => {
-    if (!confirm(`Delete user ${user.username}?`)) return;
+    if (!confirm(`确定删除用户“${user.username}”吗？`)) return;
     try {
       const response = await safeFetch(`/api/users/${user.id}/`, { method: 'DELETE' });
       if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to delete user'));
+        throw new Error(await extractResponseMessage(response, '删除用户失败'));
       }
       refreshData('users');
     } catch (error) {
-      alert(`Failed to delete user: ${error.message}`);
+      alert(`删除用户失败：${error.message}`);
     }
   };
 
   const handleToggleUserActive = async (user) => {
     if (user.username === currentUserInfo?.username) {
-      alert('You cannot disable the currently logged-in user.');
+      alert('不能停用当前正在登录的用户。');
       return;
     }
 
     const nextActive = !user.is_active;
-    if (!confirm(`${nextActive ? 'Enable' : 'Disable'} user ${user.username}?`)) return;
+    if (!confirm(`确定要${nextActive ? '启用' : '停用'}用户“${user.username}”吗？`)) return;
 
     try {
       const response = await safeFetch(`/api/users/${user.id}/`, {
@@ -128,11 +128,11 @@ export function useUserManagementHandlers({
         body: JSON.stringify({ is_active: nextActive }),
       });
       if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to update user status'));
+        throw new Error(await extractResponseMessage(response, '更新用户状态失败'));
       }
       refreshData('users');
     } catch (error) {
-      alert(`Failed to update user status: ${error.message}`);
+      alert(`更新用户状态失败：${error.message}`);
     }
   };
 
@@ -140,18 +140,18 @@ export function useUserManagementHandlers({
     try {
       const response = await safeFetch(`/api/users/${userId}/unlock/`, { method: 'POST' });
       if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to unlock user'));
+        throw new Error(await extractResponseMessage(response, '解锁用户失败'));
       }
-      alert('User unlocked.');
+      alert('用户已解锁。');
       refreshData('users');
     } catch (error) {
-      alert(`Failed to unlock user: ${error.message}`);
+      alert(`解锁用户失败：${error.message}`);
     }
   };
 
   const handleResetConfirm = async () => {
     if (!resetTarget.password) {
-      alert('New password is required.');
+      alert('新密码不能为空。');
       return;
     }
 
@@ -165,24 +165,24 @@ export function useUserManagementHandlers({
         }),
       });
       if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, 'Failed to reset password'));
+        throw new Error(await extractResponseMessage(response, '重置密码失败'));
       }
-      alert('Password reset completed.');
+      alert('密码已重置。');
       setIsResetModalOpen(false);
       setResetTarget({});
       refreshData('users');
     } catch (error) {
-      alert(`Failed to reset password: ${error.message}`);
+      alert(`重置密码失败：${error.message}`);
     }
   };
 
   const handleChangeOwnPassword = async () => {
     if (!passwordFormData.current_password || !passwordFormData.new_password) {
-      alert('Current password and new password are required.');
+      alert('当前密码和新密码都不能为空。');
       return;
     }
     if (passwordFormData.new_password !== passwordFormData.confirm_password) {
-      alert('The new password confirmation does not match.');
+      alert('两次输入的新密码不一致。');
       return;
     }
 
@@ -193,14 +193,14 @@ export function useUserManagementHandlers({
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(data.message || 'Failed to change password');
+        throw new Error(data.message || '修改密码失败');
       }
       updateCurrentUserInfo(data.user);
       setPasswordFormData({ current_password: '', new_password: '', confirm_password: '' });
       setIsPasswordChangeModalOpen(false);
-      alert('Password changed successfully.');
+      alert('密码修改成功。');
     } catch (error) {
-      alert(`Failed to change password: ${error.message}`);
+      alert(`修改密码失败：${error.message}`);
     }
   };
 
