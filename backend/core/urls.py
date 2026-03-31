@@ -40,6 +40,7 @@ urlpatterns = [
     path('api/list-backups/', views.list_backups),
     path('api/backup/summary/', views.backup_summary),
     path('api/backup/download/', views.download_backup),
+    path('api/data-quality/encoding-report/', views.encoding_report),
     path('api/scan/', views.scan_subnet),
     path('api/subnets/<int:pk>/usage/', views.subnet_usage_matrix),
     path('api/export-excel/', views.export_excel),

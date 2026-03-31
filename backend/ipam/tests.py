@@ -2,11 +2,13 @@ import json
 import os
 import shutil
 import tempfile
+from io import StringIO
 from pathlib import Path
 from subprocess import CompletedProcess
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
+from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APITestCase
 
@@ -15,6 +17,10 @@ from .models import Datacenter, IPAddress, NetworkSection, Rack, RackDevice, Sub
 
 def make_csv_upload(name, content):
     return SimpleUploadedFile(name, content.encode('utf-8'), content_type='text/csv')
+
+
+def make_csv_upload_bytes(name, content_bytes):
+    return SimpleUploadedFile(name, content_bytes, content_type='text/csv')
 
 
 class BaseApiTestCase(APITestCase):
@@ -211,6 +217,26 @@ class ImportExcelTests(BaseApiTestCase):
         self.assertEqual(response.data['status'], 'error')
         self.assertIn('缺少必要列', response.data['message'])
 
+    def test_import_excel_accepts_gb18030_csv_and_repairs_mojibake(self):
+        source_name = '核心交换机'
+        upload = make_csv_upload_bytes(
+            'gb18030_import.csv',
+            (
+                'IP地址,设备名称,状态,设备类型,负责人,备注\n'
+                f'10.20.30.12,{source_name},online,switch,网络管理部,骨干网络接入\n'
+            ).encode('gb18030'),
+        )
+
+        response = self.client.post(
+            '/api/import-excel/',
+            {'file': upload, 'config': json.dumps({'skipRows': 1, 'conflictMode': 'overwrite'})},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        imported = IPAddress.objects.get(ip_address='10.20.30.12')
+        self.assertEqual(imported.device_name, source_name)
+        self.assertEqual(imported.owner, '网络管理部')
+
 
 class BackupApiTests(BaseApiTestCase):
     def setUp(self):
@@ -293,6 +319,19 @@ class AccessControlAndPaginationTests(BaseApiTestCase):
         profile = UserProfile.objects.get(user=self.guest)
         self.assertTrue(profile.must_change_password)
 
+    def test_admin_can_fetch_encoding_report(self):
+        client = self.make_authenticated_client(self.admin)
+        garbled_name = '核心交换机'.encode('utf-8').decode('latin1')
+        datacenter = Datacenter.objects.create(name='主机房', location='7F')
+        rack = Rack.objects.create(datacenter=datacenter, code='R-01', name='核心机柜')
+        RackDevice.objects.create(rack=rack, name=garbled_name, position=1, u_height=1)
+
+        response = client.get('/api/data-quality/encoding-report/?limit=2')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(response.data['summary']['suspected_records'], 1)
+        self.assertTrue(any(model['model'] == 'RackDevice' for model in response.data['models']))
+
 
 class ResidentImportTests(BaseApiTestCase):
     def setUp(self):
@@ -332,3 +371,59 @@ class ResidentImportTests(BaseApiTestCase):
         self.assertEqual(resident_response.data[0]['registration_code'], registration_code)
         self.assertEqual(resident_response.data[0]['project_name'], 'Project X')
         self.assertEqual(resident_response.data[0]['device_count'], 1)
+
+    def test_resident_import_accepts_gbk_csv(self):
+        upload = make_csv_upload_bytes(
+            'resident_import_gbk.csv',
+            (
+                '登记编号,公司,姓名,联系方式,所属项目,设备名称,品牌,型号\n'
+                'RC202604010001,示例科技,张三,13800001111,骨干网改造,运维笔记本,联想,ThinkPad\n'
+            ).encode('gbk'),
+        )
+
+        response = self.client.post('/api/resident-staff/import_excel/', {'file': upload})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['created'], 1)
+        resident_response = self.client.get('/api/resident-staff/')
+        self.assertEqual(resident_response.status_code, 200)
+        self.assertEqual(resident_response.data[0]['company'], '示例科技')
+        self.assertEqual(resident_response.data[0]['device_count'], 1)
+
+
+class EncodingAuditCommandTests(BaseApiTestCase):
+    def test_scan_encoding_issues_command_reports_suspected_rows(self):
+        garbled_device_name = '华三交换机'.encode('utf-8').decode('latin1')
+        datacenter = Datacenter.objects.create(name='主机房', location='7F')
+        rack = Rack.objects.create(datacenter=datacenter, code='R-09', name='接入机柜')
+        RackDevice.objects.create(rack=rack, name=garbled_device_name, position=9, u_height=1)
+
+        stdout = StringIO()
+        call_command('scan_encoding_issues', '--limit', '1', stdout=stdout)
+        output = stdout.getvalue()
+
+        self.assertIn('RackDevice', output)
+        self.assertIn('建议修复', output)
+
+    def test_repair_encoding_issues_command_can_apply_and_restore(self):
+        garbled_device_name = '华三交换机'.encode('utf-8').decode('latin1')
+        datacenter = Datacenter.objects.create(name='主机房', location='7F')
+        rack = Rack.objects.create(datacenter=datacenter, code='R-11', name='回滚机柜')
+        device = RackDevice.objects.create(rack=rack, name=garbled_device_name, position=11, u_height=1)
+
+        snapshot_path = Path(tempfile.mkdtemp(prefix='ipam-encoding-snapshot-')) / 'encoding_snapshot.json'
+        self.addCleanup(shutil.rmtree, snapshot_path.parent, ignore_errors=True)
+
+        preview_stdout = StringIO()
+        call_command('repair_encoding_issues', '--snapshot', str(snapshot_path), stdout=preview_stdout)
+        self.assertTrue(snapshot_path.exists())
+
+        apply_stdout = StringIO()
+        call_command('repair_encoding_issues', '--apply', '--snapshot', str(snapshot_path), stdout=apply_stdout)
+        device.refresh_from_db()
+        self.assertEqual(device.name, '华三交换机')
+
+        restore_stdout = StringIO()
+        call_command('repair_encoding_issues', '--restore', str(snapshot_path), stdout=restore_stdout)
+        device.refresh_from_db()
+        self.assertEqual(device.name, garbled_device_name)

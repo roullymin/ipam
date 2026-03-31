@@ -60,6 +60,7 @@ from .serializers import (
     SubnetSerializer,
     UserSerializer,
 )
+from .text_encoding import build_encoding_report, normalize_dataframe_text, normalize_text_value, read_csv_with_fallback
 
 logger = logging.getLogger('django')
 
@@ -232,7 +233,7 @@ def record_audit(request, module, action, target=None, detail=''):
 
 
 def _normalize_header(value):
-    text = str(value or '').strip()
+    text = str(normalize_text_value(value) or '').strip()
     text = text.replace('\n', '').replace('\r', '').replace(' ', '')
     if text.lower().startswith('unnamed:'):
         return ''
@@ -240,13 +241,7 @@ def _normalize_header(value):
 
 
 def _normalize_cell(value):
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return ''
-    if pd.isna(value):
-        return ''
-    if isinstance(value, str):
-        return value.strip()
-    return value
+    return normalize_text_value(value)
 
 
 def _parse_bool(value):
@@ -308,12 +303,12 @@ def _parse_approval_status(value):
 def _read_resident_import_dataframe(uploaded_file):
     name = (uploaded_file.name or '').lower()
     if name.endswith('.csv'):
-        dataframe = pd.read_csv(uploaded_file)
+        dataframe = read_csv_with_fallback(uploaded_file)
         dataframe = dataframe.dropna(how='all')
         dataframe.columns = [_normalize_header(col) for col in dataframe.columns]
         return dataframe, 1
 
-    raw = pd.read_excel(uploaded_file, sheet_name=0, header=None)
+    raw = normalize_dataframe_text(pd.read_excel(uploaded_file, sheet_name=0, header=None))
     raw = raw.dropna(axis=0, how='all').dropna(axis=1, how='all')
     if raw.empty:
         return pd.DataFrame(), 0
@@ -1909,9 +1904,9 @@ def _dcim_import_sheets(file_obj):
     devices_sheet = '设备资产' if '设备资产' in workbook.sheet_names else (
         workbook.sheet_names[1] if len(workbook.sheet_names) > 1 else None
     )
-    racks_df = pd.read_excel(workbook, sheet_name=racks_sheet, engine='openpyxl').fillna('')
+    racks_df = normalize_dataframe_text(pd.read_excel(workbook, sheet_name=racks_sheet, engine='openpyxl').fillna(''))
     devices_df = (
-        pd.read_excel(workbook, sheet_name=devices_sheet, engine='openpyxl').fillna('')
+        normalize_dataframe_text(pd.read_excel(workbook, sheet_name=devices_sheet, engine='openpyxl').fillna(''))
         if devices_sheet
         else pd.DataFrame(columns=DCIM_DEVICE_HEADERS)
     )
@@ -2231,13 +2226,13 @@ def import_excel(request):
 
     try:
         if str(file_obj.name).lower().endswith('.csv'):
-            df = pd.read_csv(file_obj, header=header_row).fillna('')
+            df = read_csv_with_fallback(file_obj, header=header_row).fillna('')
             df['__sheet_name__'] = ''
         else:
             sheet_frames = pd.read_excel(file_obj, sheet_name=None, engine='openpyxl', header=header_row)
             normalized_frames = []
             for sheet_name, frame in sheet_frames.items():
-                normalized = frame.fillna('').copy()
+                normalized = normalize_dataframe_text(frame.fillna('').copy())
                 normalized['__sheet_name__'] = sheet_name
                 normalized_frames.append(normalized)
             df = pd.concat(normalized_frames, ignore_index=True) if normalized_frames else pd.DataFrame()
@@ -2321,6 +2316,19 @@ def import_excel(request):
     except Exception as exc:
         logger.exception('Import excel failed.')
         return Response({'status': 'error', 'message': f'导入失败: {exc}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@authentication_classes([SessionAuthentication, BasicAuthentication])
+@permission_classes([IsAdminUser])
+def encoding_report(request):
+    try:
+        limit = max(int(request.GET.get('limit') or 5), 1)
+    except (TypeError, ValueError):
+        limit = 5
+    report = build_encoding_report(limit_per_model=limit)
+    record_audit(request, 'data_quality', 'scan_encoding', detail=f'扫描疑似乱码数据，样本上限 {limit} 条')
+    return Response(report)
 
 
 @api_view(['POST', 'GET'])
