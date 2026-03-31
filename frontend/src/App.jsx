@@ -28,7 +28,16 @@ import ResidentIntakePage from './components/ResidentIntakePage';
 import ResidentManagementView from './components/ResidentManagementView';
 import SecurityCenterView from './components/SecurityCenterView';
 import UserManagementView from './components/UserManagementView';
-import { DebugModal, FormInput, Modal, OptionManagerModal, SmartInput, StatusBadge } from './components/common/UI';
+import {
+  ConfirmActionModal,
+  DebugModal,
+  FormInput,
+  Modal,
+  NotificationCenter,
+  OptionManagerModal,
+  SmartInput,
+  StatusBadge,
+} from './components/common/UI';
 import { safeFetch } from './lib/api';
 import { BRAND } from './lib/brand';
 import { useAuthSession } from './hooks/useAuthSession';

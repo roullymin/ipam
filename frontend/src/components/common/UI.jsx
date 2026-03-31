@@ -242,6 +242,113 @@ export const DebugModal = ({ isOpen, onClose, logs, onClear }) => {
   );
 };
 
+export const NotificationCenter = ({ items = [], onDismiss }) => {
+  if (!items.length) return null;
+
+  const toneMap = {
+    success: {
+      card: 'border-emerald-200 bg-emerald-50/95',
+      title: 'text-emerald-800',
+      body: 'text-emerald-700',
+      button: 'text-emerald-500 hover:bg-emerald-100',
+      dot: 'bg-emerald-500',
+    },
+    error: {
+      card: 'border-rose-200 bg-rose-50/95',
+      title: 'text-rose-800',
+      body: 'text-rose-700',
+      button: 'text-rose-500 hover:bg-rose-100',
+      dot: 'bg-rose-500',
+    },
+    warning: {
+      card: 'border-amber-200 bg-amber-50/95',
+      title: 'text-amber-800',
+      body: 'text-amber-700',
+      button: 'text-amber-500 hover:bg-amber-100',
+      dot: 'bg-amber-500',
+    },
+    info: {
+      card: 'border-cyan-200 bg-cyan-50/95',
+      title: 'text-cyan-800',
+      body: 'text-cyan-700',
+      button: 'text-cyan-500 hover:bg-cyan-100',
+      dot: 'bg-cyan-500',
+    },
+  };
+
+  return (
+    <div className="pointer-events-none fixed right-4 top-4 z-[80] flex w-[min(26rem,calc(100vw-2rem))] flex-col gap-3">
+      {items.map((item) => {
+        const tone = toneMap[item.type] || toneMap.info;
+        return (
+          <div
+            key={item.id}
+            className={`pointer-events-auto overflow-hidden rounded-[24px] border p-4 shadow-[0_18px_40px_rgba(15,23,42,0.12)] backdrop-blur-sm ${tone.card}`}
+          >
+            <div className="flex items-start gap-3">
+              <span className={`mt-1 h-2.5 w-2.5 rounded-full ${tone.dot}`}></span>
+              <div className="min-w-0 flex-1">
+                {item.title ? (
+                  <div className={`text-sm font-bold ${tone.title}`}>{item.title}</div>
+                ) : null}
+                <div className={`text-sm leading-6 ${tone.body}`}>{item.message}</div>
+              </div>
+              <button
+                onClick={() => onDismiss?.(item.id)}
+                className={`rounded-xl p-1 transition-colors ${tone.button}`}
+                type="button"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+export const ConfirmActionModal = ({
+  isOpen,
+  title,
+  message,
+  confirmLabel = '确认',
+  tone = 'danger',
+  onCancel,
+  onConfirm,
+}) => {
+  const confirmTone =
+    tone === 'danger'
+      ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-200'
+      : 'bg-cyan-600 hover:bg-cyan-700 shadow-cyan-200';
+
+  return (
+    <Modal isOpen={isOpen} onClose={onCancel} title={title || '请确认操作'} size="sm">
+      <div className="space-y-5">
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm leading-7 text-slate-600">
+          {message || '请确认是否继续执行此操作。'}
+        </div>
+        <div className="flex justify-end gap-3">
+          <button
+            onClick={onCancel}
+            className="rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-500 transition-colors hover:bg-slate-50"
+            type="button"
+          >
+            取消
+          </button>
+          <button
+            onClick={onConfirm}
+            className={`rounded-2xl px-4 py-2.5 text-sm font-semibold text-white shadow-lg transition-colors ${confirmTone}`}
+            type="button"
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
 export const OptionManagerModal = ({ title, options, onSave, onClose }) => {
   const initialList =
     Array.isArray(options) && typeof options[0] === 'object'
