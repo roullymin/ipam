@@ -2,36 +2,38 @@
 import { Archive, Clock3, Database, Download, FolderOpen, RefreshCw, ShieldCheck } from 'lucide-react';
 
 const LABELS = {
-  title: 'Backup Operations',
-  heading: 'Database Backup Center',
+  title: '备份操作',
+  heading: '数据库备份中心',
   intro:
-    'Review backup health, trigger manual backups, and download historical files from one place. Use the restore reminders before any production recovery work.',
-  refresh: 'Refresh',
-  manualBackup: 'Run Backup',
-  backupCount: 'Backup Files',
-  latestBackup: 'Latest Backup',
-  manualCount: 'Manual Backups',
-  totalSize: 'Storage Used',
-  fileTable: 'Backup Files',
-  fileTableDesc: 'Download backup files directly and pair them with your restore checklist.',
-  fileName: 'Filename',
-  backupTime: 'Created At',
-  size: 'Size',
-  type: 'Type',
-  actions: 'Actions',
-  download: 'Download',
-  empty: 'No backup files are available yet.',
-  strategy: 'Backup Notes',
-  storagePath: 'Storage Path',
-  restoreTip: 'Restore Reminder',
-  restoreChecks: 'Pre-Restore Checks',
-  restoreCheck1: '1. Confirm the selected backup matches the required recovery point.',
-  restoreCheck2: '2. Create a fresh backup of the current database before restoring.',
-  restoreCheck3: '3. Validate the backup in a test environment whenever possible.',
-  availableCount: 'Available backup file count',
-  currentPath: 'Current storage location',
-  noBackupYet: 'No backups yet',
-  autoCountSuffix: 'automatic backups',
+    '在一个页面中查看备份健康情况、触发手动备份，并下载历史备份文件。执行生产恢复前，请先阅读恢复提示。',
+  refresh: '刷新',
+  manualBackup: '执行备份',
+  backupCount: '备份文件',
+  latestBackup: '最近备份',
+  manualCount: '手动备份',
+  totalSize: '已用存储',
+  fileTable: '备份文件',
+  fileTableDesc: '直接下载备份文件，并结合你的恢复检查清单一起使用。',
+  fileName: '文件名',
+  backupTime: '创建时间',
+  size: '大小',
+  type: '类型',
+  actions: '操作',
+  download: '下载',
+  empty: '暂无备份文件。',
+  strategy: '备份说明',
+  storagePath: '存储路径',
+  restoreTip: '恢复提示',
+  restoreChecks: '恢复前检查',
+  restoreCheck1: '1. 确认所选备份与目标恢复时间点一致。',
+  restoreCheck2: '2. 在恢复前先对当前数据库再做一次最新备份。',
+  restoreCheck3: '3. 条件允许时，优先在测试环境验证备份可用性。',
+  availableCount: '当前可用备份文件数',
+  currentPath: '当前存储位置',
+  noBackupYet: '暂无备份',
+  autoCountSuffix: '个自动备份',
+  typeManual: '手动',
+  typeAutomatic: '自动',
 };
 
 function ActionButton({ icon: Icon, label, onClick, primary = false }) {
@@ -82,10 +84,9 @@ function formatBytes(bytes, fallback = '-') {
 }
 
 function normalizeBackupType(backup) {
-  if (backup?.type === 'Manual' || backup?.type === 'Automatic') return backup.type;
-  if (backup?.type === '手动') return 'Manual';
-  if (backup?.type === '自动') return 'Automatic';
-  return String(backup?.filename || '').includes('manual') ? 'Manual' : 'Automatic';
+  if (backup?.type === 'Manual' || backup?.type === '手动') return LABELS.typeManual;
+  if (backup?.type === 'Automatic' || backup?.type === '自动') return LABELS.typeAutomatic;
+  return String(backup?.filename || '').includes('manual') ? LABELS.typeManual : LABELS.typeAutomatic;
 }
 
 export default function BackupView({
@@ -99,11 +100,11 @@ export default function BackupView({
     latest_backup_time: '',
     latest_backup_name: '',
     backup_count: backups.length,
-    manual_count: backups.filter((item) => normalizeBackupType(item) === 'Manual').length,
-    auto_count: backups.filter((item) => normalizeBackupType(item) === 'Automatic').length,
+    manual_count: backups.filter((item) => normalizeBackupType(item) === LABELS.typeManual).length,
+    auto_count: backups.filter((item) => normalizeBackupType(item) === LABELS.typeAutomatic).length,
     total_size: '-',
     storage_path: '/app/backups',
-    restore_tip: 'Stop the application and validate the backup before restoring it.',
+    restore_tip: '恢复前请先停止业务容器，并先校验备份文件是否完整。',
   };
 
   const totalSizeLabel = formatBytes(resolvedSummary.total_bytes, resolvedSummary.total_size || '-');
@@ -189,7 +190,7 @@ export default function BackupView({
                       <td className="px-6 py-4">
                         <span
                           className={`rounded-full px-3 py-1 text-xs font-bold ${
-                            normalizeBackupType(backup) === 'Manual'
+                            normalizeBackupType(backup) === LABELS.typeManual
                               ? 'bg-blue-50 text-blue-700'
                               : 'bg-emerald-50 text-emerald-700'
                           }`}
@@ -236,7 +237,7 @@ export default function BackupView({
                 <div className="rounded-2xl bg-slate-50 px-4 py-3">
                   <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">{LABELS.restoreTip}</div>
                   <div className="mt-2 leading-6 text-slate-600">
-                    {resolvedSummary.restore_tip || 'Stop the application and validate the backup before restoring it.'}
+                    {resolvedSummary.restore_tip || '恢复前请先停止业务容器，并先校验备份文件是否完整。'}
                   </div>
                 </div>
               </div>
