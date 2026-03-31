@@ -436,6 +436,7 @@ export default function DcimView(props) {
     handleExportImage,
     setCurrentRackForm,
     setIsRackModalOpen,
+    datacenterPowerStats,
     currentRacks,
     getRackCalculatedPower,
     selectedRack,
