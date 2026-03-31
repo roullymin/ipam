@@ -278,6 +278,21 @@ class AccessControlAndPaginationTests(BaseApiTestCase):
         self.assertEqual(response.data['count'], 2)
         self.assertEqual(len(response.data['results']), 1)
 
+    def test_admin_can_reset_user_password_with_partial_patch(self):
+        client = self.make_authenticated_client(self.admin)
+
+        response = client.patch(
+            f'/api/users/{self.guest.id}/',
+            {'password': 'ResetPass123', 'must_change_password': True},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.guest.refresh_from_db()
+        self.assertTrue(self.guest.check_password('ResetPass123'))
+        profile = UserProfile.objects.get(user=self.guest)
+        self.assertTrue(profile.must_change_password)
+
 
 class ResidentImportTests(BaseApiTestCase):
     def setUp(self):

@@ -943,6 +943,7 @@ class UserViewSet(BaseViewSet):
     serializer_class = UserSerializer
 
     def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
         instance = self.get_object()
         role = request.data.get('role')
         is_active = request.data.get('is_active')
@@ -959,9 +960,10 @@ class UserViewSet(BaseViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        return super().update(request, *args, **kwargs)
+        return super().update(request, *args, partial=partial, **kwargs)
 
     def partial_update(self, request, *args, **kwargs):
+        kwargs['partial'] = True
         return self.update(request, *args, **kwargs)
 
 

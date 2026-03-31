@@ -348,6 +348,7 @@ function MainApp() {
       });
     });
   }, []);
+  const handleZoomIn = () => setViewState(prev => ({ ...prev, scale: Math.min(prev.scale + 0.06, 0.9) }));
   const handleZoomOut = () => setViewState(prev => ({ ...prev, scale: Math.max(prev.scale - 0.06, 0.56) }));
   const handleZoomReset = () => setViewState({ scale: 0.74 });
 
