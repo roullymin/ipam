@@ -406,16 +406,18 @@ function MainApp() {
   }, [ips]);
 
   const datacenterPowerStats = useMemo(() => {
-      return currentRacks.reduce((acc, rack) => {
-          const rackStats = getRackCalculatedPower(rack.id);
-          return { 
-              total_rated: acc.total_rated + rackStats.rated_sum, 
-              total_typical: acc.total_typical + rackStats.typical_sum, 
-              // 闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾剧懓顪冪€ｎ亝鎹ｉ柣顓炴閵嗘帒顫濋敐鍛婵°倗濮烽崑鐐烘偋閻樻眹鈧線寮撮姀鐘栄囨煕閵夈垺娅囬柛妯煎█濮婄粯鎷呯粙娆炬闂佺顑呴幊搴ｅ弲閻庡箍鍎遍ˇ顖炴倿閸偁浜滈柟鐑樺煀閸旂喖鏌ｉ敐鍥ㄦ毄闁逞屽墲椤煤閺嶎厼围闁告稑锕ラ崣蹇涙煃瑜滈崜鐔煎蓟閺囷紕鐤€閻庯綆浜炴禒鐓庮渻閵堝繗鍚傞柡鍛Т椤繒绱掑Ο璇差€撻梺鎯х箳閹虫挾绮敓鐘斥拺闁告稑锕ラˉ鏍磼閻樿櫕灏柣锝呭槻椤劑宕橀敐鍡╂綌闂備線娼х换鎺撴叏閻戣棄鍌ㄩ柟缁㈠枟閸婂灚顨ラ悙鑼虎闁告梹纰嶆穱濠囶敃閵忕媭鍔夌紓浣稿€哥粔鎾€﹂妸鈺侀唶闁绘柨鎼獮鎰版⒒娴ｅ憡鍟為柛鏃€鍨垮畷婵嗩吋婢跺﹦顔愰梺褰掑亰閸犳宕戦弽銊﹀弿婵☆垰鐏濋悡鎰版煃闁垮鐏撮柡灞剧☉閳规垿宕卞Δ濠佺棯闂備焦瀵х粙鎴犵矓瑜版帒钃熸繛鎴炃氶弸搴ㄧ叓閸ャ劍灏版繛鍫濐煼閹鈻撻崹顔界亪濡炪値鍙冮弨杈ㄧ┍婵犲洤绠瑰ù锝堝€介妸鈺傜厪闊洤锕ラ～濠冪箾閸忓吋鈷愮紒缁樼箞閹粙妫冨☉妤冩崟婵犵妲呴崑鍛存偡閳轰胶鏆︽繛宸簻闁卞洭鏌曟径鍫濆姕閺夊牆鐗撳铏规崉閵娿儲鐏佹繝娈垮枤閺佸宕哄☉銏犵闁绘劗鏁搁鏇㈡⒑閻撳簺鍋㈡い銈呭€垮畷顒勬惞閸︻厾锛滈梺闈涱焾閸斿矂宕ラ崷顓犵＜閺夊牄鍔嶇亸顓熴亜閹剧偨鍋㈢€规洦浜畷姗€顢橀悙鏉戝壍闂傚倸鍊烽懗鍓佸垝椤栨稓鐟规俊銈呮噹闂傤垶鏌ㄥ┑鍡╂Ц闁哄嫨鍎甸弻?PDU 闂傚倸鍊搁崐鎼佸磹閹间礁纾圭€瑰嫭鍣磋ぐ鎺戠倞妞ゆ帒顦伴弲顏堟偡濠婂啴鍙勯柕鍡楀暣婵＄柉顦撮柣顓熺懇閺屾盯寮婚婊冣偓鎰板磻閹捐閿ゆ俊銈勮閹峰搫顪冮妶鍡楀潑闁稿鎸剧槐鎺撳緞婵犲骸娈舵繝銏ｎ潐濞叉鎹㈠┑鍡╂僵妞ゆ挾濮寸敮楣冩⒒娴ｇ顥忛柛瀣噽閹广垽宕橀埡浣哥亖婵犻潧鍊搁幉锟犳偂閻旂厧绠规繛锝庡墮閳ь剚娲熼幃锟犲箛閻楀牏鍘梺鎼炲劀閸愬彞绱旈柣搴㈩問閸犳洜鍒掑▎鎾扁偓渚€寮撮～顔剧◤濡炪倖鎸炬慨闈涚暦閻旇櫣纾介柛灞捐壘閳ь剟顥撻幏瀣蓟閵夈儳锛涢梺鍦亾閸撴岸鎮㈤崱娑欑厾闁归棿鐒﹀☉褍鈹戦鑲╁ⅵ闁哄矉缍侀獮妯兼崉閻戞浜梻浣告惈閻鎹㈠┑鍡欐殾闁圭儤鍨熷Σ鍫熸叏濡も偓濡鈻撳┑瀣拻濞达絿鐡旈崵鍐煕閵娿倕宓嗛柟顔ㄥ洤绠婚悹鍥蔼閹?
-              total_pdu: acc.total_pdu + safeInt(rack.pdu_power, 0)
-          };
-      }, { total_rated: 0, total_typical: 0, total_pdu: 0 });
-  }, [currentRacks, rackDevices]);
+    return currentRacks.reduce(
+      (acc, rack) => {
+        const rackStats = getRackCalculatedPower(rack.id);
+        return {
+          total_rated: acc.total_rated + rackStats.rated_sum,
+          total_typical: acc.total_typical + rackStats.typical_sum,
+          total_pdu: acc.total_pdu + safeInt(rack.pdu_power, 0),
+        };
+      },
+      { total_rated: 0, total_typical: 0, total_pdu: 0 }
+    );
+  }, [currentRacks]);
 
   const handleElevationMouseDown = (e) => {
     const ele = elevationScrollRef.current;
