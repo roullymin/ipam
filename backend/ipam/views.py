@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import subprocess
+from functools import lru_cache
 from datetime import date, datetime, timedelta
 
 import pandas as pd
@@ -66,6 +67,8 @@ logger = logging.getLogger('django')
 
 LOGIN_LOCK_THRESHOLD = 5
 LOGIN_LOCK_MINUTES = 30
+APP_VERSION = os.environ.get('APP_VERSION', '1.0.0')
+SYSTEM_OVERVIEW_CACHE = {'expires_at': None, 'payload': None}
 
 
 def get_client_ip(request):
@@ -73,6 +76,45 @@ def get_client_ip(request):
     if forwarded:
         return forwarded.split(',')[0].strip()
     return request.META.get('REMOTE_ADDR', 'unknown')
+
+
+def _repo_root():
+    return settings.BASE_DIR.parent
+
+
+def _run_git_command(args):
+    try:
+        result = subprocess.run(
+            ['git', *args],
+            cwd=str(_repo_root()),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        logger.debug('Git command failed: %s', args, exc_info=True)
+    return ''
+
+
+@lru_cache(maxsize=1)
+def get_backend_version_payload():
+    commit = _run_git_command(['rev-parse', '--short', 'HEAD']) or os.environ.get('APP_GIT_SHA', '')
+    branch = _run_git_command(['rev-parse', '--abbrev-ref', 'HEAD']) or os.environ.get('APP_GIT_BRANCH', '')
+    committed_at = _run_git_command(['log', '-1', '--format=%cI']) or os.environ.get('APP_GIT_COMMITTED_AT', '')
+    dirty = bool(_run_git_command(['status', '--porcelain']))
+    return {
+        'service': 'backend',
+        'version': APP_VERSION,
+        'commit': commit,
+        'branch': branch,
+        'committed_at': committed_at,
+        'dirty': dirty,
+        'runtime': 'django',
+    }
 
 DCIM_RACK_HEADERS = [
     '机房名称',
@@ -422,6 +464,147 @@ def _build_resident_lookup_maps(grouped_rows):
             identity_map[(resident.company, resident.name, resident.phone)] = resident
 
     return registration_map, identity_map
+
+
+def _build_resident_import_groups(dataframe, header_rows):
+    grouped_rows = {}
+    errors = []
+
+    for excel_row_number, (_, row) in enumerate(dataframe.iterrows(), start=header_rows + 1):
+        company = str(_get_row_value(row, 'company')).strip()
+        name = str(_get_row_value(row, 'name')).strip()
+        phone = str(_get_row_value(row, 'phone')).strip()
+        registration_code = str(_get_row_value(row, 'registration_code')).strip()
+
+        if not company and not name and not phone:
+            continue
+
+        if not company or not name:
+            errors.append(f'第 {excel_row_number} 行缺少必填字段：公司或姓名。')
+            continue
+
+        resident_key = registration_code or f'{company}|{name}|{phone}'
+        record = grouped_rows.setdefault(
+            resident_key,
+            {
+                'resident': {
+                    'registration_code': registration_code,
+                    'company': company,
+                    'name': name,
+                    'title': str(_get_row_value(row, 'title')).strip(),
+                    'phone': phone,
+                    'email': str(_get_row_value(row, 'email')).strip(),
+                    'resident_type': _parse_resident_type(_get_row_value(row, 'resident_type')),
+                    'project_name': str(_get_row_value(row, 'project_name')).strip(),
+                    'department': str(_get_row_value(row, 'department')).strip(),
+                    'needs_seat': _parse_bool(_get_row_value(row, 'needs_seat')),
+                    'office_location': str(_get_row_value(row, 'office_location')).strip(),
+                    'seat_number': str(_get_row_value(row, 'seat_number')).strip(),
+                    'start_date': _parse_date(_get_row_value(row, 'start_date')),
+                    'end_date': _parse_date(_get_row_value(row, 'end_date')),
+                    'approval_status': _parse_approval_status(_get_row_value(row, 'approval_status')),
+                    'remarks': str(_get_row_value(row, 'remarks')).strip(),
+                },
+                'devices': [],
+                'row_number': excel_row_number,
+            },
+        )
+
+        device_payload = {
+            'device_name': str(_get_row_value(row, 'device_name')).strip(),
+            'serial_number': str(_get_row_value(row, 'serial_number')).strip(),
+            'brand': str(_get_row_value(row, 'brand')).strip(),
+            'model': str(_get_row_value(row, 'model')).strip(),
+            'wired_mac': str(_get_row_value(row, 'wired_mac')).strip(),
+            'wireless_mac': str(_get_row_value(row, 'wireless_mac')).strip(),
+            'security_software_installed': _parse_bool(_get_row_value(row, 'security_software_installed')),
+            'os_activated': _parse_bool(_get_row_value(row, 'os_activated')),
+            'vulnerabilities_patched': _parse_bool(_get_row_value(row, 'vulnerabilities_patched')),
+            'last_antivirus_at': _parse_date(_get_row_value(row, 'last_antivirus_at')),
+            'malware_found': _parse_bool(_get_row_value(row, 'malware_found')),
+            'malware_notes': str(_get_row_value(row, 'malware_notes')).strip(),
+            'remarks': '',
+        }
+        has_device_content = any(
+            value not in ['', None, False]
+            for key, value in device_payload.items()
+            if key not in {'security_software_installed', 'os_activated', 'vulnerabilities_patched', 'malware_found'}
+        ) or any(
+            device_payload[key]
+            for key in ['security_software_installed', 'os_activated', 'vulnerabilities_patched', 'malware_found']
+        )
+        if has_device_content:
+            record['devices'].append(device_payload)
+
+    return grouped_rows, errors
+
+
+def _build_resident_import_preview(grouped_rows, errors, preview_limit=20):
+    preview = {
+        'summary': {
+            'resident_rows': 0,
+            'device_rows': 0,
+            'create_rows': 0,
+            'update_rows': 0,
+            'actionable_rows': 0,
+            'invalid_rows': len(errors),
+        },
+        'rows': [],
+        'warnings': [],
+        'errors': list(errors),
+        'can_import': not errors,
+    }
+
+    if not grouped_rows:
+        preview['errors'].append('没有解析到有效人员，请检查模板表头和必填字段。')
+        preview['can_import'] = False
+        return preview
+
+    registration_map, identity_map = _build_resident_lookup_maps(grouped_rows)
+
+    for grouped in grouped_rows.values():
+        resident_data = grouped['resident']
+        row_number = grouped['row_number']
+        device_count = len(grouped['devices'])
+        registration_code = resident_data.get('registration_code')
+
+        resident = None
+        match_reason = '按公司、姓名和联系电话匹配'
+        if registration_code:
+            resident = registration_map.get(registration_code)
+            match_reason = '按登记编号匹配'
+        if resident is None:
+            resident = identity_map.get((resident_data['company'], resident_data['name'], resident_data['phone']))
+
+        action = 'update' if resident else 'create'
+        preview['summary']['resident_rows'] += 1
+        preview['summary']['device_rows'] += device_count
+        preview['summary'][f'{action}_rows'] += 1
+        preview['summary']['actionable_rows'] += 1
+
+        if not registration_code:
+            warning = f'第 {row_number} 行未提供登记编号，预览将按公司、姓名和联系电话匹配。'
+            if warning not in preview['warnings']:
+                preview['warnings'].append(warning)
+
+        if len(preview['rows']) < preview_limit:
+            preview['rows'].append(
+                {
+                    'row_number': row_number,
+                    'title': resident_data['name'],
+                    'subtitle': f"{resident_data['company']} · {resident_data['phone'] or '未填写电话'}",
+                    'action': action,
+                    'reason': f"{match_reason}，备案设备 {device_count} 台",
+                    'sheet': ' / '.join(
+                        [
+                            resident_data['project_name'] or '未填写项目',
+                            resident_data['department'] or '未填写部门',
+                        ]
+                    ),
+                }
+            )
+
+    return preview
 
 
 def _get_resident_registration_url(request):
@@ -1242,6 +1425,32 @@ class ResidentStaffViewSet(OptionalPaginationMixin, BaseViewSet):
         return response
 
     @action(detail=False, methods=['post'], parser_classes=[MultiPartParser])
+    def preview_import_excel(self, request):
+        uploaded_file = request.FILES.get('file')
+        if not uploaded_file:
+            return Response({'detail': '请先选择要导入的 Excel 或 CSV 文件。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            dataframe, header_rows = _read_resident_import_dataframe(uploaded_file)
+        except Exception as exc:
+            logger.exception('Resident staff preview failed while reading file.')
+            return Response({'detail': f'文件读取失败：{exc}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if dataframe.empty:
+            return Response({'detail': '表格中没有可导入的数据。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        grouped_rows, errors = _build_resident_import_groups(dataframe, header_rows)
+        preview = _build_resident_import_preview(grouped_rows, errors)
+
+        return Response(
+            {
+                'status': 'success',
+                'detected_encoding': dataframe.attrs.get('source_encoding'),
+                'preview': preview,
+            }
+        )
+
+    @action(detail=False, methods=['post'], parser_classes=[MultiPartParser])
     def import_excel(self, request):
         uploaded_file = request.FILES.get('file')
         if not uploaded_file:
@@ -1256,73 +1465,7 @@ class ResidentStaffViewSet(OptionalPaginationMixin, BaseViewSet):
         if dataframe.empty:
             return Response({'detail': '表格中没有可导入的数据。'}, status=status.HTTP_400_BAD_REQUEST)
 
-        grouped_rows = {}
-        errors = []
-
-        for excel_row_number, (_, row) in enumerate(dataframe.iterrows(), start=header_rows + 1):
-            company = str(_get_row_value(row, 'company')).strip()
-            name = str(_get_row_value(row, 'name')).strip()
-            phone = str(_get_row_value(row, 'phone')).strip()
-            registration_code = str(_get_row_value(row, 'registration_code')).strip()
-
-            if not company and not name and not phone:
-                continue
-
-            if not company or not name:
-                errors.append(f'第 {excel_row_number} 行缺少必填字段：公司或姓名。')
-                continue
-
-            resident_key = registration_code or f'{company}|{name}|{phone}'
-            record = grouped_rows.setdefault(
-                resident_key,
-                {
-                    'resident': {
-                        'registration_code': registration_code,
-                        'company': company,
-                        'name': name,
-                        'title': str(_get_row_value(row, 'title')).strip(),
-                        'phone': phone,
-                        'email': str(_get_row_value(row, 'email')).strip(),
-                        'resident_type': _parse_resident_type(_get_row_value(row, 'resident_type')),
-                        'project_name': str(_get_row_value(row, 'project_name')).strip(),
-                        'department': str(_get_row_value(row, 'department')).strip(),
-                        'needs_seat': _parse_bool(_get_row_value(row, 'needs_seat')),
-                        'office_location': str(_get_row_value(row, 'office_location')).strip(),
-                        'seat_number': str(_get_row_value(row, 'seat_number')).strip(),
-                        'start_date': _parse_date(_get_row_value(row, 'start_date')),
-                        'end_date': _parse_date(_get_row_value(row, 'end_date')),
-                        'approval_status': _parse_approval_status(_get_row_value(row, 'approval_status')),
-                        'remarks': str(_get_row_value(row, 'remarks')).strip(),
-                    },
-                    'devices': [],
-                },
-            )
-
-            device_payload = {
-                'device_name': str(_get_row_value(row, 'device_name')).strip(),
-                'serial_number': str(_get_row_value(row, 'serial_number')).strip(),
-                'brand': str(_get_row_value(row, 'brand')).strip(),
-                'model': str(_get_row_value(row, 'model')).strip(),
-                'wired_mac': str(_get_row_value(row, 'wired_mac')).strip(),
-                'wireless_mac': str(_get_row_value(row, 'wireless_mac')).strip(),
-                'security_software_installed': _parse_bool(_get_row_value(row, 'security_software_installed')),
-                'os_activated': _parse_bool(_get_row_value(row, 'os_activated')),
-                'vulnerabilities_patched': _parse_bool(_get_row_value(row, 'vulnerabilities_patched')),
-                'last_antivirus_at': _parse_date(_get_row_value(row, 'last_antivirus_at')),
-                'malware_found': _parse_bool(_get_row_value(row, 'malware_found')),
-                'malware_notes': str(_get_row_value(row, 'malware_notes')).strip(),
-                'remarks': '',
-            }
-            has_device_content = any(
-                value not in ['', None, False]
-                for key, value in device_payload.items()
-                if key not in {'security_software_installed', 'os_activated', 'vulnerabilities_patched', 'malware_found'}
-            ) or any(
-                device_payload[key]
-                for key in ['security_software_installed', 'os_activated', 'vulnerabilities_patched', 'malware_found']
-            )
-            if has_device_content:
-                record['devices'].append(device_payload)
+        grouped_rows, errors = _build_resident_import_groups(dataframe, header_rows)
 
         if not grouped_rows:
             return Response({'detail': '没有解析到有效人员，请检查模板表头和必填字段。'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1913,6 +2056,151 @@ def _dcim_import_sheets(file_obj):
     return racks_df, devices_df
 
 
+def _build_dcim_import_preview(racks_df, devices_df, preview_limit=20):
+    preview = {
+        'can_import': True,
+        'summary': {
+            'rack_rows': 0,
+            'device_rows': 0,
+            'rack_create_rows': 0,
+            'rack_update_rows': 0,
+            'device_create_rows': 0,
+            'device_update_rows': 0,
+            'invalid_rows': 0,
+        },
+        'errors': [],
+        'warnings': [],
+        'rows': [],
+    }
+
+    existing_datacenters = {item.name: item for item in Datacenter.objects.all()}
+    existing_racks = {
+        (rack.datacenter.name, rack.code): rack
+        for rack in Rack.objects.select_related('datacenter').all()
+    }
+    existing_devices_by_asset = {}
+    existing_devices_by_position = {}
+    for device in RackDevice.objects.select_related('rack', 'rack__datacenter').all():
+        rack_key = (device.rack.datacenter.name, device.rack.code)
+        if device.asset_tag:
+            existing_devices_by_asset[(rack_key, device.asset_tag)] = device
+        existing_devices_by_position[(rack_key, device.position)] = device
+
+    staged_rack_keys = set()
+
+    for row_index, (_, row) in enumerate(racks_df.iterrows(), start=2):
+        datacenter_name = str(row.get('机房名称', '')).strip()
+        rack_code = str(row.get('机柜编号', '')).strip()
+        rack_name = str(row.get('机柜名称', '')).strip()
+
+        if not datacenter_name and not rack_code and not rack_name:
+            continue
+
+        preview['summary']['rack_rows'] += 1
+
+        if not datacenter_name or not rack_code:
+            preview['summary']['invalid_rows'] += 1
+            preview['errors'].append(f'机柜资产表第 {row_index} 行缺少必填字段：机房名称或机柜编号。')
+            if len(preview['rows']) < preview_limit:
+                preview['rows'].append(
+                    {
+                        'sheet': '机柜资产',
+                        'row_number': row_index,
+                        'record_type': 'rack',
+                        'title': rack_name or rack_code or '未命名机柜',
+                        'action': 'invalid',
+                        'reason': '缺少机房名称或机柜编号',
+                    }
+                )
+            continue
+
+        rack_key = (datacenter_name, rack_code)
+        staged_rack_keys.add(rack_key)
+        existing_rack = existing_racks.get(rack_key)
+        action = 'update' if existing_rack else 'create'
+        preview['summary'][f'rack_{action}_rows'] += 1
+
+        if datacenter_name not in existing_datacenters and action == 'create':
+            warning = f'机房“{datacenter_name}”不存在，导入时将自动创建。'
+            if warning not in preview['warnings']:
+                preview['warnings'].append(warning)
+
+        if len(preview['rows']) < preview_limit:
+            preview['rows'].append(
+                {
+                    'sheet': '机柜资产',
+                    'row_number': row_index,
+                    'record_type': 'rack',
+                    'title': rack_name or rack_code,
+                    'subtitle': f'{datacenter_name} · {rack_code}',
+                    'action': action,
+                    'reason': action == 'create' and '将新增机柜' or '将更新机柜信息',
+                }
+            )
+
+    for row_index, (_, row) in enumerate(devices_df.iterrows(), start=2):
+        datacenter_name = str(row.get('机房名称', '')).strip()
+        rack_code = str(row.get('机柜编号', '')).strip()
+        device_name = str(row.get('设备名称', '')).strip()
+        asset_tag = str(row.get('固定资产编号', '')).strip()
+        position = int(row.get('起始U位', 1) or 1)
+
+        if not datacenter_name and not rack_code and not device_name:
+            continue
+
+        preview['summary']['device_rows'] += 1
+
+        if not datacenter_name or not rack_code or not device_name:
+            preview['summary']['invalid_rows'] += 1
+            preview['errors'].append(f'设备资产表第 {row_index} 行缺少必填字段：机房名称、机柜编号或设备名称。')
+            if len(preview['rows']) < preview_limit:
+                preview['rows'].append(
+                    {
+                        'sheet': '设备资产',
+                        'row_number': row_index,
+                        'record_type': 'device',
+                        'title': device_name or '未命名设备',
+                        'action': 'invalid',
+                        'reason': '缺少机房名称、机柜编号或设备名称',
+                    }
+                )
+            continue
+
+        rack_key = (datacenter_name, rack_code)
+        existing_device = None
+        if asset_tag:
+            existing_device = existing_devices_by_asset.get((rack_key, asset_tag))
+        if existing_device is None:
+            existing_device = existing_devices_by_position.get((rack_key, position))
+
+        action = 'update' if existing_device else 'create'
+        preview['summary'][f'device_{action}_rows'] += 1
+
+        if rack_key not in existing_racks and rack_key not in staged_rack_keys:
+            warning = f'设备资产表第 {row_index} 行引用的机柜 {datacenter_name}/{rack_code} 当前不存在。'
+            if warning not in preview['warnings']:
+                preview['warnings'].append(warning)
+
+        if len(preview['rows']) < preview_limit:
+            preview['rows'].append(
+                {
+                    'sheet': '设备资产',
+                    'row_number': row_index,
+                    'record_type': 'device',
+                    'title': device_name,
+                    'subtitle': f'{datacenter_name} · {rack_code} · U{position}',
+                    'action': action,
+                    'reason': action == 'create' and '将新增设备' or '将更新设备信息',
+                    'has_warning': rack_key not in existing_racks and rack_key not in staged_rack_keys,
+                }
+            )
+
+    if preview['errors']:
+        preview['can_import'] = False
+
+    return preview
+
+
 @api_view(['GET'])
 @authentication_classes([SessionAuthentication, BasicAuthentication])
 @permission_classes([DcimAccessPermission])
@@ -2036,6 +2324,30 @@ def export_dcim_excel(request):
     response.write(buffer.getvalue())
     record_audit(request, 'dcim', 'export', detail='导出了 DCIM 资产 Excel')
     return response
+
+
+@api_view(['POST'])
+@parser_classes([MultiPartParser])
+@authentication_classes([SessionAuthentication, BasicAuthentication])
+@permission_classes([DcimWritePermission])
+def preview_dcim_import_excel(request):
+    file_obj = request.FILES.get('file')
+    if not file_obj:
+        return Response({'status': 'error', 'message': '请先上传 Excel 文件。'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        racks_df, devices_df = _dcim_import_sheets(file_obj)
+        preview = _build_dcim_import_preview(racks_df, devices_df)
+        return Response(
+            {
+                'status': 'success',
+                'detected_encoding': 'xlsx',
+                'preview': preview,
+            }
+        )
+    except Exception as exc:
+        logger.exception('Preview dcim import excel failed.')
+        return Response({'status': 'error', 'message': f'DCIM 导入预览失败: {exc}'}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(['POST'])
@@ -2204,6 +2516,208 @@ def export_excel(request):
         return Response({'status': 'error', 'message': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+def _load_ip_import_dataframe(file_obj, header_row):
+    detected_encoding = ''
+    if str(file_obj.name).lower().endswith('.csv'):
+        df = read_csv_with_fallback(file_obj, header=header_row).fillna('')
+        detected_encoding = df.attrs.get('detected_encoding', '')
+        df['__sheet_name__'] = ''
+        return df, detected_encoding
+
+    sheet_frames = pd.read_excel(file_obj, sheet_name=None, engine='openpyxl', header=header_row)
+    normalized_frames = []
+    for sheet_name, frame in sheet_frames.items():
+        normalized = normalize_dataframe_text(frame.fillna('').copy())
+        normalized['__sheet_name__'] = sheet_name
+        normalized_frames.append(normalized)
+    df = pd.concat(normalized_frames, ignore_index=True) if normalized_frames else pd.DataFrame()
+    return df, 'xlsx'
+
+
+def _resolve_import_config(config_raw):
+    try:
+        import_config = json.loads(config_raw) if config_raw else {}
+    except (TypeError, json.JSONDecodeError):
+        import_config = {}
+
+    skip_rows = max(int(import_config.get('skipRows') or 1), 1)
+    return {
+        'raw': import_config,
+        'skip_rows': skip_rows,
+        'header_row': max(skip_rows - 1, 0),
+        'conflict_mode': str(import_config.get('conflictMode') or 'overwrite').lower(),
+        'sheet_mapping': str(import_config.get('sheetMapping') or 'none').lower(),
+    }
+
+
+def _match_subnet_for_ip(target_ip, all_subnets, sheet_name='', sheet_mapping='none'):
+    matched_subnet = None
+    for subnet in all_subnets:
+        try:
+            if target_ip in ipaddress.ip_network(subnet.cidr, strict=False):
+                matched_subnet = subnet
+                break
+        except ValueError:
+            continue
+
+    if not matched_subnet and sheet_name and sheet_mapping == 'subnet':
+        matched_subnet = next(
+            (
+                subnet for subnet in all_subnets
+                if sheet_name in str(subnet.name)
+                or sheet_name in str(subnet.cidr)
+                or sheet_name in str(subnet.location or '')
+            ),
+            None,
+        )
+
+    return matched_subnet
+
+
+def _build_ip_import_preview(df, all_subnets, conflict_mode='overwrite', sheet_mapping='none', preview_limit=20):
+    required_cols = ['IP地址', '设备名称']
+    missing_columns = [column for column in required_cols if column not in df.columns]
+    preview = {
+        'columns': [str(column) for column in df.columns if str(column)],
+        'missing_required_columns': missing_columns,
+        'can_import': not missing_columns,
+        'summary': {
+            'total_rows': 0,
+            'actionable_rows': 0,
+            'create_rows': 0,
+            'update_rows': 0,
+            'skip_rows': 0,
+            'invalid_rows': 0,
+            'unmatched_subnet_rows': 0,
+        },
+        'errors': [],
+        'warnings': [],
+        'rows': [],
+    }
+
+    if missing_columns:
+        preview['errors'].append(f"缺少必要列：{'、'.join(missing_columns)}")
+        return preview
+
+    existing_ip_map = {item.ip_address: item for item in IPAddress.objects.filter(ip_address__in=df['IP地址'].astype(str).tolist())}
+
+    for row_index, (_, row) in enumerate(df.iterrows(), start=1):
+        ip_str = str(row.get('IP地址', '')).strip()
+        if not ip_str:
+            continue
+
+        preview['summary']['total_rows'] += 1
+        sheet_name = str(row.get('__sheet_name__', '')).strip()
+        device_name = str(row.get('设备名称', '')).strip()
+
+        try:
+            target_ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            preview['summary']['invalid_rows'] += 1
+            preview['errors'].append(f'第 {row_index} 行 IP 地址无效：{ip_str}')
+            if len(preview['rows']) < preview_limit:
+                preview['rows'].append(
+                    {
+                        'row_number': row_index,
+                        'ip_address': ip_str,
+                        'device_name': device_name,
+                        'sheet_name': sheet_name,
+                        'action': 'invalid',
+                        'reason': 'IP 地址格式无效',
+                    }
+                )
+            continue
+
+        matched_subnet = _match_subnet_for_ip(target_ip, all_subnets, sheet_name=sheet_name, sheet_mapping=sheet_mapping)
+        existing_ip = existing_ip_map.get(ip_str)
+        action = 'create'
+        reason = '将新增记录'
+
+        if existing_ip and conflict_mode == 'skip':
+            action = 'skip'
+            reason = '目标 IP 已存在，按策略跳过'
+            preview['summary']['skip_rows'] += 1
+        elif existing_ip:
+            action = 'update'
+            reason = '目标 IP 已存在，将覆盖现有信息'
+            preview['summary']['update_rows'] += 1
+            preview['summary']['actionable_rows'] += 1
+        else:
+            preview['summary']['create_rows'] += 1
+            preview['summary']['actionable_rows'] += 1
+
+        if matched_subnet is None:
+            preview['summary']['unmatched_subnet_rows'] += 1
+            warning = f'第 {row_index} 行未匹配到网段：{ip_str}'
+            if warning not in preview['warnings']:
+                preview['warnings'].append(warning)
+
+        if len(preview['rows']) < preview_limit:
+            preview['rows'].append(
+                {
+                    'row_number': row_index,
+                    'ip_address': ip_str,
+                    'device_name': device_name,
+                    'status': str(row.get('状态', 'offline')).strip() or 'offline',
+                    'device_type': str(row.get('设备类型', 'other')).strip() or 'other',
+                    'owner': str(row.get('负责人', row.get('使用人', ''))).strip(),
+                    'sheet_name': sheet_name,
+                    'subnet': {
+                        'id': matched_subnet.id,
+                        'name': matched_subnet.name,
+                        'cidr': matched_subnet.cidr,
+                    }
+                    if matched_subnet
+                    else None,
+                    'action': action,
+                    'reason': reason,
+                    'has_warning': matched_subnet is None,
+                }
+            )
+
+    return preview
+
+
+def _append_sheet_mapping_description(description, sheet_name, sheet_mapping):
+    normalized_description = str(description or '').strip()
+    if sheet_name and sheet_mapping == 'location' and sheet_name not in normalized_description:
+        return f'{normalized_description}\n工作表:{sheet_name}'.strip() if normalized_description else f'工作表:{sheet_name}'
+    return normalized_description
+
+
+@api_view(['POST'])
+@parser_classes([MultiPartParser])
+@authentication_classes([SessionAuthentication, BasicAuthentication])
+@permission_classes([IpamWritePermission])
+def preview_import_excel(request):
+    file_obj = request.FILES.get('file')
+    if not file_obj:
+        return Response({'status': 'error', 'message': '未上传文件'}, status=status.HTTP_400_BAD_REQUEST)
+
+    config = _resolve_import_config(request.data.get('config'))
+
+    try:
+        df, detected_encoding = _load_ip_import_dataframe(file_obj, header_row=config['header_row'])
+        all_subnets = list(Subnet.objects.select_related('section').all())
+        preview = _build_ip_import_preview(
+            df,
+            all_subnets,
+            conflict_mode=config['conflict_mode'],
+            sheet_mapping=config['sheet_mapping'],
+        )
+        return Response(
+            {
+                'status': 'success',
+                'detected_encoding': detected_encoding,
+                'config': config['raw'],
+                'preview': preview,
+            }
+        )
+    except Exception as exc:
+        logger.exception('Preview import excel failed.')
+        return Response({'status': 'error', 'message': f'导入预览失败: {exc}'}, status=status.HTTP_400_BAD_REQUEST)
+
+
 @api_view(['POST'])
 @parser_classes([MultiPartParser])
 @authentication_classes([SessionAuthentication, BasicAuthentication])
@@ -2213,38 +2727,23 @@ def import_excel(request):
     if not file_obj:
         return Response({'status': 'error', 'message': '未上传文件'}, status=status.HTTP_400_BAD_REQUEST)
 
-    config_raw = request.data.get('config')
-    try:
-        import_config = json.loads(config_raw) if config_raw else {}
-    except (TypeError, json.JSONDecodeError):
-        import_config = {}
-
-    skip_rows = max(int(import_config.get('skipRows') or 1), 1)
-    header_row = max(skip_rows - 1, 0)
-    conflict_mode = str(import_config.get('conflictMode') or 'overwrite').lower()
-    sheet_mapping = str(import_config.get('sheetMapping') or 'none').lower()
+    config = _resolve_import_config(request.data.get('config'))
 
     try:
-        if str(file_obj.name).lower().endswith('.csv'):
-            df = read_csv_with_fallback(file_obj, header=header_row).fillna('')
-            df['__sheet_name__'] = ''
-        else:
-            sheet_frames = pd.read_excel(file_obj, sheet_name=None, engine='openpyxl', header=header_row)
-            normalized_frames = []
-            for sheet_name, frame in sheet_frames.items():
-                normalized = normalize_dataframe_text(frame.fillna('').copy())
-                normalized['__sheet_name__'] = sheet_name
-                normalized_frames.append(normalized)
-            df = pd.concat(normalized_frames, ignore_index=True) if normalized_frames else pd.DataFrame()
-
-        required_cols = ['IP地址', '设备名称']
-        if not all(column in df.columns for column in required_cols):
+        df, detected_encoding = _load_ip_import_dataframe(file_obj, header_row=config['header_row'])
+        all_subnets = list(Subnet.objects.select_related('section').all())
+        preview = _build_ip_import_preview(
+            df,
+            all_subnets,
+            conflict_mode=config['conflict_mode'],
+            sheet_mapping=config['sheet_mapping'],
+        )
+        if not preview['can_import']:
             return Response(
-                {'status': 'error', 'message': 'Excel 缺少必要列：IP地址、设备名称'},
+                {'status': 'error', 'message': 'Excel 缺少必要列：IP地址、设备名称', 'preview': preview},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        all_subnets = list(Subnet.objects.select_related('section').all())
         success_count = 0
         skipped_count = 0
 
@@ -2259,35 +2758,23 @@ def import_excel(request):
                 skipped_count += 1
                 continue
 
-            matched_subnet = None
-            for subnet in all_subnets:
-                try:
-                    if target_ip in ipaddress.ip_network(subnet.cidr, strict=False):
-                        matched_subnet = subnet
-                        break
-                except ValueError:
-                    continue
-
             sheet_name = str(row.get('__sheet_name__', '')).strip()
-            if not matched_subnet and sheet_name and sheet_mapping == 'subnet':
-                matched_subnet = next(
-                    (
-                        subnet for subnet in all_subnets
-                        if sheet_name in str(subnet.name)
-                        or sheet_name in str(subnet.cidr)
-                        or sheet_name in str(subnet.location or '')
-                    ),
-                    None,
-                )
-
+            matched_subnet = _match_subnet_for_ip(
+                target_ip,
+                all_subnets,
+                sheet_name=sheet_name,
+                sheet_mapping=config['sheet_mapping'],
+            )
             existing_ip = IPAddress.objects.filter(ip_address=ip_str).first()
-            if existing_ip and conflict_mode == 'skip':
+            if existing_ip and config['conflict_mode'] == 'skip':
                 skipped_count += 1
                 continue
 
-            description = str(row.get('备注', '')).strip()
-            if sheet_name and sheet_mapping == 'location' and sheet_name not in description:
-                description = f'{description}\n工作表:{sheet_name}'.strip() if description else f'工作表:{sheet_name}'
+            description = _append_sheet_mapping_description(
+                row.get('备注', ''),
+                sheet_name,
+                config['sheet_mapping'],
+            )
 
             IPAddress.objects.update_or_create(
                 ip_address=ip_str,
@@ -2304,18 +2791,72 @@ def import_excel(request):
 
         detail = (
             f'批量导入 IP 台账：成功/更新 {success_count} 条，跳过 {skipped_count} 条，'
-            f'冲突策略 {conflict_mode}，工作表映射 {sheet_mapping}'
+            f'冲突策略 {config["conflict_mode"]}，工作表映射 {config["sheet_mapping"]}，源编码 {detected_encoding or "unknown"}'
         )
         record_audit(request, 'ip_address', 'import', detail=detail)
         return Response(
             {
                 'status': 'success',
                 'message': f'成功导入 / 更新 {success_count} 条数据，跳过 {skipped_count} 条',
+                'detected_encoding': detected_encoding,
+                'report': {
+                    **preview['summary'],
+                    'imported_rows': success_count,
+                    'skipped_rows': skipped_count,
+                },
+                'warnings': preview['warnings'],
             }
         )
     except Exception as exc:
         logger.exception('Import excel failed.')
         return Response({'status': 'error', 'message': f'导入失败: {exc}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+@authentication_classes([])
+def api_version(request):
+    return Response({'status': 'success', 'backend': get_backend_version_payload()})
+
+
+def _get_data_quality_summary(max_age_seconds=300):
+    now = timezone.now()
+    expires_at = SYSTEM_OVERVIEW_CACHE.get('expires_at')
+    payload = SYSTEM_OVERVIEW_CACHE.get('payload')
+    if payload is not None and expires_at and now < expires_at:
+        return payload
+
+    report = build_encoding_report(limit_per_model=1)
+    payload = report['summary']
+    SYSTEM_OVERVIEW_CACHE['payload'] = payload
+    SYSTEM_OVERVIEW_CACHE['expires_at'] = now + timedelta(seconds=max_age_seconds)
+    return payload
+
+
+@api_view(['GET'])
+@authentication_classes([SessionAuthentication, BasicAuthentication])
+@permission_classes([IsAuthenticated])
+def system_overview(request):
+    backup_files = _collect_backup_files()
+    latest_backup = backup_files[0] if backup_files else None
+    payload = {
+        'status': 'success',
+        'backend': get_backend_version_payload(),
+        'counts': {
+            'datacenters': Datacenter.objects.count(),
+            'racks': Rack.objects.count(),
+            'devices': RackDevice.objects.count(),
+            'ips': IPAddress.objects.count(),
+            'resident_staff': ResidentStaff.objects.count(),
+        },
+        'backup': {
+            'status': 'normal' if backup_files else 'empty',
+            'latest_backup_time': latest_backup['time'] if latest_backup else '',
+            'backup_count': len(backup_files),
+        },
+        'data_quality': _get_data_quality_summary(),
+    }
+    return Response(payload)
 
 
 @api_view(['GET'])

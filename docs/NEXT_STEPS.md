@@ -75,3 +75,39 @@ This file is the default backlog for the local `ipam` Codex skill. When a reques
 - [x] 为批量导入覆盖流程和网段扫描结果补强审计记录。
 - [ ] 在未来引入恢复接口时补充恢复专用审计。
 - Blocked: 当前后端还没有恢复接口，因此暂时无法安全实现恢复专用审计。
+
+## Priority 6 / 发布与运维
+
+- [x] Extend import preview and error reporting from IPAM to DCIM import.
+- [x] Extend import preview and error reporting from IPAM to resident staff import.
+- [x] Surface build/version state on dashboard or settings, not only in the top bar modal.
+- [x] Add an operator-facing deployment checklist view or settings panel.
+- [x] Continue cleaning source-level historical mojibake comments when touching old files.
+
+- [x] 把导入预览和错误报告从 IPAM 扩展到 DCIM 导入流程。
+- [x] 把导入预览和错误报告从 IPAM 扩展到驻场人员导入流程。
+- [x] 除顶栏弹层外，在总览页或设置页继续展示构建版本和部署状态。
+- [x] 为运维人员增加部署检查页或设置面板。
+- [x] 在后续修改旧文件时，继续清理源码里的历史乱码注释。
+
+## Priority 7 / 下一阶段优化
+
+- [x] Surface backend version and commit in the shared shell, not only inside the status modal.
+- [ ] Finish a full frontend copy sweep for remaining business pages and shell edge cases.
+- [ ] Add downloadable failed-row reports for IPAM, DCIM, and resident import previews.
+- [ ] Prepare the first production-safe encoding cleanup batch with a sampling checklist.
+
+- [x] 在共享壳层中继续展示后端版本和提交号，不只放在状态弹层里。
+- [ ] 对剩余业务页面和壳层边角文案做一轮完整收口。
+- [ ] 为 IPAM、DCIM、驻场导入预览补充失败行报告下载。
+- [ ] 为首批生产环境乱码清洗准备抽样核对清单和执行批次。
+
+## Priority 8 / 中期能力扩展
+
+- [ ] Continue moving page-specific orchestration out of `frontend/src/App.jsx`.
+- [ ] Design a global search MVP covering IP, device, rack, resident, and project entities.
+- [ ] Design an alert-center MVP around backup, security, and data-quality signals.
+
+- [ ] 继续把页面专属编排逻辑从 `frontend/src/App.jsx` 中迁出。
+- [ ] 设计覆盖 IP、设备、机柜、驻场和项目实体的全局搜索 MVP。
+- [ ] 围绕备份、安全和数据质量信号设计告警中心 MVP。

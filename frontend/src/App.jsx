@@ -27,6 +27,7 @@ import NetworkManagementModals from './components/NetworkManagementModals';
 import ResidentIntakePage from './components/ResidentIntakePage';
 import ResidentManagementView from './components/ResidentManagementView';
 import SecurityCenterView from './components/SecurityCenterView';
+import SystemStatusModal from './components/SystemStatusModal';
 import UserManagementView from './components/UserManagementView';
 import {
   ConfirmActionModal,
@@ -43,6 +44,7 @@ import { BRAND } from './lib/brand';
 import { useAuthSession } from './hooks/useAuthSession';
 import { useAppDataLoader } from './hooks/useAppDataLoader';
 import { useImportExportHandlers } from './hooks/useImportExportHandlers';
+import { useSystemOverview } from './hooks/useSystemOverview';
 import { useUserManagementHandlers } from './hooks/useUserManagementHandlers';
 
 // ============================================================================
@@ -149,7 +151,9 @@ const extractResponseMessage = async (response, fallback = 'Operation failed') =
   }
 };
 
-// 闂傚倸鍊搁崐鎼佸磹瀹勬噴褰掑炊椤掑鏅悷婊冪Ч濠€渚€姊虹紒妯虹伇婵☆偄瀚板鍛婄瑹閳ь剟寮婚悢鍏尖拻閻庨潧澹婂Σ顕€姊虹粙鑳潶闁告柨閰ｉ獮澶愬箹娴ｅ憡顥濋柣鐘充航閸斿秴鈻撴ィ鍐┾拺闁圭娴风粻鎾淬亜閿旇鐏﹂柣娑卞櫍婵偓闁挎稑瀚鏇㈡⒑閻熼偊鍤熼柛搴㈠姍閹偤宕滆閸嬫牗绻濋棃娑卞剱闁抽攱甯掗湁闁挎繂娲ら崝瀣煕閵堝倸浜鹃梻鍌欑椤撲粙寮堕崹顕呯€烽梻浣烘嚀缁犲秹宕硅ぐ鎺濇晣闁稿繒鍘х欢鐐测攽閻樻彃鈧綊宕曢鍫熲拻濞撴埃鍋撴繛浣冲洦鍋嬮柛鈩冾樅濞差亝鍋愰悹鍥皺閿涙盯姊虹憴鍕妞ゆ泦鍥х闁煎摜鍋ｆ禍婊堟煙閻愵剦娈旈柟鍐插閹便劍绺介崨濠勫幗闁瑰吋鐣崺鍕疮韫囨稒鐓曢柣妯虹－濞插鈧娲樺钘夘嚕娴犲鏁囬柣鎰問濡叉潙鈹戦悩鍨毄濠殿喗娼欑叅闁靛牆顦伴悡渚€鏌涢妷顔煎闁绘挻鐩弻娑㈠Ψ閵忊剝鐝旀繛瀵稿閸曗晙绨婚梺鎸庢椤曆勭閻楀牊鍙忓┑鐘叉噺椤忕娀鏌涢弽銊у⒌鐎殿喗鎸抽幃娆徝圭€ｎ偄鐝舵繝纰夌磿閸嬫垿宕愰幋锕€绀夌€光偓閸曨偆鐤囧┑顔姐仜閸嬫挻顨?./components/ImportWizardModal
+// ============================================================================
+// Main application shell
+// ============================================================================
 
 function MainApp() {
   const {
@@ -161,12 +165,13 @@ function MainApp() {
     completeLogin,
     updateCurrentUserInfo,
   } = useAuthSession();
-  const [activeTab, setActiveTab] = useState('dashboard'); // 濠电姷鏁告慨鐑藉极閸涘﹥鍙忛柣銏犲閺佸﹪鏌″搴″箹缂佹劖顨嗘穱濠囧Χ閸涱厽娈查梺鍝勬缁秵绌辨繝鍥ч柛娑卞幗濞堝爼姊哄ú璇插箺闁荤啿鏅犲濠氭偄閸忕厧鈧粯淇婇鐐存珳缂侇喖鐖煎娲焻閻愯尪瀚板褍澧界槐鎺楁偐閾忣偄纰嶉梺浼欑秮閺€杈╃紦閻ｅ瞼鐭欓悹鍥﹀嫎閸斿秹濡甸崟顖氱睄闁搞儺鐏濋幘瀵哥闁告侗鍘捐倴缂備浇椴搁幑鍥х暦閹烘埈娼╂い鎴ｆ娴滈箖鏌ｉ幋锝呅撻柛濠傛健閺屻劑寮村鍗炲闂佺懓鍟块懟顖炲煘閹达附鍊烽柤纰卞墯閹插ジ姊洪幖鐐测偓鏇㈡煀閿濆懐鏆﹂柟鐗堟緲閸愨偓濡炪倖鍔х徊鑺ユ償婵犲倵鏀介柣鎰綑閻忕喖鏌涢妸銉﹁础缂侇喖顭烽弫鎰緞鐎ｎ剙骞楅梻濠庡亜濞诧箑顫忚ぐ鎺懳﹂柣鏃囶問閻熼偊鐓ラ柛鏇ㄥ幘閻撳顪冮妶鍐ㄧ仾鐎光偓閹间礁鏋侀柟閭﹀幖缁剁偛鈹戦悩鎻掝伌闁哥偞鎸冲缁樻媴缁嬫寧鍊繛瀛樼矆缁瑥鐣烽弴銏犵闁芥ê顦崑宥夋⒒娓氬洤澧紒澶屾暬钘熷┑鐘插暔娴滄粓鏌熼幍铏珔闁诲浚浜弻鐔煎礂閻撳骸顫嶉梺闈涙搐鐎氫即鐛€ｎ亖鏀介柛銉戝嫷浠繝鐢靛剳缁茶棄煤閵堝鏅濇い蹇撶墕缁犵娀鏌ｉ幇顒佹儓閸烆垶鎮峰鍐妞ゃ垺鐟╁鎾閳锯偓閹锋椽姊洪崨濠勨槈闁挎洩绲垮▎銏ゆ焼瀹ュ棛鍘遍梺缁樏崯鍧楀传閻戞﹩娈介柣鎰嚋闊剛鈧娲橀敃銏ゅ春閻愭潙绶為柛婵勫劤濞夊灝鈹戦敍鍕杭闁稿﹥鐗犲畷婵婎槾缂佽京鍋ゅ畷鍗烆渻缂佹浜栨繝鐢靛Т閿曘倝骞婃径鎰；闁规崘鍩栭崰鍡涙煕閺囥劌澧版い锔哄姂閺岋綁濮€閳轰胶浠柣銏╁灲缁绘繂鐣峰ú顏呭€烽柛婵嗗椤撴椽姊洪幐搴㈢５闁稿鎸剧槐鎺楁偐瀹曞洠濮囬梺闈涙搐鐎氫即鐛Ο鍏煎磯闁烩晜甯囬崕闈浳?
+  const [activeTab, setActiveTab] = useState('dashboard');
   const [ipViewMode, setIpViewMode] = useState('list');
   const [dcimViewMode, setDcimViewMode] = useState('list');
   const [elevationLayout, setElevationLayout] = useState('horizontal');
   const [debugLogs, setDebugLogs] = useState([]);
   const [isDebugOpen, setIsDebugOpen] = useState(false);
+  const [isSystemStatusOpen, setIsSystemStatusOpen] = useState(false);
   const [tagFilter, setTagFilter] = useState('');
   const currentRole = currentUserInfo?.role || (currentUser === 'admin' ? 'admin' : 'guest');
   const currentPermissions = ROLE_DEFINITIONS[currentRole]?.permissions || [];
@@ -384,6 +389,14 @@ function MainApp() {
     safeInt,
   });
 
+  const {
+    overview: systemOverview,
+    version: backendVersion,
+    isLoading: isSystemOverviewLoading,
+    lastRefreshedAt: systemOverviewRefreshedAt,
+    refreshOverview,
+  } = useSystemOverview(isLoggedIn);
+
   const currentRacks = useMemo(() => racks.filter(r => String(r.datacenter) === String(activeLocation)), [racks, activeLocation]);
   const currentSubnet = useMemo(() => subnets.find(s => String(s.id) === String(selectedSubnetId)) || {}, [subnets, selectedSubnetId]);
   
@@ -457,6 +470,7 @@ function MainApp() {
     isImporting,
     importWizardOpen,
     pendingFile,
+    importContext,
     handleExport,
     handleFileChange,
     handleConfirmImport,
@@ -904,6 +918,7 @@ function MainApp() {
           currentUser={currentUserDisplay}
           currentRoleLabel={ROLE_DEFINITIONS[currentRole]?.label}
           onLogout={handleLogout}
+          overview={systemOverview}
         />
 
         <main className="flex-1 flex flex-col min-w-0 bg-transparent">
@@ -913,6 +928,8 @@ function MainApp() {
             currentRoleLabel={ROLE_DEFINITIONS[currentRole]?.label}
             onOpenDebug={() => setIsDebugOpen(true)}
             onOpenPasswordChange={() => setIsPasswordChangeModalOpen(true)}
+            onOpenSystemStatus={() => setIsSystemStatusOpen(true)}
+            overview={systemOverview}
           />
 
         <div className="flex-1 overflow-hidden relative">
@@ -925,6 +942,8 @@ function MainApp() {
                 ips={ips} 
                 logs={loginLogs} 
                 residentStaff={residentStaff}
+                overview={systemOverview}
+                lastRefreshedAt={systemOverviewRefreshedAt}
                 onJumpToDc={handleJumpToDc}
              />
           )}
@@ -1051,7 +1070,7 @@ function MainApp() {
         </div>
       </main>
 
-      {/* --- 闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌ｉ幋锝呅撻柛銈呭閺屾盯顢曢敐鍡欙紩闂侀€炲苯澧剧紒鐘虫尭閻ｉ攱绺界粙娆炬綂闂佺偨鍎遍崯璺ㄨ姳閵夆晜鈷掑ù锝囶焾椤ュ繘鏌涚€ｂ晝绐旂€规洘娲樺蹇涘煛閸愵亞鍔跺┑鐘灱濞夋稒寰勯崶顒€纾婚柟鎹愵嚙缁€鍌氼熆鐠虹尨姊楀瑙勬礋濮婄粯鎷呴崨濠傛殘濠电偠顕滅粻鎾崇暦濠婂啠鏋庨柟鎯х－椤︻參姊洪崨濠傚婵☆垰锕ら妴鎺撶節濮橆厾鍘梺鍓插亝缁诲啴藟濠婂牊鐓曠憸宥夋晝椤忓牆钃熸繛鎴炲焹閸嬫捇鏁愭惔鈥茬凹閻庤娲栭惌鍌炲蓟閻斿吋瀵犲璺鸿嫰閻撶喖姊烘潪鎵妽闁告梹鐗曢銉╁礋椤撴稑浜鹃柨婵嗛婢ь噣鎮介娑辨疁婵﹦绮幏鍛村传閵夛妇鈧喖鈹戦埄鍐︿粻闁告柨娴烽崚鎺楀醇閻旇櫣鎳濋梺閫炲苯澧い鏇秮閹煎綊顢曢妶鍥╂闂備焦鎮堕崕顖炲礉鎼淬劌鍌ㄩ梺顒€绉甸悡鐔煎箹閹碱厼鐏ｇ紒澶屾暬閺屾稓鈧綆浜濋崳钘壝瑰鍐╁暈閻庝絻鍋愰埀顒佺⊕椤洭宕㈤悽鍛婂€甸柣鐔告緲椤忣偄顭胯椤ㄥ﹤鐣烽搹顐ゎ浄閻庯綆鍋嗛崢鍨繆閻愬樊鍎忓Δ鐘虫倐閸┿垽宕奸妷锔惧幈闂佸疇妗ㄧ粈渚€顢旈鐘亾鐟欏嫭绀冮柨鏇樺灲瀹曟椽鏁撻悩鑼紲濠电偞鍨靛畷顒勫疾閻樼粯鈷掗柛灞捐壘閳ь剚鎮傚畷鎰暋閹冲﹤缍婂畷鍫曨敆婢跺娅旈柣鐔哥矊缁夊綊鏁愰悙娴嬫斀閻庯綆鍋呭▍鍥⒑缁嬭法鐒垮┑鈥虫川缁瑨绠涢弮鍌滅槇闂侀潧楠忕徊浠嬫偂閹扮増鐓曢柡鍐ｅ亾闁绘濮撮悾鐑藉即閻愬秵姊归幏鍛村礂閸濄儳娉块梻鍌欑閹碱偊宕愰幖浣瑰€舵繝闈涱儏閻撴洟鏌￠崒姘辨皑婵?(Modals) --- */}
+      {/* Shared management modals */}
       {managingOptionKey && <OptionManagerModal title={managingOptionKey} options={optionLists[managingOptionKey]} onClose={()=>setManagingOptionKey(null)} onSave={(l)=>setOptionLists({...optionLists, [managingOptionKey]: l})} />}
       <NetworkManagementModals
         isSectionModalOpen={isSectionModalOpen}
@@ -1074,10 +1093,11 @@ function MainApp() {
         handleSaveIP={handleSaveIP}
       />
 
-      {/* 闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾剧懓顪冪€ｎ亝鎹ｉ柣顓炴閵嗘帒顫濋敐鍛婵°倗濮烽崑鐐烘偋閻樻眹鈧線寮撮姀鈩冩珖闂侀€炲苯澧板瑙勬礉閵囨劙骞掗幘璺哄箺闂備胶绮濠氬储瑜庣粋宥嗗鐎涙鍘介梺鍝勫€圭€笛囁夐悙鐑樼厵濞撴艾鐏濇俊鍏笺亜椤忓嫬鏆熼柟椋庡█閻擃偊顢橀悜鍡橆棥闂傚倷娴囧畷鍨叏瀹曞洦濯伴柨鏇炲€搁崹鍌炴煕椤愶絾绀€闁藉啰鍠愮换娑㈠箣濞嗗繒浠肩紓浣哄У閻╊垰顫忔繝姘唶闁绘棁銆€婵洭姊虹拠鑼缂佸鎳撻～蹇撁洪鍕炊闂佸憡娲﹂崜娆擃敁濞戙垺鈷戦柛娑橈攻鐏忔壆鈧厜鍋撻柟闂磋兌瀹撲線鏌涢鐘插姎閹喖姊洪棃娑辨▓闁哥姵顨呴娆徝洪鍛嫼缂備緡鍨卞ú鏍ㄦ櫠閸欏浜滈柕濞垮劜閸ゅ洭鏌涢埡鍌滄创妤犵偞甯掕灃濞达絽寮剁€氬ジ姊绘担渚敯闁稿鍔欏畷鎴濃槈閵忕姷鍔﹀銈嗗笂缁€渚€鎮樼€电硶鍋撶憴鍕闁告梹娲熼崺鐐哄箣閻橆偄浜鹃柨婵嗙凹濞寸兘鏌熼懞銉︾闁宠鍨块幃娆撳级閹寸姳妗撶紓鍌欑贰閸犳牠鏌婇敐澶婄畺闁秆勵殔閻掑灚銇勯幒鎴濐仾闁绘挾鍠栭獮鏍箹椤撶偟浠紓浣割樀濞佳囨箒濠电姴锕ょ€氼噣鎯岀€ｎ喗鐓欏〒姘仢婵′粙鏌熼娑欘棃濠碘剝鎮傞弫鍌滄喆閸曨偒浼栭梻鍌欐祰瀹曞灚鎱ㄩ弶鎳ㄦ椽鎮╃拠鑼姦濡炪倖甯掗崯顖炴偟椤忓牊鐓熼煫鍥ㄦ尵鑲栫紓浣介哺閹歌崵绮悢鐓庣倞鐟滃酣鎮橀崼銉︹拻濞达絿顭堢花鑽ょ磽瀹ュ嫮顦﹂柣锝呭槻鐓ゆい蹇撳閸?Modal */}
+      {/* Import preview modal */}
       {importWizardOpen && pendingFile && (
         <ImportWizardModal 
           file={pendingFile} 
+          context={importContext}
           onClose={closeImportWizard}
           onConfirm={handleConfirmImport}
         />
@@ -1137,7 +1157,16 @@ function MainApp() {
         setBlockFormData={setBlockFormData}
         handleBlockIP={handleBlockIP}
       />
-      {/* 闂傚倸鍊搁崐鎼佸磹閹间礁纾圭€瑰嫭鍣磋ぐ鎺戠倞鐟滃繘寮抽敃鍌涚厱妞ゎ厽鍨垫禍婵嬫煕濞嗗繒绠婚柡宀€鍠撶槐鎺楀閻樺磭褰梻浣芥〃缁€浣衡偓姘嵆瀵鈽夊Ο閿嬵潔濠电偛妫欓崝妤冪矙閸ヮ剚鈷戞慨鐟版搐閳ь兙鍊濆畷鎶芥晲婢跺﹨鎽曢梺缁樻⒒閸樠呯不濮樿埖鐓涘璺猴攻濞呭洭鏌熼崜褏甯涢柣鎾存礋楠炴牜鍒掔憴鍕垫綈闂佽　鍋撳┑鐘崇閻撳繘鏌涢妷鎴濆枤娴煎啴鎮楀▓鍨灆缂侇喗鐟╅妴渚€寮撮～顔剧◤濡炪倖鎸炬慨闈涚暦閻旇櫣纾介柛灞捐壘閳ь剟顥撳▎銏ゆ晸閻樿尙锛涢梺鍛婃处閸橀箖鎯岄幘鑸靛枑闁绘鐗嗙粭鎺楁煢閸愵亜鏋涢柡宀嬬節瀹曞爼鍩℃担鍦偓鑽ょ磽娴ｇ顣抽柛瀣ㄥ€濆璇测槈閵忊晜鏅濋梺鎸庣箓濞层劑鎮鹃崹顐ょ瘈婵炲牆鐏濋弸鏃堟煕閵娿劌鍚规俊鍙夊姍楠炴鈧稒锚椤庢捇姊洪崨濠勭畵閻庢艾鎳樻慨鈧柣娆屽亾闁绘柨妫涢幉绋款吋婢跺鍘愰梺鎸庣箓椤︻垶寮伴妷鈺傜厓鐟滄粓宕滃璺何﹂柛鏇ㄥ灠缁犲磭鈧箍鍎卞ú鈺冪玻濡ゅ懏鈷戦柛婵勫劚閺嬪海绱掔紒姗堣€跨€殿喛顕ч埥澶愬閳ュ厖姹楅柣搴ゎ潐濞叉牕煤閵堝鐒荤憸鐗堝笚閳锋垿鏌熺粙鍨劉缁剧偓鎮傞弻娑㈠Ω閵堝洨鐓撻悗娈垮枛椤嘲鐣烽崡鐐嶆梹绻濋崒娑樷偓顖炴⒒娴ｈ櫣銆婇柛鎾寸箞婵＄敻鎮欓棃娑樼亰?*/}
+      <SystemStatusModal
+        isOpen={isSystemStatusOpen}
+        onClose={() => setIsSystemStatusOpen(false)}
+        overview={systemOverview}
+        backendVersion={backendVersion}
+        isLoading={isSystemOverviewLoading}
+        onRefresh={refreshOverview}
+        lastRefreshedAt={systemOverviewRefreshedAt}
+      />
+      {/* Global utility overlays */}
       <NotificationCenter items={notifications} onDismiss={dismissNotification} />
       <ConfirmActionModal isOpen={confirmState.isOpen} title={confirmState.title} message={confirmState.message} confirmLabel={confirmState.confirmLabel} tone={confirmState.tone} onCancel={() => closeConfirm(false)} onConfirm={() => closeConfirm(true)} />
       <DebugModal isOpen={isDebugOpen} onClose={() => setIsDebugOpen(false)} logs={debugLogs} onClear={() => setDebugLogs([])} />

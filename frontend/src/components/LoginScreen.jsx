@@ -120,7 +120,7 @@ export default function LoginScreen({ onLogin }) {
                 disabled={loading}
                 className="login-button flex w-full items-center justify-center py-3.5 text-sm font-bold text-white transition-all"
               >
-                {loading ? '登录中...' : '进入 AtlasOps'}
+                {loading ? '登录中...' : '进入系统'}
               </button>
             </form>
 
@@ -144,7 +144,7 @@ export default function LoginScreen({ onLogin }) {
         当前版本优先保留现有账号与业务数据，同时逐步补齐更适合生产环境的认证、角色、审计和恢复能力。
       </div>
       <div className="mx-auto mt-3 flex max-w-6xl items-center gap-2 px-1 text-[11px] uppercase tracking-[0.22em] text-slate-400">
-        <span>AtlasOps</span>
+        <span>{BRAND.shortName}</span>
         <span className="text-slate-300">/</span>
         <span>基础设施运营</span>
         <span className="text-slate-300">/</span>

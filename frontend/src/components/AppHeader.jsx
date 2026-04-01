@@ -3,6 +3,7 @@ import { Activity, KeyRound, ShieldCheck, Sparkles, Terminal } from 'lucide-reac
 
 import BrandLockup from './BrandLockup';
 import { BRAND } from '../lib/brand';
+import { BUILD_INFO, shortCommitLabel } from '../lib/buildInfo';
 
 export default function AppHeader({
   activeLabel,
@@ -10,7 +11,12 @@ export default function AppHeader({
   currentRoleLabel,
   onOpenDebug,
   onOpenPasswordChange,
+  onOpenSystemStatus,
+  overview,
 }) {
+  const backupCount = overview?.backup?.backup_count ?? 0;
+  const qualityCount = overview?.data_quality?.suspected_records ?? 0;
+
   return (
     <header className="app-topbar z-10 flex min-h-24 items-center justify-between px-5 py-4 md:px-8">
       <div className="min-w-0">
@@ -23,19 +29,29 @@ export default function AppHeader({
         </div>
         <div className="mt-1 text-2xl font-black tracking-tight text-slate-950">{activeLabel}</div>
         <div className="mt-1 text-sm text-slate-500">
-          {BRAND.englishName} · {BRAND.consoleLabel}
+          {BRAND.name} · {BRAND.consoleLabel}
         </div>
       </div>
 
       <div className="flex items-center gap-2 md:gap-3">
-        <div className="topbar-chip hidden items-center gap-2 rounded-2xl px-3 py-2 text-xs md:flex">
+        <button
+          onClick={onOpenSystemStatus}
+          type="button"
+          className="topbar-chip hidden items-center gap-2 rounded-2xl px-3 py-2 text-xs md:flex"
+          title="查看当前部署版本与运行状态"
+        >
           <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
-          审计在线
-        </div>
-        <div className="topbar-chip hidden items-center gap-2 rounded-2xl px-3 py-2 text-xs lg:flex">
+          版本 {shortCommitLabel(overview?.backend?.commit || BUILD_INFO.commit)}
+        </button>
+        <button
+          onClick={onOpenSystemStatus}
+          type="button"
+          className="topbar-chip hidden items-center gap-2 rounded-2xl px-3 py-2 text-xs lg:flex"
+          title="查看部署检查清单"
+        >
           <Activity className="h-3.5 w-3.5 text-cyan-600" />
-          运营控制面
-        </div>
+          备份 {backupCount} · 乱码 {qualityCount}
+        </button>
         <div className="hidden min-w-[8.5rem] rounded-[22px] border border-slate-200/80 bg-white/80 px-3 py-2 shadow-sm md:block">
           <div className="truncate text-xs font-bold text-slate-800">{currentUser}</div>
           <div className="truncate text-[11px] text-slate-500">{currentRoleLabel || '未分配角色'}</div>

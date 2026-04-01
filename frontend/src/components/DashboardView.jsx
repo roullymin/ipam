@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 
 import { BRAND } from '../lib/brand';
+import { BUILD_INFO, shortCommitLabel } from '../lib/buildInfo';
 
 
 const safeInt = (value, fallback = 0) => {
@@ -69,6 +70,8 @@ export default function DashboardView({
   logs,
   residentStaff = [],
   onJumpToDc,
+  overview = null,
+  lastRefreshedAt = '',
 }) {
   const dashboard = useMemo(() => {
     const totalAssets = rackDevices.length;
@@ -425,6 +428,79 @@ export default function DashboardView({
             </div>
           </PanelCard>
         </section>
+
+        <section className="grid gap-6 xl:grid-cols-[1.02fr_0.98fr]">
+          <PanelCard
+            title="版本与部署状态"
+            subtitle="把当前前后端版本、备份健康度和数据质量告警放到总览页，避免每次都进弹层或 SSH 排查。"
+            icon={CheckCircle2}
+          >
+            <div className="grid gap-4 md:grid-cols-2">
+              <StatusLine
+                label="前端版本"
+                value={`${BUILD_INFO.version} · ${shortCommitLabel(BUILD_INFO.commit)}`}
+                helper={`构建时间：${formatDateTime(BUILD_INFO.builtAt)}`}
+              />
+              <StatusLine
+                label="后端版本"
+                value={`${overview?.backend?.version || '未获取'} · ${shortCommitLabel(overview?.backend?.commit)}`}
+                helper={`最后提交：${formatDateTime(overview?.backend?.committed_at)}`}
+              />
+              <StatusLine
+                label="备份状态"
+                value={
+                  overview?.backup?.latest_filename
+                    ? `${overview.backup.file_count || 0} 份备份`
+                    : '暂无备份摘要'
+                }
+                helper={overview?.backup?.latest_filename || '建议先确认自动备份与下载链路正常'}
+              />
+              <StatusLine
+                label="数据质量"
+                value={`${overview?.data_quality?.suspected_records || 0} 条疑似乱码`}
+                helper="可进入编码修复流程先扫描、再快照、再应用"
+              />
+            </div>
+
+            <div className="mt-5 rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
+              <div className="font-semibold text-slate-800">最近状态刷新</div>
+              <div className="mt-2 flex flex-wrap gap-3">
+                <span>页面刷新：{formatDateTime(lastRefreshedAt)}</span>
+                <span>前端分支：{BUILD_INFO.branch || '未知'}</span>
+                <span>后端分支：{overview?.backend?.branch || '未知'}</span>
+              </div>
+            </div>
+          </PanelCard>
+
+          <PanelCard
+            title="运维发布检查"
+            subtitle="按固定顺序检查版本、构建、备份和数据质量，减少“已经更新但页面没变”的发布误判。"
+            icon={ClipboardCheck}
+          >
+            <div className="space-y-3">
+              <ChecklistItem
+                title="核对当前提交"
+                body="先看前后端 commit 与构建时间，确认页面加载的不是旧包。"
+              />
+              <ChecklistItem
+                title="确认前端构建产物"
+                body="更新 frontend 源码后一定重新 build，再确认 index.html 引用的是最新 hash。"
+              />
+              <ChecklistItem
+                title="确认后端健康"
+                body="查看版本接口、备份摘要和关键 API，避免只更新了代码没重启服务。"
+              />
+              <ChecklistItem
+                title="导入前先做预览"
+                body="IP、DCIM、驻场导入都先看预览，再决定是否真正入库。"
+              />
+              <ChecklistItem
+                title="修乱码先做快照"
+                body="先扫描疑似乱码，再生成快照，确认后再应用修复；不满意可按快照回滚。"
+              />
+            </div>
+          </PanelCard>
+        </section>
       </div>
     </div>
   );
@@ -613,6 +689,25 @@ function RecommendationItem({ title, body, tone }) {
     <div className={`rounded-[24px] border p-4 ${tone}`}>
       <div className="text-sm font-bold">{title}</div>
       <div className="mt-2 text-sm leading-6 opacity-90">{body}</div>
+    </div>
+  );
+}
+
+function StatusLine({ label, value, helper }) {
+  return (
+    <div className="rounded-[24px] border border-slate-200 bg-white px-4 py-4">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{label}</div>
+      <div className="mt-2 text-lg font-black tracking-tight text-slate-900">{value}</div>
+      <div className="mt-2 text-sm leading-6 text-slate-500">{helper}</div>
+    </div>
+  );
+}
+
+function ChecklistItem({ title, body }) {
+  return (
+    <div className="rounded-[24px] border border-slate-200 bg-slate-50/70 px-4 py-4">
+      <div className="text-sm font-bold text-slate-900">{title}</div>
+      <div className="mt-2 text-sm leading-6 text-slate-600">{body}</div>
     </div>
   );
 }

@@ -56,3 +56,26 @@ export const changePasswordRequest = async ({ current_password, new_password }) 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ current_password, new_password }),
   });
+
+export const fetchBackendVersion = async () => safeFetch('/api/version/');
+
+export const fetchSystemOverview = async () => safeFetch('/api/system/overview/');
+
+export const previewIpImport = async ({ file, config }) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('config', JSON.stringify(config || {}));
+  return safeFetch('/api/import-excel/preview/', { method: 'POST', body: formData });
+};
+
+export const previewDcimImport = async ({ file }) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return safeFetch('/api/dcim/import-excel/preview/', { method: 'POST', body: formData });
+};
+
+export const previewResidentImport = async ({ file }) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return safeFetch('/api/resident-staff/preview_import_excel/', { method: 'POST', body: formData });
+};

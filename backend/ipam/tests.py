@@ -3,10 +3,12 @@ import os
 import shutil
 import tempfile
 from io import StringIO
+from io import BytesIO
 from pathlib import Path
 from subprocess import CompletedProcess
 from unittest.mock import patch
 
+import pandas as pd
 from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -21,6 +23,19 @@ def make_csv_upload(name, content):
 
 def make_csv_upload_bytes(name, content_bytes):
     return SimpleUploadedFile(name, content_bytes, content_type='text/csv')
+
+
+def make_excel_upload(name, sheets):
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        for sheet_name, rows in sheets.items():
+            pd.DataFrame(rows).to_excel(writer, sheet_name=sheet_name, index=False)
+    buffer.seek(0)
+    return SimpleUploadedFile(
+        name,
+        buffer.getvalue(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
 
 
 class BaseApiTestCase(APITestCase):
@@ -45,6 +60,13 @@ class BaseApiTestCase(APITestCase):
 
 
 class AuthAndCrudSmokeTests(BaseApiTestCase):
+    def test_version_endpoint_returns_backend_metadata(self):
+        response = self.client.get('/api/version/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'success')
+        self.assertEqual(response.data['backend']['service'], 'backend')
+
     def test_login_smoke_returns_user_payload_and_session(self):
         response = self.client.post(
             '/api/login/',
@@ -217,6 +239,24 @@ class ImportExcelTests(BaseApiTestCase):
         self.assertEqual(response.data['status'], 'error')
         self.assertIn('缺少必要列', response.data['message'])
 
+    def test_import_excel_preview_returns_summary(self):
+        upload = make_csv_upload(
+            'preview.csv',
+            'IP地址,设备名称,状态,设备类型,负责人,备注\n'
+            '10.20.30.15,preview-sw,online,switch,ops,预览测试\n',
+        )
+
+        response = self.client.post(
+            '/api/import-excel/preview/',
+            {'file': upload, 'config': json.dumps({'skipRows': 1, 'conflictMode': 'overwrite'})},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'success')
+        self.assertTrue(response.data['preview']['can_import'])
+        self.assertEqual(response.data['preview']['summary']['create_rows'], 1)
+        self.assertEqual(response.data['preview']['rows'][0]['action'], 'create')
+
     def test_import_excel_accepts_gb18030_csv_and_repairs_mojibake(self):
         source_name = '核心交换机'
         upload = make_csv_upload_bytes(
@@ -319,6 +359,70 @@ class AccessControlAndPaginationTests(BaseApiTestCase):
         profile = UserProfile.objects.get(user=self.guest)
         self.assertTrue(profile.must_change_password)
 
+    def test_authenticated_user_can_fetch_system_overview(self):
+        client = self.make_authenticated_client(self.ip_manager)
+
+        response = client.get('/api/system/overview/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'success')
+        self.assertIn('backend', response.data)
+        self.assertIn('counts', response.data)
+        self.assertIn('data_quality', response.data)
+
+    def test_dc_operator_can_preview_dcim_import(self):
+        client = self.make_authenticated_client(self.dc_operator)
+        upload = make_excel_upload(
+            'dcim_preview.xlsx',
+            {
+                '机柜资产': [
+                    {
+                        '机房名称': '7F 核心机房',
+                        '机房位置': '708',
+                        '机柜编号': 'RK-01',
+                        '机柜名称': '核心交换机柜',
+                        '高度(U)': 42,
+                        '额定功率(W)': 8000,
+                        'PDU数量': 2,
+                        'PDU实测功率(W)': 1200,
+                        '备注': '预览机柜',
+                    }
+                ],
+                '设备资产': [
+                    {
+                        '机房名称': '7F 核心机房',
+                        '机柜编号': 'RK-01',
+                        '机柜名称': '核心交换机柜',
+                        '设备名称': '核心交换机 A',
+                        '起始U位': 40,
+                        '占用高度(U)': 2,
+                        '设备类型': 'switch',
+                        '品牌': 'Huawei',
+                        '管理IP': '172.25.1.10',
+                        '项目名称': '骨干网络',
+                        '负责人': '张三',
+                        '额定功率(W)': 350,
+                        '配置信息': '24口万兆交换机',
+                        '序列号(SN)': 'SN-0001',
+                        '固定资产编号': 'ASSET-0001',
+                        '设备状态': 'active',
+                        '采购日期': '2025-01-01',
+                        '维保到期': '2028-01-01',
+                        '供应商': '华为',
+                        'OS/固件': 'V1.0.0',
+                    }
+                ],
+            },
+        )
+
+        response = client.post('/api/dcim/import-excel/preview/', {'file': upload})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'success')
+        self.assertTrue(response.data['preview']['can_import'])
+        self.assertEqual(response.data['preview']['summary']['rack_create_rows'], 1)
+        self.assertEqual(response.data['preview']['summary']['device_create_rows'], 1)
+
     def test_admin_can_fetch_encoding_report(self):
         client = self.make_authenticated_client(self.admin)
         garbled_name = '核心交换机'.encode('utf-8').decode('latin1')
@@ -336,6 +440,22 @@ class AccessControlAndPaginationTests(BaseApiTestCase):
 class ResidentImportTests(BaseApiTestCase):
     def setUp(self):
         self.client = self.make_authenticated_client(self.dc_operator)
+
+    def test_resident_import_preview_returns_summary(self):
+        upload = make_csv_upload(
+            'resident_preview.csv',
+            '登记编号,公司,姓名,联系方式,所属项目,归属部门,设备名称,品牌,型号\n'
+            'RC202604010101,示例科技,李四,13800002222,一体化项目,运维中心,办公终端,Lenovo,ThinkPad\n',
+        )
+
+        response = self.client.post('/api/resident-staff/preview_import_excel/', {'file': upload})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['preview']['can_import'])
+        self.assertEqual(response.data['preview']['summary']['resident_rows'], 1)
+        self.assertEqual(response.data['preview']['summary']['device_rows'], 1)
+        self.assertEqual(response.data['preview']['summary']['create_rows'], 1)
+        self.assertEqual(response.data['preview']['rows'][0]['action'], 'create')
 
     def test_resident_import_updates_existing_record_by_registration_code(self):
         response = self.client.post(

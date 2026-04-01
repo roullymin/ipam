@@ -28,29 +28,6 @@ export function useImportExportHandlers({
     const file = event.target.files[0];
     if (!file) return;
 
-    if (importContext === 'dcim') {
-      setIsImporting(true);
-      const formData = new FormData();
-      formData.append('file', file);
-
-      try {
-        const response = await safeFetch('/api/dcim/import-excel/', { method: 'POST', body: formData });
-        if (!response.ok) {
-          throw new Error(await extractResponseMessage(response, '机房设备导入失败'));
-        }
-
-        const data = await response.json();
-        alert(data.message || '机房设备导入完成。');
-        refreshData('dcim');
-      } catch (error) {
-        alert(`机房设备导入失败：${error.message}`);
-      } finally {
-        setIsImporting(false);
-        event.target.value = null;
-      }
-      return;
-    }
-
     setPendingFile(file);
     setImportWizardOpen(true);
     event.target.value = null;
@@ -67,16 +44,29 @@ export function useImportExportHandlers({
     formData.append('config', JSON.stringify(config || {}));
 
     try {
-      const response = await safeFetch('/api/import-excel/', { method: 'POST', body: formData });
+      const endpoint = importContext === 'dcim' ? '/api/dcim/import-excel/' : '/api/import-excel/';
+      const response = await safeFetch(endpoint, { method: 'POST', body: formData });
       if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, '导入失败'));
+        throw new Error(await extractResponseMessage(response, importContext === 'dcim' ? '机房设备导入失败' : '导入失败'));
       }
 
       const data = await response.json();
-      alert(data.message || '导入完成。');
-      refreshData('list');
+      if (importContext === 'dcim') {
+        alert(data.message || '机房设备导入完成。');
+        refreshData('dcim');
+      } else {
+        const report = data.report;
+        const warningText = Array.isArray(data.warnings) && data.warnings.length
+          ? `\n预警：${data.warnings.slice(0, 3).join('；')}`
+          : '';
+        const summaryText = report
+          ? `\n新增 ${report.create_rows}，覆盖 ${report.update_rows}，跳过 ${report.skipped_rows}，异常 ${report.invalid_rows}`
+          : '';
+        alert(`${data.message || '导入完成。'}${summaryText}${warningText}`);
+        refreshData('list');
+      }
     } catch (error) {
-      alert(`导入失败：${error.message}`);
+      alert(`${importContext === 'dcim' ? '机房设备导入失败' : '导入失败'}：${error.message}`);
     } finally {
       setPendingFile(null);
       setIsImporting(false);
@@ -132,6 +122,7 @@ export function useImportExportHandlers({
     isImporting,
     importWizardOpen,
     pendingFile,
+    importContext,
     handleExport,
     handleFileChange,
     handleConfirmImport,

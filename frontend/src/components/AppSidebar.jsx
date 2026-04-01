@@ -3,6 +3,7 @@ import { ChevronRight, LogOut, Radar, QrCode } from 'lucide-react';
 
 import BrandLockup from './BrandLockup';
 import { BRAND } from '../lib/brand';
+import { BUILD_INFO, shortCommitLabel } from '../lib/buildInfo';
 
 export default function AppSidebar({
   activeTab,
@@ -12,8 +13,11 @@ export default function AppSidebar({
   currentUser,
   currentRoleLabel,
   onLogout,
+  overview,
 }) {
   const initials = (currentUser || 'U').slice(0, 2).toUpperCase();
+  const backendVersion = overview?.backend?.version || '未获取';
+  const backendCommit = shortCommitLabel(overview?.backend?.commit);
 
   return (
     <aside className="app-sidebar z-20 flex w-80 flex-shrink-0 flex-col">
@@ -91,6 +95,13 @@ export default function AppSidebar({
             <LogOut className="mr-2 h-4 w-4" />
             退出系统
           </button>
+
+          <div className="mt-4 border-t border-white/8 pt-3 text-[11px] leading-5 text-slate-400/80">
+            <div>前端版本 {BUILD_INFO.version}</div>
+            <div>构建提交 {shortCommitLabel(BUILD_INFO.commit)}</div>
+            <div>后端版本 {backendVersion}</div>
+            <div>后端提交 {backendCommit}</div>
+          </div>
         </div>
       </div>
     </aside>

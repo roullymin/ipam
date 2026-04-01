@@ -24,6 +24,8 @@ urlpatterns = [
     path('api/', include(router.urls)),
 
     path('api/csrf/', views.api_csrf),
+    path('api/version/', views.api_version),
+    path('api/system/overview/', views.system_overview),
     path('api/me/', views.api_me),
     path('api/login/', views.api_login),
     path('api/logout/', views.api_logout),
@@ -35,6 +37,7 @@ urlpatterns = [
     path('api/init-dc/', views.init_datacenters),
     path('api/dcim/download-template/', views.download_dcim_template),
     path('api/dcim/export-excel/', views.export_dcim_excel),
+    path('api/dcim/import-excel/preview/', views.preview_dcim_import_excel),
     path('api/dcim/import-excel/', views.import_dcim_excel),
     path('api/trigger-backup/', views.trigger_backup),
     path('api/list-backups/', views.list_backups),
@@ -44,6 +47,7 @@ urlpatterns = [
     path('api/scan/', views.scan_subnet),
     path('api/subnets/<int:pk>/usage/', views.subnet_usage_matrix),
     path('api/export-excel/', views.export_excel),
+    path('api/import-excel/preview/', views.preview_import_excel),
     path('api/import-excel/', views.import_excel),
     path('api/download-template/', views.download_template),
 ]
