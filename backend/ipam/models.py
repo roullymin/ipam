@@ -1,4 +1,5 @@
 import secrets
+from datetime import timedelta
 
 from django.contrib.auth.models import User
 from django.db import models
@@ -327,6 +328,181 @@ class ResidentDevice(models.Model):
         verbose_name = '驻场设备备案'
         verbose_name_plural = '驻场设备备案'
         db_table = 'ops_resident_device'
+        ordering = ['id']
+
+
+CHANGE_REQUEST_TYPE_CHOICES = [
+    ('rack_in', '设备上架'),
+    ('rack_out', '设备下架'),
+    ('move_in', '设备搬入'),
+    ('move_out', '设备搬出'),
+    ('relocate', '位置迁移'),
+    ('decommission', '设备退役'),
+    ('power_change', '电力变更'),
+]
+
+
+CHANGE_REQUEST_STATUS_CHOICES = [
+    ('draft', '草稿'),
+    ('submitted', '待审批'),
+    ('approved', '已批准'),
+    ('rejected', '已驳回'),
+    ('scheduled', '待执行'),
+    ('completed', '已完成'),
+    ('cancelled', '已取消'),
+]
+
+
+NETWORK_ROLE_CHOICES = [
+    ('management', '管理网络'),
+    ('service', '业务网络'),
+    ('dual', '双网'),
+    ('none', '无需网络'),
+]
+
+
+IP_ACTION_CHOICES = [
+    ('allocate', '新分配'),
+    ('keep', '保留原 IP'),
+    ('change', '变更 IP'),
+    ('release', '释放旧 IP'),
+    ('none', '不涉及'),
+]
+
+
+class DatacenterChangeRequest(models.Model):
+    request_code = models.CharField('申请编号', max_length=32, unique=True, editable=False)
+    request_type = models.CharField('申请类型', max_length=32, choices=CHANGE_REQUEST_TYPE_CHOICES)
+    status = models.CharField('状态', max_length=20, choices=CHANGE_REQUEST_STATUS_CHOICES, default='draft')
+    approval_code = models.CharField('审批编号', max_length=64, blank=True)
+    title = models.CharField('申请标题', max_length=200)
+    applicant_name = models.CharField('申请人', max_length=100)
+    applicant_phone = models.CharField('联系电话', max_length=50, blank=True)
+    applicant_email = models.EmailField('联系邮箱', blank=True)
+    company = models.CharField('所属单位', max_length=120, blank=True)
+    department = models.CharField('所属部门', max_length=120, blank=True)
+    project_name = models.CharField('所属项目', max_length=120, blank=True)
+    reason = models.TextField('申请原因', blank=True)
+    impact_scope = models.TextField('影响范围', blank=True)
+    requires_power_down = models.BooleanField('是否涉及下电', default=False)
+    department_comment = models.TextField('部门意见', blank=True)
+    it_comment = models.TextField('信息化意见', blank=True)
+    planned_execute_at = models.DateTimeField('计划执行时间', null=True, blank=True)
+    review_comment = models.TextField('审批意见', blank=True)
+    reviewer_name = models.CharField('审批人', max_length=100, blank=True)
+    reviewed_at = models.DateTimeField('审批时间', null=True, blank=True)
+    executor_name = models.CharField('执行人', max_length=100, blank=True)
+    executed_at = models.DateTimeField('执行时间', null=True, blank=True)
+    execution_comment = models.TextField('执行备注', blank=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_datacenter_change_requests',
+        verbose_name='创建人',
+    )
+    public_token = models.CharField('公开访问令牌', max_length=64, unique=True, editable=False)
+    token_expires_at = models.DateTimeField('公开链接有效期', null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        if not self.request_code:
+            stamp = timezone.now().strftime('%Y%m%d%H%M%S')
+            self.request_code = f'DCR{stamp}{secrets.token_hex(2).upper()}'
+        if not self.public_token:
+            self.public_token = secrets.token_urlsafe(24)
+        if not self.token_expires_at:
+            self.token_expires_at = timezone.now() + timedelta(days=14)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.request_code} - {self.title}'
+
+    class Meta:
+        verbose_name = '机房设备变更申请'
+        verbose_name_plural = '机房设备变更申请'
+        db_table = 'ops_datacenter_change_request'
+        ordering = ['-created_at']
+
+
+class DatacenterChangeItem(models.Model):
+    request = models.ForeignKey(
+        DatacenterChangeRequest,
+        on_delete=models.CASCADE,
+        related_name='items',
+        verbose_name='所属申请',
+    )
+    rack_device = models.ForeignKey(
+        RackDevice,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='change_request_items',
+        verbose_name='关联现有设备',
+    )
+    device_name = models.CharField('设备名称', max_length=120)
+    device_model = models.CharField('设备型号', max_length=120, blank=True)
+    serial_number = models.CharField('序列号', max_length=120, blank=True)
+    quantity = models.PositiveIntegerField('数量', default=1)
+    is_rack_mounted = models.BooleanField('是否上架', default=True)
+    u_height = models.PositiveIntegerField('占用 U 数', default=1)
+    power_watts = models.PositiveIntegerField('功率需求(W)', default=0)
+    power_circuit = models.CharField('电力回路', max_length=120, blank=True)
+    network_role = models.CharField('网络需求', max_length=20, choices=NETWORK_ROLE_CHOICES, default='none')
+    ip_quantity = models.PositiveIntegerField('所需 IP 数量', default=0)
+    requires_static_ip = models.BooleanField('是否需要固定 IP', default=False)
+    ip_action = models.CharField('IP 动作', max_length=20, choices=IP_ACTION_CHOICES, default='allocate')
+    assigned_management_ip = models.CharField('分配管理 IP', max_length=100, blank=True)
+    assigned_service_ip = models.CharField('分配业务 IP', max_length=100, blank=True)
+    source_datacenter = models.ForeignKey(
+        Datacenter,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='source_change_items',
+        verbose_name='源机房',
+    )
+    source_rack = models.ForeignKey(
+        Rack,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='source_change_items',
+        verbose_name='源机柜',
+    )
+    source_u_start = models.PositiveIntegerField('源起始 U 位', null=True, blank=True)
+    source_u_end = models.PositiveIntegerField('源结束 U 位', null=True, blank=True)
+    target_datacenter = models.ForeignKey(
+        Datacenter,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='target_change_items',
+        verbose_name='目标机房',
+    )
+    target_rack = models.ForeignKey(
+        Rack,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='target_change_items',
+        verbose_name='目标机柜',
+    )
+    target_u_start = models.PositiveIntegerField('目标起始 U 位', null=True, blank=True)
+    target_u_end = models.PositiveIntegerField('目标结束 U 位', null=True, blank=True)
+    notes = models.TextField('明细备注', blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.device_name or f'变更设备#{self.pk}'
+
+    class Meta:
+        verbose_name = '机房设备变更明细'
+        verbose_name_plural = '机房设备变更明细'
+        db_table = 'ops_datacenter_change_item'
         ordering = ['id']
 
 

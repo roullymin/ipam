@@ -17,6 +17,7 @@ router.register(r'datacenters', views.DatacenterViewSet)
 router.register(r'racks', views.RackViewSet)
 router.register(r'rack-devices', views.RackDeviceViewSet)
 router.register(r'resident-staff', views.ResidentStaffViewSet)
+router.register(r'datacenter-change-requests', views.DatacenterChangeRequestViewSet)
 
 
 urlpatterns = [
@@ -32,6 +33,7 @@ urlpatterns = [
     path('api/change-password/', views.api_change_password),
     path('api/resident-intake/', views.api_resident_intake),
     path('api/resident-intake/export-pdf/', views.api_resident_intake_export_pdf),
+    path('api/public/change-requests/<str:token>/', views.public_change_request_detail),
     path('api/public/dcim-overview/', views.public_dcim_overview),
 
     path('api/init-dc/', views.init_datacenters),

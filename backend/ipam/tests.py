@@ -14,7 +14,16 @@ from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APITestCase
 
-from .models import Datacenter, IPAddress, NetworkSection, Rack, RackDevice, Subnet, UserProfile
+from .models import (
+    Datacenter,
+    DatacenterChangeRequest,
+    IPAddress,
+    NetworkSection,
+    Rack,
+    RackDevice,
+    Subnet,
+    UserProfile,
+)
 
 
 def make_csv_upload(name, content):
@@ -258,14 +267,210 @@ class ImportExcelTests(BaseApiTestCase):
         self.assertEqual(response.data['preview']['rows'][0]['action'], 'create')
         self.assertEqual(response.data['preview']['failed_rows'], [])
 
+
+class DatacenterChangeRequestTests(BaseApiTestCase):
+    def setUp(self):
+        self.client = self.make_authenticated_client(self.dc_operator)
+        self.datacenter = Datacenter.objects.create(name='核心机房', location='7F')
+        self.rack = Rack.objects.create(
+            datacenter=self.datacenter,
+            code='R-01',
+            name='主机柜',
+            height=42,
+            power_limit=5000,
+        )
+        self.device = RackDevice.objects.create(
+            rack=self.rack,
+            name='核心交换机',
+            position=20,
+            u_height=2,
+            device_type='switch_core',
+            brand='Huawei',
+            mgmt_ip='10.0.0.10',
+            project='核心网络',
+            contact='网络组',
+            power_usage=300,
+        )
+
+    def test_can_create_change_request_with_nested_items(self):
+        response = self.client.post(
+            '/api/datacenter-change-requests/',
+            {
+                'request_type': 'rack_out',
+                'title': '核心交换机搬出申请',
+                'applicant_name': '张三',
+                'applicant_phone': '13800000000',
+                'applicant_email': 'zhangsan@example.com',
+                'company': '数字广东',
+                'department': '网络组',
+                'project_name': '核心网改造',
+                'reason': '更换老旧设备',
+                'items': [
+                    {
+                        'rack_device': self.device.id,
+                        'device_name': '核心交换机',
+                        'device_model': 'S12700',
+                        'serial_number': 'SN-CORE-001',
+                        'quantity': 1,
+                        'u_height': 2,
+                        'power_watts': 300,
+                        'network_role': 'management',
+                        'ip_quantity': 1,
+                        'requires_static_ip': True,
+                        'ip_action': 'release',
+                        'source_datacenter': self.datacenter.id,
+                        'source_rack': self.rack.id,
+                        'source_u_start': 20,
+                        'source_u_end': 19,
+                        'notes': '由网络组执行下架',
+                    }
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['status'], 'submitted')
+        self.assertEqual(response.data['item_count'], 1)
+        self.assertTrue(response.data['public_token'])
+        self.assertTrue(response.data['public_link'].endswith(f"/api/public/change-requests/{response.data['public_token']}/"))
+
+        change_request = DatacenterChangeRequest.objects.get(pk=response.data['id'])
+        self.assertEqual(change_request.items.count(), 1)
+        self.assertEqual(change_request.created_by, self.dc_operator)
+
+    def test_can_approve_change_request(self):
+        change_request = DatacenterChangeRequest.objects.create(
+            request_type='rack_in',
+            status='submitted',
+            title='新设备上架申请',
+            applicant_name='李四',
+            applicant_phone='13900000000',
+        )
+
+        response = self.client.post(
+            f'/api/datacenter-change-requests/{change_request.id}/approve/',
+            {'review_comment': '批准实施'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        change_request.refresh_from_db()
+        self.assertEqual(change_request.status, 'approved')
+        self.assertEqual(change_request.review_comment, '批准实施')
+        self.assertTrue(change_request.reviewer_name)
+
+    def test_can_schedule_and_complete_change_request(self):
+        change_request = DatacenterChangeRequest.objects.create(
+            request_type='relocate',
+            status='approved',
+            title='璁惧杩佺Щ鎵ц',
+            applicant_name='璧靛叚',
+            applicant_phone='13600000000',
+        )
+
+        schedule_response = self.client.post(
+            f'/api/datacenter-change-requests/{change_request.id}/schedule/',
+            {
+                'planned_execute_at': '2026-04-05T10:00:00',
+                'department_comment': '缃戠粶缁勯厤鍚?',
+                'it_comment': '瀹夋帓鍋滄満绐楀彛',
+            },
+            format='json',
+        )
+        self.assertEqual(schedule_response.status_code, 200)
+        change_request.refresh_from_db()
+        self.assertEqual(change_request.status, 'scheduled')
+        self.assertEqual(change_request.department_comment, '缃戠粶缁勯厤鍚?')
+        self.assertEqual(change_request.it_comment, '瀹夋帓鍋滄満绐楀彛')
+
+        complete_response = self.client.post(
+            f'/api/datacenter-change-requests/{change_request.id}/complete/',
+            {'executor_name': '鎵ц宸ョ▼甯?', 'execution_comment': '璁惧宸叉惉杩佸畬鎴?'},
+            format='json',
+        )
+        self.assertEqual(complete_response.status_code, 200)
+        change_request.refresh_from_db()
+        self.assertEqual(change_request.status, 'completed')
+        self.assertEqual(change_request.executor_name, '鎵ц宸ョ▼甯?')
+        self.assertEqual(change_request.execution_comment, '璁惧宸叉惉杩佸畬鎴?')
+        self.assertIsNotNone(change_request.executed_at)
+
+    def test_public_change_request_detail_works_with_token(self):
+        change_request = DatacenterChangeRequest.objects.create(
+            request_type='move_in',
+            status='submitted',
+            title='测试公开链接',
+            applicant_name='王五',
+            applicant_phone='13700000000',
+        )
+
+        response = self.client.get(f'/api/public/change-requests/{change_request.public_token}/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'success')
+        self.assertEqual(response.data['request']['request_code'], change_request.request_code)
+        self.assertEqual(response.data['request']['title'], '测试公开链接')
+
+    def test_public_change_request_can_submit_updates(self):
+        change_request = DatacenterChangeRequest.objects.create(
+            request_type='rack_in',
+            status='draft',
+            title='寰呰ˉ鍏呯敵璇?',
+            applicant_name='',
+            applicant_phone='',
+        )
+
+        response = self.client.post(
+            f'/api/public/change-requests/{change_request.public_token}/',
+            {
+                'applicant_name': '鐢宠浜虹敳',
+                'applicant_phone': '13500000000',
+                'company': '鏁板瓧骞夸笢',
+                'reason': '璁惧涓婃灦闇€姹?',
+                'requires_power_down': True,
+                'items': [
+                    {
+                        'device_name': '姹囪仛浜ゆ崲鏈?',
+                        'device_model': 'S7700',
+                        'quantity': 1,
+                        'u_height': 2,
+                        'power_watts': 400,
+                        'network_role': 'management',
+                        'ip_quantity': 1,
+                        'ip_action': 'allocate',
+                    }
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        change_request.refresh_from_db()
+        self.assertEqual(change_request.status, 'submitted')
+        self.assertEqual(change_request.applicant_name, '鐢宠浜虹敳')
+        self.assertTrue(change_request.requires_power_down)
+        self.assertEqual(change_request.items.count(), 1)
+
+    def test_topology_endpoint_returns_datacenter_racks_and_occupied_ranges(self):
+        response = self.client.get('/api/datacenter-change-requests/topology/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'success')
+        self.assertEqual(len(response.data['datacenters']), 1)
+        rack_row = response.data['datacenters'][0]['racks'][0]
+        self.assertEqual(rack_row['code'], 'R-01')
+        self.assertEqual(rack_row['occupied_ranges'][0]['name'], '核心交换机')
+
     def test_import_excel_preview_returns_failed_row_report(self):
+        client = self.make_authenticated_client(self.ip_manager)
         upload = make_csv_upload(
             'invalid_preview.csv',
             'IP鍦板潃,璁惧鍚嶇О\n'
             'bad-ip,preview-sw\n',
         )
 
-        response = self.client.post(
+        response = client.post(
             '/api/import-excel/preview/',
             {'file': upload, 'config': json.dumps({'skipRows': 1, 'conflictMode': 'overwrite'})},
         )
@@ -277,6 +482,7 @@ class ImportExcelTests(BaseApiTestCase):
         self.assertEqual(response.data['preview']['failed_rows'][0]['action'], 'invalid')
 
     def test_import_excel_accepts_gb18030_csv_and_repairs_mojibake(self):
+        client = self.make_authenticated_client(self.ip_manager)
         source_name = '核心交换机'
         upload = make_csv_upload_bytes(
             'gb18030_import.csv',
@@ -286,7 +492,7 @@ class ImportExcelTests(BaseApiTestCase):
             ).encode('gb18030'),
         )
 
-        response = self.client.post(
+        response = client.post(
             '/api/import-excel/',
             {'file': upload, 'config': json.dumps({'skipRows': 1, 'conflictMode': 'overwrite'})},
         )

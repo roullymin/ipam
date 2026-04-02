@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import subprocess
 from functools import lru_cache
 from datetime import date, datetime, timedelta
@@ -35,7 +36,9 @@ from rest_framework.response import Response
 from .models import (
     AuditLog,
     Blocklist,
+    DatacenterChangeRequest,
     Datacenter,
+    DatacenterChangeItem,
     IPAddress,
     LoginLog,
     NetworkSection,
@@ -47,10 +50,20 @@ from .models import (
     UserProfile,
 )
 from .pagination import OptionalPaginationMixin
-from .permissions import DcimAccessPermission, DcimWritePermission, IpamAccessPermission, IpamWritePermission, ResidentAccessPermission
+from .permissions import (
+    DatacenterChangeAccessPermission,
+    DcimAccessPermission,
+    DcimWritePermission,
+    IpamAccessPermission,
+    IpamWritePermission,
+    ResidentAccessPermission,
+)
 from .serializers import (
     AuditLogSerializer,
     BlocklistSerializer,
+    DatacenterChangeRequestPublicSerializer,
+    DatacenterChangeRequestPublicSubmitSerializer,
+    DatacenterChangeRequestSerializer,
     DatacenterSerializer,
     IPAddressSerializer,
     LoginLogSerializer,
@@ -1686,6 +1699,44 @@ def api_resident_intake_export_pdf(request):
     return response
 
 
+@api_view(['GET', 'POST'])
+@permission_classes([AllowAny])
+@authentication_classes([])
+def public_change_request_detail(request, token):
+    change_request = (
+        DatacenterChangeRequest.objects.prefetch_related(
+            'items',
+            'items__source_datacenter',
+            'items__source_rack',
+            'items__target_datacenter',
+            'items__target_rack',
+        )
+        .filter(public_token=token)
+        .first()
+    )
+    if change_request is None:
+        return Response({'detail': '申请链接不存在。'}, status=status.HTTP_404_NOT_FOUND)
+    if change_request.token_expires_at and change_request.token_expires_at < timezone.now():
+        return Response({'detail': '申请链接已过期。'}, status=status.HTTP_410_GONE)
+
+    if request.method == 'POST':
+        if change_request.status in {'completed', 'cancelled'}:
+            return Response({'detail': '当前申请不允许继续填写。'}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = DatacenterChangeRequestPublicSubmitSerializer(change_request, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(
+            {
+                'status': 'success',
+                'message': '申请信息已提交。',
+                'request': DatacenterChangeRequestPublicSerializer(change_request).data,
+            }
+        )
+
+    serializer = DatacenterChangeRequestPublicSerializer(change_request)
+    return Response({'status': 'success', 'request': serializer.data})
+
+
 @api_view(['POST'])
 @authentication_classes([SessionAuthentication, BasicAuthentication])
 @permission_classes([IpamWritePermission])
@@ -1743,11 +1794,167 @@ def scan_subnet(request):
                 ),
             }
         )
+
     except FileNotFoundError:
         return Response({'status': 'error', 'message': '服务器未安装 nmap'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     except Exception as exc:
         logger.exception('Subnet scan failed.')
         return Response({'status': 'error', 'message': f'扫描失败: {exc}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class DatacenterChangeRequestViewSet(OptionalPaginationMixin, BaseViewSet):
+    audit_module = 'datacenter_change_request'
+    permission_classes = [DatacenterChangeAccessPermission]
+    queryset = (
+        DatacenterChangeRequest.objects.select_related('created_by')
+        .prefetch_related(
+            'items',
+            'items__rack_device',
+            'items__source_datacenter',
+            'items__source_rack',
+            'items__target_datacenter',
+            'items__target_rack',
+        )
+        .all()
+    )
+    serializer_class = DatacenterChangeRequestSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = [
+        'request_code',
+        'title',
+        'applicant_name',
+        'company',
+        'department',
+        'project_name',
+        'items__device_name',
+        'items__serial_number',
+    ]
+
+    def perform_create(self, serializer):
+        instance = serializer.save(created_by=self.request.user, status='submitted')
+        record_audit(self.request, self.audit_module, 'create', instance, '新增机房设备变更申请')
+
+    @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        change_request = self.get_object()
+        change_request.status = 'approved'
+        change_request.reviewer_name = get_actor_name(request.user)
+        change_request.reviewed_at = timezone.now()
+        if request.data.get('approval_code') is not None:
+            change_request.approval_code = request.data.get('approval_code')
+        if request.data.get('department_comment') is not None:
+            change_request.department_comment = request.data.get('department_comment')
+        if request.data.get('it_comment') is not None:
+            change_request.it_comment = request.data.get('it_comment')
+        comment = request.data.get('review_comment')
+        if comment is not None:
+            change_request.review_comment = comment
+        change_request.save(
+            update_fields=[
+                'status',
+                'reviewer_name',
+                'reviewed_at',
+                'approval_code',
+                'department_comment',
+                'it_comment',
+                'review_comment',
+                'updated_at',
+            ]
+        )
+        record_audit(request, self.audit_module, 'approve', change_request, '机房设备变更申请已批准')
+        return Response({'status': 'success', 'request': self.get_serializer(change_request).data})
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        change_request = self.get_object()
+        change_request.status = 'rejected'
+        change_request.reviewer_name = get_actor_name(request.user)
+        change_request.reviewed_at = timezone.now()
+        comment = request.data.get('review_comment')
+        if comment is not None:
+            change_request.review_comment = comment
+        change_request.save(update_fields=['status', 'reviewer_name', 'reviewed_at', 'review_comment', 'updated_at'])
+        record_audit(request, self.audit_module, 'reject', change_request, '机房设备变更申请已驳回')
+        return Response({'status': 'success', 'request': self.get_serializer(change_request).data})
+
+    @action(detail=True, methods=['post'])
+    def schedule(self, request, pk=None):
+        change_request = self.get_object()
+        change_request.status = 'scheduled'
+        if request.data.get('planned_execute_at'):
+            change_request.planned_execute_at = request.data.get('planned_execute_at')
+        if request.data.get('review_comment') is not None:
+            change_request.review_comment = request.data.get('review_comment')
+        if request.data.get('department_comment') is not None:
+            change_request.department_comment = request.data.get('department_comment')
+        if request.data.get('it_comment') is not None:
+            change_request.it_comment = request.data.get('it_comment')
+        change_request.save(
+            update_fields=[
+                'status',
+                'planned_execute_at',
+                'review_comment',
+                'department_comment',
+                'it_comment',
+                'updated_at',
+            ]
+        )
+        record_audit(request, self.audit_module, 'schedule', change_request, '机房设备变更申请已排期')
+        return Response({'status': 'success', 'request': self.get_serializer(change_request).data})
+
+    @action(detail=True, methods=['post'])
+    def complete(self, request, pk=None):
+        change_request = self.get_object()
+        change_request.status = 'completed'
+        change_request.executor_name = request.data.get('executor_name') or get_actor_name(request.user)
+        change_request.execution_comment = request.data.get('execution_comment', change_request.execution_comment)
+        change_request.executed_at = timezone.now()
+        change_request.save(update_fields=['status', 'executor_name', 'execution_comment', 'executed_at', 'updated_at'])
+        record_audit(request, self.audit_module, 'complete', change_request, '机房设备变更申请已执行完成')
+        return Response({'status': 'success', 'request': self.get_serializer(change_request).data})
+
+    @action(detail=True, methods=['post'])
+    def regenerate_link(self, request, pk=None):
+        change_request = self.get_object()
+        change_request.public_token = secrets.token_urlsafe(24)
+        change_request.token_expires_at = timezone.now() + timedelta(days=14)
+        change_request.save(update_fields=['public_token', 'token_expires_at', 'updated_at'])
+        record_audit(request, self.audit_module, 'regenerate_link', change_request, '重新生成了公开申请链接')
+        return Response({'status': 'success', 'request': self.get_serializer(change_request).data})
+
+    @action(detail=False, methods=['get'])
+    def topology(self, request):
+        datacenter_rows = []
+        for datacenter in Datacenter.objects.prefetch_related('racks__devices').all():
+            rack_rows = []
+            for rack in datacenter.racks.all():
+                devices = list(rack.devices.all())
+                rack_rows.append(
+                    {
+                        'id': rack.id,
+                        'code': rack.code,
+                        'name': rack.name,
+                        'height': rack.height,
+                        'occupied_ranges': [
+                            {
+                                'id': device.id,
+                                'name': device.name,
+                                'start': device.position,
+                                'end': max(1, device.position - max(device.u_height, 1) + 1),
+                            }
+                            for device in devices
+                        ],
+                    }
+                )
+            datacenter_rows.append(
+                {
+                    'id': datacenter.id,
+                    'name': datacenter.name,
+                    'location': datacenter.location,
+                    'racks': rack_rows,
+                }
+            )
+        return Response({'status': 'success', 'datacenters': datacenter_rows})
 
 
 @api_view(['GET'])

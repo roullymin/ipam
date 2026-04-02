@@ -40,6 +40,11 @@ class ResidentAccessPermission(BaseRolePermission):
     write_roles = ('admin', 'dc_operator')
 
 
+class DatacenterChangeAccessPermission(BaseRolePermission):
+    read_roles = ('admin', 'dc_operator', 'auditor')
+    write_roles = ('admin', 'dc_operator')
+
+
 class IpamWritePermission(BaseRolePermission):
     read_roles = ('admin', 'ip_manager')
     write_roles = ('admin', 'ip_manager')

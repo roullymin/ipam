@@ -5,6 +5,8 @@ from rest_framework import serializers
 from .models import (
     AuditLog,
     Blocklist,
+    DatacenterChangeItem,
+    DatacenterChangeRequest,
     Datacenter,
     IPAddress,
     LoginLog,
@@ -322,5 +324,198 @@ class ResidentStaffSerializer(serializers.ModelSerializer):
             instance.devices.all().delete()
             for device_data in devices_data:
                 ResidentDevice.objects.create(resident=instance, **device_data)
+
+        return instance
+
+
+class DatacenterChangeItemSerializer(serializers.ModelSerializer):
+    source_datacenter_name = serializers.CharField(source='source_datacenter.name', read_only=True)
+    source_rack_code = serializers.CharField(source='source_rack.code', read_only=True)
+    target_datacenter_name = serializers.CharField(source='target_datacenter.name', read_only=True)
+    target_rack_code = serializers.CharField(source='target_rack.code', read_only=True)
+
+    class Meta:
+        model = DatacenterChangeItem
+        fields = [
+            'id',
+            'rack_device',
+            'device_name',
+            'device_model',
+            'serial_number',
+            'quantity',
+            'is_rack_mounted',
+            'u_height',
+            'power_watts',
+            'power_circuit',
+            'network_role',
+            'ip_quantity',
+            'requires_static_ip',
+            'ip_action',
+            'assigned_management_ip',
+            'assigned_service_ip',
+            'source_datacenter',
+            'source_datacenter_name',
+            'source_rack',
+            'source_rack_code',
+            'source_u_start',
+            'source_u_end',
+            'target_datacenter',
+            'target_datacenter_name',
+            'target_rack',
+            'target_rack_code',
+            'target_u_start',
+            'target_u_end',
+            'notes',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['created_at', 'updated_at']
+
+
+class DatacenterChangeRequestSerializer(serializers.ModelSerializer):
+    items = DatacenterChangeItemSerializer(many=True, required=False)
+    item_count = serializers.SerializerMethodField()
+    public_link = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DatacenterChangeRequest
+        fields = [
+            'id',
+            'request_code',
+            'request_type',
+            'status',
+            'approval_code',
+            'title',
+            'applicant_name',
+            'applicant_phone',
+            'applicant_email',
+            'company',
+            'department',
+            'project_name',
+            'reason',
+            'impact_scope',
+            'requires_power_down',
+            'department_comment',
+            'it_comment',
+            'planned_execute_at',
+            'review_comment',
+            'reviewer_name',
+            'reviewed_at',
+            'executor_name',
+            'executed_at',
+            'execution_comment',
+            'public_token',
+            'token_expires_at',
+            'created_at',
+            'updated_at',
+            'items',
+            'item_count',
+            'public_link',
+        ]
+        read_only_fields = [
+            'request_code',
+            'reviewer_name',
+            'reviewed_at',
+            'public_token',
+            'token_expires_at',
+            'created_at',
+            'updated_at',
+            'item_count',
+            'public_link',
+        ]
+
+    def get_item_count(self, obj):
+        prefetched_items = get_prefetched_related(obj, 'items')
+        if prefetched_items is not None:
+            return len(prefetched_items)
+        return obj.items.count()
+
+    def get_public_link(self, obj):
+        request = self.context.get('request')
+        path = f'/api/public/change-requests/{obj.public_token}/'
+        return request.build_absolute_uri(path) if request else path
+
+    def create(self, validated_data):
+        items_data = validated_data.pop('items', [])
+        request = self.context.get('request')
+        if request and request.user and request.user.is_authenticated:
+            validated_data.setdefault('created_by', request.user)
+        change_request = DatacenterChangeRequest.objects.create(**validated_data)
+        for item_data in items_data:
+            DatacenterChangeItem.objects.create(request=change_request, **item_data)
+        return change_request
+
+    def update(self, instance, validated_data):
+        items_data = validated_data.pop('items', None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        if items_data is not None:
+            instance.items.all().delete()
+            for item_data in items_data:
+                DatacenterChangeItem.objects.create(request=instance, **item_data)
+
+        return instance
+
+
+class DatacenterChangeRequestPublicSerializer(serializers.ModelSerializer):
+    items = DatacenterChangeItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = DatacenterChangeRequest
+        fields = [
+            'request_code',
+            'request_type',
+            'status',
+            'approval_code',
+            'title',
+            'applicant_name',
+            'applicant_phone',
+            'applicant_email',
+            'company',
+            'department',
+            'project_name',
+            'reason',
+            'impact_scope',
+            'requires_power_down',
+            'planned_execute_at',
+            'token_expires_at',
+            'items',
+        ]
+
+
+class DatacenterChangeRequestPublicSubmitSerializer(serializers.ModelSerializer):
+    items = DatacenterChangeItemSerializer(many=True, required=False)
+
+    class Meta:
+        model = DatacenterChangeRequest
+        fields = [
+            'title',
+            'applicant_name',
+            'applicant_phone',
+            'applicant_email',
+            'company',
+            'department',
+            'project_name',
+            'reason',
+            'impact_scope',
+            'requires_power_down',
+            'planned_execute_at',
+            'items',
+        ]
+
+    def update(self, instance, validated_data):
+        items_data = validated_data.pop('items', None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        if instance.status == 'draft':
+            instance.status = 'submitted'
+        instance.save()
+
+        if items_data is not None:
+            instance.items.all().delete()
+            for item_data in items_data:
+                DatacenterChangeItem.objects.create(request=instance, **item_data)
 
         return instance

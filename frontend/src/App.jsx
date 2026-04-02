@@ -15,6 +15,7 @@ import AppHeader from './components/AppHeader';
 import AppSidebar from './components/AppSidebar';
 import AuthManagementModals from './components/AuthManagementModals';
 import BackupView from './components/BackupView';
+import DatacenterChangeRequestView from './components/DatacenterChangeRequestView';
 import DcimView from './components/DcimView';
 import DcimOverviewPage from './components/DcimOverviewPage';
 import { DatacenterModal, DeviceModal, RackModal } from './components/DcimManagementModals';
@@ -76,10 +77,10 @@ const DEFAULT_OPTIONS = {
 };
 
 const ROLE_DEFINITIONS = {
-  admin: { label: '\u8d85\u7ea7\u7ba1\u7406\u5458', permissions: ['dashboard', 'list', 'dcim', 'resident', 'security', 'backup', 'users'] },
-  dc_operator: { label: '\u673a\u623f\u8fd0\u7ef4', permissions: ['dashboard', 'dcim', 'resident'] },
+  admin: { label: '\u8d85\u7ea7\u7ba1\u7406\u5458', permissions: ['dashboard', 'list', 'dcim', 'changes', 'resident', 'security', 'backup', 'users'] },
+  dc_operator: { label: '\u673a\u623f\u8fd0\u7ef4', permissions: ['dashboard', 'dcim', 'changes', 'resident'] },
   ip_manager: { label: 'IP \u7ba1\u7406\u5458', permissions: ['dashboard', 'list'] },
-  auditor: { label: '\u5ba1\u8ba1\u5458', permissions: ['dashboard', 'security', 'resident'] },
+  auditor: { label: '\u5ba1\u8ba1\u5458', permissions: ['dashboard', 'changes', 'security', 'resident'] },
   guest: { label: '\u8bbf\u5ba2', permissions: ['dashboard', 'list', 'dcim'] },
 };
 
@@ -87,6 +88,7 @@ const TAB_CONFIG = {
   dashboard: { icon: LayoutDashboard, label: BRAND.navigation.dashboard },
   list: { icon: Server, label: BRAND.navigation.list },
   dcim: { icon: Box, label: BRAND.navigation.dcim },
+  changes: { icon: ArrowLeftRight, label: BRAND.navigation.changes || '设备变更' },
   resident: { icon: Users, label: BRAND.navigation.resident },
   security: { icon: Shield, label: BRAND.navigation.security },
   backup: { icon: Database, label: BRAND.navigation.backup },
@@ -963,6 +965,10 @@ function MainApp() {
               viewState={viewState}
               rackDevices={rackDevices}
             />
+          )}
+
+          {activeTab === 'changes' && (
+            <DatacenterChangeRequestView />
           )}
 
           {activeTab === 'security' && (
