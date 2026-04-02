@@ -256,6 +256,25 @@ class ImportExcelTests(BaseApiTestCase):
         self.assertTrue(response.data['preview']['can_import'])
         self.assertEqual(response.data['preview']['summary']['create_rows'], 1)
         self.assertEqual(response.data['preview']['rows'][0]['action'], 'create')
+        self.assertEqual(response.data['preview']['failed_rows'], [])
+
+    def test_import_excel_preview_returns_failed_row_report(self):
+        upload = make_csv_upload(
+            'invalid_preview.csv',
+            'IP鍦板潃,璁惧鍚嶇О\n'
+            'bad-ip,preview-sw\n',
+        )
+
+        response = self.client.post(
+            '/api/import-excel/preview/',
+            {'file': upload, 'config': json.dumps({'skipRows': 1, 'conflictMode': 'overwrite'})},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['preview']['summary']['invalid_rows'], 1)
+        self.assertEqual(len(response.data['preview']['failed_rows']), 1)
+        self.assertEqual(response.data['preview']['failed_rows'][0]['row_number'], 1)
+        self.assertEqual(response.data['preview']['failed_rows'][0]['action'], 'invalid')
 
     def test_import_excel_accepts_gb18030_csv_and_repairs_mojibake(self):
         source_name = '核心交换机'
@@ -422,6 +441,32 @@ class AccessControlAndPaginationTests(BaseApiTestCase):
         self.assertTrue(response.data['preview']['can_import'])
         self.assertEqual(response.data['preview']['summary']['rack_create_rows'], 1)
         self.assertEqual(response.data['preview']['summary']['device_create_rows'], 1)
+        self.assertEqual(response.data['preview']['failed_rows'], [])
+
+    def test_dc_operator_preview_dcim_import_returns_failed_rows(self):
+        client = self.make_authenticated_client(self.dc_operator)
+        upload = make_excel_upload(
+            'dcim_invalid_preview.xlsx',
+            {
+                '机柜资产': [
+                    {
+                        '机房名称': '',
+                        '机房位置': '708',
+                        '机柜编号': '',
+                        '机柜名称': '异常机柜',
+                    }
+                ],
+                '设备资产': [],
+            },
+        )
+
+        response = client.post('/api/dcim/import-excel/preview/', {'file': upload})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data['preview']['can_import'])
+        self.assertEqual(response.data['preview']['summary']['invalid_rows'], 1)
+        self.assertEqual(len(response.data['preview']['failed_rows']), 1)
+        self.assertEqual(response.data['preview']['failed_rows'][0]['action'], 'invalid')
 
     def test_admin_can_fetch_encoding_report(self):
         client = self.make_authenticated_client(self.admin)
@@ -456,6 +501,24 @@ class ResidentImportTests(BaseApiTestCase):
         self.assertEqual(response.data['preview']['summary']['device_rows'], 1)
         self.assertEqual(response.data['preview']['summary']['create_rows'], 1)
         self.assertEqual(response.data['preview']['rows'][0]['action'], 'create')
+        self.assertEqual(response.data['preview']['failed_rows'], [])
+
+    def test_resident_import_preview_returns_failed_row_report(self):
+        upload = make_csv_upload(
+            'resident_invalid_preview.csv',
+            '公司,姓名,联系方式,所属项目,归属部门\n'
+            ',李四,13800002222,一体化项目,运维中心\n'
+            '示例科技,王五,13800002223,一体化项目,运维中心\n',
+        )
+
+        response = self.client.post('/api/resident-staff/preview_import_excel/', {'file': upload})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data['preview']['can_import'])
+        self.assertEqual(response.data['preview']['summary']['invalid_rows'], 1)
+        self.assertEqual(len(response.data['preview']['failed_rows']), 1)
+        self.assertEqual(response.data['preview']['failed_rows'][0]['row_number'], 2)
+        self.assertEqual(response.data['preview']['failed_rows'][0]['action'], 'invalid')
 
     def test_resident_import_updates_existing_record_by_registration_code(self):
         response = self.client.post(

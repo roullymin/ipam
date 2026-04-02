@@ -93,21 +93,27 @@ This file is the default backlog for the local `ipam` Codex skill. When a reques
 ## Priority 7 / 下一阶段优化
 
 - [x] Surface backend version and commit in the shared shell, not only inside the status modal.
-- [ ] Finish a full frontend copy sweep for remaining business pages and shell edge cases.
-- [ ] Add downloadable failed-row reports for IPAM, DCIM, and resident import previews.
-- [ ] Prepare the first production-safe encoding cleanup batch with a sampling checklist.
+- [x] Finish a full frontend copy sweep for remaining business pages and shell edge cases.
+- [x] Add downloadable failed-row reports for IPAM, DCIM, and resident import previews.
+- [x] Prepare the first production-safe encoding cleanup batch with a sampling checklist.
 
 - [x] 在共享壳层中继续展示后端版本和提交号，不只放在状态弹层里。
-- [ ] 对剩余业务页面和壳层边角文案做一轮完整收口。
-- [ ] 为 IPAM、DCIM、驻场导入预览补充失败行报告下载。
-- [ ] 为首批生产环境乱码清洗准备抽样核对清单和执行批次。
+- [x] 对剩余业务页面和壳层边角文案做一轮完整收口。
+- [x] 为 IPAM、DCIM、驻场导入预览补充失败行报告下载。
+- [x] 为首批生产环境乱码清洗准备抽样核对清单和执行批次。
 
 ## Priority 8 / 中期能力扩展
 
 - [ ] Continue moving page-specific orchestration out of `frontend/src/App.jsx`.
+- [x] Extract IPAM page state, filters, and scan actions from `frontend/src/App.jsx` into a dedicated hook.
+- [x] Extract DCIM page state and rack/device orchestration from `frontend/src/App.jsx` into a dedicated hook.
+- [ ] Extract shared page routing or active-tab rendering branches from `frontend/src/App.jsx`.
 - [ ] Design a global search MVP covering IP, device, rack, resident, and project entities.
 - [ ] Design an alert-center MVP around backup, security, and data-quality signals.
 
 - [ ] 继续把页面专属编排逻辑从 `frontend/src/App.jsx` 中迁出。
+- [x] 把 IPAM 页状态、筛选逻辑和扫描动作从 `frontend/src/App.jsx` 拆到独立 hook。
+- [x] 把 DCIM 页状态和机柜/设备编排逻辑从 `frontend/src/App.jsx` 拆到独立 hook。
+- [ ] 把公共页面路由或 `activeTab` 渲染分支从 `frontend/src/App.jsx` 中继续迁出。
 - [ ] 设计覆盖 IP、设备、机柜、驻场和项目实体的全局搜索 MVP。
 - [ ] 围绕备份、安全和数据质量信号设计告警中心 MVP。

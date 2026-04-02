@@ -29,7 +29,7 @@ export default function AppHeader({
         </div>
         <div className="mt-1 text-2xl font-black tracking-tight text-slate-950">{activeLabel}</div>
         <div className="mt-1 text-sm text-slate-500">
-          {BRAND.name} · {BRAND.consoleLabel}
+          {BRAND.name} / {BRAND.consoleLabel}
         </div>
       </div>
 
@@ -50,7 +50,7 @@ export default function AppHeader({
           title="查看部署检查清单"
         >
           <Activity className="h-3.5 w-3.5 text-cyan-600" />
-          备份 {backupCount} · 乱码 {qualityCount}
+          备份 {backupCount} / 乱码 {qualityCount}
         </button>
         <div className="hidden min-w-[8.5rem] rounded-[22px] border border-slate-200/80 bg-white/80 px-3 py-2 shadow-sm md:block">
           <div className="truncate text-xs font-bold text-slate-800">{currentUser}</div>

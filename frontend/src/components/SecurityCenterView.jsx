@@ -184,7 +184,7 @@ export default function SecurityCenterView({
                         操作
                       </p>
                       <p className="mt-1 text-xs text-slate-500">
-                        模块：{moduleLabels[log.module] || log.module || '系统'} · 目标：
+                        模块：{moduleLabels[log.module] || log.module || '系统'} / 目标：
                         {log.target_display || log.target_type || '未指定'}
                       </p>
                     </div>

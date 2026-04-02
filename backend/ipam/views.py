@@ -469,6 +469,7 @@ def _build_resident_lookup_maps(grouped_rows):
 def _build_resident_import_groups(dataframe, header_rows):
     grouped_rows = {}
     errors = []
+    failed_rows = []
 
     for excel_row_number, (_, row) in enumerate(dataframe.iterrows(), start=header_rows + 1):
         company = str(_get_row_value(row, 'company')).strip()
@@ -480,7 +481,18 @@ def _build_resident_import_groups(dataframe, header_rows):
             continue
 
         if not company or not name:
-            errors.append(f'第 {excel_row_number} 行缺少必填字段：公司或姓名。')
+            reason = '缺少必填字段：公司或姓名。'
+            errors.append(f'第 {excel_row_number} 行{reason}')
+            failed_rows.append(
+                {
+                    'row_number': excel_row_number,
+                    'action': 'invalid',
+                    'title': name or '未填写姓名',
+                    'subtitle': company or '未填写公司',
+                    'sheet': '驻场导入',
+                    'reason': reason,
+                }
+            )
             continue
 
         resident_key = registration_code or f'{company}|{name}|{phone}'
@@ -536,10 +548,10 @@ def _build_resident_import_groups(dataframe, header_rows):
         if has_device_content:
             record['devices'].append(device_payload)
 
-    return grouped_rows, errors
+    return grouped_rows, errors, failed_rows
 
 
-def _build_resident_import_preview(grouped_rows, errors, preview_limit=20):
+def _build_resident_import_preview(grouped_rows, errors, failed_rows, preview_limit=20):
     preview = {
         'summary': {
             'resident_rows': 0,
@@ -550,6 +562,7 @@ def _build_resident_import_preview(grouped_rows, errors, preview_limit=20):
             'invalid_rows': len(errors),
         },
         'rows': [],
+        'failed_rows': list(failed_rows),
         'warnings': [],
         'errors': list(errors),
         'can_import': not errors,
@@ -557,6 +570,16 @@ def _build_resident_import_preview(grouped_rows, errors, preview_limit=20):
 
     if not grouped_rows:
         preview['errors'].append('没有解析到有效人员，请检查模板表头和必填字段。')
+        preview['failed_rows'].append(
+            {
+                'row_number': '',
+                'action': 'invalid',
+                'title': '未解析到有效人员',
+                'subtitle': '驻场导入',
+                'sheet': '驻场导入',
+                'reason': '没有解析到有效人员，请检查模板表头和必填字段。',
+            }
+        )
         preview['can_import'] = False
         return preview
 
@@ -1439,8 +1462,8 @@ class ResidentStaffViewSet(OptionalPaginationMixin, BaseViewSet):
         if dataframe.empty:
             return Response({'detail': '表格中没有可导入的数据。'}, status=status.HTTP_400_BAD_REQUEST)
 
-        grouped_rows, errors = _build_resident_import_groups(dataframe, header_rows)
-        preview = _build_resident_import_preview(grouped_rows, errors)
+        grouped_rows, errors, failed_rows = _build_resident_import_groups(dataframe, header_rows)
+        preview = _build_resident_import_preview(grouped_rows, errors, failed_rows)
 
         return Response(
             {
@@ -1465,7 +1488,7 @@ class ResidentStaffViewSet(OptionalPaginationMixin, BaseViewSet):
         if dataframe.empty:
             return Response({'detail': '表格中没有可导入的数据。'}, status=status.HTTP_400_BAD_REQUEST)
 
-        grouped_rows, errors = _build_resident_import_groups(dataframe, header_rows)
+        grouped_rows, errors, _ = _build_resident_import_groups(dataframe, header_rows)
 
         if not grouped_rows:
             return Response({'detail': '没有解析到有效人员，请检查模板表头和必填字段。'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2071,6 +2094,7 @@ def _build_dcim_import_preview(racks_df, devices_df, preview_limit=20):
         'errors': [],
         'warnings': [],
         'rows': [],
+        'failed_rows': [],
     }
 
     existing_datacenters = {item.name: item for item in Datacenter.objects.all()}
@@ -2100,7 +2124,18 @@ def _build_dcim_import_preview(racks_df, devices_df, preview_limit=20):
 
         if not datacenter_name or not rack_code:
             preview['summary']['invalid_rows'] += 1
+            reason = '缺少机房名称或机柜编号'
             preview['errors'].append(f'机柜资产表第 {row_index} 行缺少必填字段：机房名称或机柜编号。')
+            preview['failed_rows'].append(
+                {
+                    'sheet': '机柜资产',
+                    'row_number': row_index,
+                    'record_type': 'rack',
+                    'title': rack_name or rack_code or '未命名机柜',
+                    'action': 'invalid',
+                    'reason': reason,
+                }
+            )
             if len(preview['rows']) < preview_limit:
                 preview['rows'].append(
                     {
@@ -2109,7 +2144,7 @@ def _build_dcim_import_preview(racks_df, devices_df, preview_limit=20):
                         'record_type': 'rack',
                         'title': rack_name or rack_code or '未命名机柜',
                         'action': 'invalid',
-                        'reason': '缺少机房名称或机柜编号',
+                        'reason': reason,
                     }
                 )
             continue
@@ -2152,7 +2187,18 @@ def _build_dcim_import_preview(racks_df, devices_df, preview_limit=20):
 
         if not datacenter_name or not rack_code or not device_name:
             preview['summary']['invalid_rows'] += 1
+            reason = '缺少机房名称、机柜编号或设备名称'
             preview['errors'].append(f'设备资产表第 {row_index} 行缺少必填字段：机房名称、机柜编号或设备名称。')
+            preview['failed_rows'].append(
+                {
+                    'sheet': '设备资产',
+                    'row_number': row_index,
+                    'record_type': 'device',
+                    'title': device_name or '未命名设备',
+                    'action': 'invalid',
+                    'reason': reason,
+                }
+            )
             if len(preview['rows']) < preview_limit:
                 preview['rows'].append(
                     {
@@ -2161,7 +2207,7 @@ def _build_dcim_import_preview(racks_df, devices_df, preview_limit=20):
                         'record_type': 'device',
                         'title': device_name or '未命名设备',
                         'action': 'invalid',
-                        'reason': '缺少机房名称、机柜编号或设备名称',
+                        'reason': reason,
                     }
                 )
             continue
@@ -2593,10 +2639,22 @@ def _build_ip_import_preview(df, all_subnets, conflict_mode='overwrite', sheet_m
         'errors': [],
         'warnings': [],
         'rows': [],
+        'failed_rows': [],
     }
 
     if missing_columns:
-        preview['errors'].append(f"缺少必要列：{'、'.join(missing_columns)}")
+        reason = f"缺少必要列：{'、'.join(missing_columns)}"
+        preview['errors'].append(reason)
+        preview['failed_rows'].append(
+            {
+                'row_number': '',
+                'action': 'invalid',
+                'title': '模板校验失败',
+                'subtitle': 'IP 台账导入',
+                'sheet': 'IP 台账导入',
+                'reason': reason,
+            }
+        )
         return preview
 
     existing_ip_map = {item.ip_address: item for item in IPAddress.objects.filter(ip_address__in=df['IP地址'].astype(str).tolist())}
@@ -2614,7 +2672,18 @@ def _build_ip_import_preview(df, all_subnets, conflict_mode='overwrite', sheet_m
             target_ip = ipaddress.ip_address(ip_str)
         except ValueError:
             preview['summary']['invalid_rows'] += 1
+            reason = 'IP 地址格式无效'
             preview['errors'].append(f'第 {row_index} 行 IP 地址无效：{ip_str}')
+            preview['failed_rows'].append(
+                {
+                    'row_number': row_index,
+                    'action': 'invalid',
+                    'title': device_name or '未填写设备名称',
+                    'subtitle': ip_str,
+                    'sheet': sheet_name or 'IP 台账导入',
+                    'reason': reason,
+                }
+            )
             if len(preview['rows']) < preview_limit:
                 preview['rows'].append(
                     {
@@ -2623,7 +2692,7 @@ def _build_ip_import_preview(df, all_subnets, conflict_mode='overwrite', sheet_m
                         'device_name': device_name,
                         'sheet_name': sheet_name,
                         'action': 'invalid',
-                        'reason': 'IP 地址格式无效',
+                        'reason': reason,
                     }
                 )
             continue

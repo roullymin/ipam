@@ -8,6 +8,9 @@ This document is the operational playbook for updating the local `ipam` project 
 如需固定的部署后验收清单，请同时参考 `docs/DEPLOY_ACCEPTANCE.md`。  
 For a fixed post-deploy acceptance checklist, also see `docs/DEPLOY_ACCEPTANCE.md`.
 
+如需执行首批生产环境乱码清洗，请同时参考 `docs/ENCODING_CLEANUP_BATCH_01.md`。  
+For the first production encoding cleanup batch, also see `docs/ENCODING_CLEANUP_BATCH_01.md`.
+
 ## 本地开发流程 / Local Development Flow
 
 1. 在仓库根目录开始，先检查当前改动状态。  

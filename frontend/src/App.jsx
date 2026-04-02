@@ -43,7 +43,9 @@ import { safeFetch } from './lib/api';
 import { BRAND } from './lib/brand';
 import { useAuthSession } from './hooks/useAuthSession';
 import { useAppDataLoader } from './hooks/useAppDataLoader';
+import { useDcimDerivedData, useDcimViewState } from './hooks/useDcimViewState';
 import { useImportExportHandlers } from './hooks/useImportExportHandlers';
+import { useIpamDerivedData, useIpamViewActions, useIpamViewState } from './hooks/useIpamViewState';
 import { useSystemOverview } from './hooks/useSystemOverview';
 import { useUserManagementHandlers } from './hooks/useUserManagementHandlers';
 
@@ -166,13 +168,9 @@ function MainApp() {
     updateCurrentUserInfo,
   } = useAuthSession();
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [ipViewMode, setIpViewMode] = useState('list');
-  const [dcimViewMode, setDcimViewMode] = useState('list');
-  const [elevationLayout, setElevationLayout] = useState('horizontal');
   const [debugLogs, setDebugLogs] = useState([]);
   const [isDebugOpen, setIsDebugOpen] = useState(false);
   const [isSystemStatusOpen, setIsSystemStatusOpen] = useState(false);
-  const [tagFilter, setTagFilter] = useState('');
   const currentRole = currentUserInfo?.role || (currentUser === 'admin' ? 'admin' : 'guest');
   const currentPermissions = ROLE_DEFINITIONS[currentRole]?.permissions || [];
   const currentUserDisplay = currentUserInfo?.display_name || currentUserInfo?.username || currentUser;
@@ -253,13 +251,6 @@ function MainApp() {
       });
   };
 
-  const [activeLocation, setActiveLocation] = useState(null);
-  const [selectedRack, setSelectedRack] = useState(null);
-  const [selectedSubnetId, setSelectedSubnetId] = useState(null);
-  const [expandedSections, setExpandedSections] = useState({});
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isScanning, setIsScanning] = useState(false);
-
   const [isIPModalOpen, setIsIPModalOpen] = useState(false);
   const [isSubnetModalOpen, setIsSubnetModalOpen] = useState(false);
   const [isSectionModalOpen, setIsSectionModalOpen] = useState(false);
@@ -280,14 +271,6 @@ function MainApp() {
   const [resetTarget, setResetTarget] = useState({});
   const [blockFormData, setBlockFormData] = useState({});
   const [passwordFormData, setPasswordFormData] = useState({ current_password: '', new_password: '', confirm_password: '' });
-  const [currentRackForm, setCurrentRackForm] = useState(null);
-  const [currentDcForm, setCurrentDcForm] = useState(null);
-  const [editingDevice, setEditingDevice] = useState(null);
-
-  const elevationScrollRef = useRef(null);
-  const elevationContentRef = useRef(null);
-  const elevationDragInfo = useRef({ isDown: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0 });
-  const [viewState, setViewState] = useState({ scale: 0.74 });
 
   const [notifications, setNotifications] = useState([]);
   const [confirmState, setConfirmState] = useState({
@@ -353,15 +336,52 @@ function MainApp() {
       });
     });
   }, []);
-  const handleZoomIn = () => setViewState(prev => ({ ...prev, scale: Math.min(prev.scale + 0.06, 0.9) }));
-  const handleZoomOut = () => setViewState(prev => ({ ...prev, scale: Math.max(prev.scale - 0.06, 0.56) }));
-  const handleZoomReset = () => setViewState({ scale: 0.74 });
-
   const getRackCalculatedPower = (rackId) => {
       if (!Array.isArray(rackDevices)) return { rated_sum: 0, typical_sum: 0 };
     const devicesInRack = rackDevices.filter(d => String(d.rack) === String(rackId));
       return devicesInRack.reduce((acc, dev) => ({ rated_sum: acc.rated_sum + (safeInt(dev.power_usage) || 0), typical_sum: acc.typical_sum + (safeInt(dev.typical_power) || 0) }), { rated_sum: 0, typical_sum: 0 });
   };
+
+  const {
+    ipViewMode,
+    setIpViewMode,
+    selectedSubnetId,
+    setSelectedSubnetId,
+    expandedSections,
+    setExpandedSections,
+    searchQuery,
+    setSearchQuery,
+    tagFilter,
+    setTagFilter,
+  } = useIpamViewState();
+
+  const {
+    dcimViewMode,
+    setDcimViewMode,
+    elevationLayout,
+    setElevationLayout,
+    activeLocation,
+    setActiveLocation,
+    selectedRack,
+    setSelectedRack,
+    currentRackForm,
+    setCurrentRackForm,
+    currentDcForm,
+    setCurrentDcForm,
+    editingDevice,
+    setEditingDevice,
+    viewState,
+    elevationScrollRef,
+    elevationContentRef,
+    handleZoomIn,
+    handleZoomOut,
+    handleZoomReset,
+    handleElevationMouseDown,
+    handleElevationMouseLeave,
+    handleElevationMouseUp,
+    handleElevationMouseMove,
+    handleJumpToDc,
+  } = useDcimViewState();
 
   const {
     sections,
@@ -397,73 +417,34 @@ function MainApp() {
     refreshOverview,
   } = useSystemOverview(isLoggedIn);
 
-  const currentRacks = useMemo(() => racks.filter(r => String(r.datacenter) === String(activeLocation)), [racks, activeLocation]);
-  const currentSubnet = useMemo(() => subnets.find(s => String(s.id) === String(selectedSubnetId)) || {}, [subnets, selectedSubnetId]);
-  
-  const filteredIPs = useMemo(() => {
-    const selectedKey = selectedSubnetId == null ? null : String(selectedSubnetId);
-    return ips.filter(ip => {
-      const matchSubnet = selectedKey == null ? true : String(ip.subnet) === selectedKey;
-      const matchSearch = searchQuery ? JSON.stringify(ip).toLowerCase().includes(searchQuery.toLowerCase()) : true;
-      const matchTag = tagFilter ? (ip.tag === tagFilter) : true;
-      return matchSubnet && matchSearch && matchTag;
-    });
-  }, [ips, selectedSubnetId, searchQuery, tagFilter]);
+  const {
+    isScanning,
+    handleScanSubnet,
+    handlePoolIPClick,
+  } = useIpamViewActions({
+    selectedSubnetId,
+    safeFetch,
+    refreshData,
+    alert,
+    extractResponseMessage,
+    setIsIPModalOpen,
+    setEditingIP,
+    setIpFormData,
+  });
 
-  const uniqueTags = useMemo(() => {
-    const tags = new Set();
-    ips.forEach(ip => {
-      if (ip.tag) tags.add(ip.tag);
-    });
-    return Array.from(tags);
-  }, [ips]);
-
-  const datacenterPowerStats = useMemo(() => {
-    return currentRacks.reduce(
-      (acc, rack) => {
-        const rackStats = getRackCalculatedPower(rack.id);
-        return {
-          total_rated: acc.total_rated + rackStats.rated_sum,
-          total_typical: acc.total_typical + rackStats.typical_sum,
-          total_pdu: acc.total_pdu + safeInt(rack.pdu_power, 0),
-        };
-      },
-      { total_rated: 0, total_typical: 0, total_pdu: 0 }
-    );
-  }, [currentRacks]);
-
-  const handleElevationMouseDown = (e) => {
-    const ele = elevationScrollRef.current;
-    if (!ele) return;
-    elevationDragInfo.current.isDown = true;
-    elevationDragInfo.current.startX = e.pageX - ele.offsetLeft;
-    elevationDragInfo.current.startY = e.pageY - ele.offsetTop;
-    elevationDragInfo.current.scrollLeft = ele.scrollLeft;
-    elevationDragInfo.current.scrollTop = ele.scrollTop;
-    ele.style.cursor = 'grabbing';
-  };
-
-  const handleElevationMouseLeave = () => {
-    elevationDragInfo.current.isDown = false;
-    if (elevationScrollRef.current) elevationScrollRef.current.style.cursor = 'grab';
-  };
-
-  const handleElevationMouseUp = () => {
-    elevationDragInfo.current.isDown = false;
-    if (elevationScrollRef.current) elevationScrollRef.current.style.cursor = 'grab';
-  };
-
-  const handleElevationMouseMove = (e) => {
-    if (!elevationDragInfo.current.isDown) return;
-    e.preventDefault();
-    const ele = elevationScrollRef.current;
-    const x = e.pageX - ele.offsetLeft;
-    const y = e.pageY - ele.offsetTop;
-    const walkX = (x - elevationDragInfo.current.startX) * 1.2;
-    const walkY = (y - elevationDragInfo.current.startY) * 1.2;
-    ele.scrollLeft = elevationDragInfo.current.scrollLeft - walkX;
-    ele.scrollTop = elevationDragInfo.current.scrollTop - walkY;
-  };
+  const { currentSubnet, filteredIPs, uniqueTags } = useIpamDerivedData({
+    ips,
+    subnets,
+    selectedSubnetId,
+    searchQuery,
+    tagFilter,
+  });
+  const { currentRacks, datacenterPowerStats } = useDcimDerivedData({
+    racks,
+    activeLocation,
+    getRackCalculatedPower,
+    safeInt,
+  });
 
   const {
     fileInputRef,
@@ -490,11 +471,6 @@ function MainApp() {
     getRackCalculatedPower,
     refreshData,
   });
-
-  const handleJumpToDc = (dcId) => {
-    setActiveTab('dcim');
-    setActiveLocation(dcId);
-  };
 
   const handleSaveIP = async () => {
     if (!ipFormData.ip_address) {
@@ -799,30 +775,6 @@ function MainApp() {
     }
   };
 
-  const handleScanSubnet = async () => {
-    if (!selectedSubnetId) return;
-    if (!confirm('确定立即开始子网扫描吗？')) return;
-
-    setIsScanning(true);
-    try {
-      const response = await safeFetch('/api/scan/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subnet_id: selectedSubnetId }),
-      });
-      if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, '子网扫描失败'));
-      }
-      const data = await response.json();
-      alert(data.message || '子网扫描完成。');
-      refreshData();
-    } catch (error) {
-      alert(`子网扫描失败：${error.message}`);
-    } finally {
-      setIsScanning(false);
-    }
-  };
-
   const handleManualBackup = async () => {
     try {
       const response = await safeFetch('/api/trigger-backup/', { method: 'POST' });
@@ -874,20 +826,6 @@ function MainApp() {
     } catch (error) {
       alert(`移除黑名单失败：${error.message}`);
     }
-  };
-
-  const handlePoolIPClick = (item) => { 
-      if (item.id) {
-          setEditingIP(item);
-          setIpFormData(item);
-      } else {
-          setEditingIP(null);
-          setIpFormData({ 
-              ip_address: item.ip || item.ip_address, 
-              status: item.status === 'free' ? 'offline' : item.status 
-          });
-      }
-      setIsIPModalOpen(true); 
   };
 
   if (isAuthChecking) {
@@ -944,7 +882,7 @@ function MainApp() {
                 residentStaff={residentStaff}
                 overview={systemOverview}
                 lastRefreshedAt={systemOverviewRefreshedAt}
-                onJumpToDc={handleJumpToDc}
+                onJumpToDc={(dcId) => handleJumpToDc(dcId, setActiveTab)}
              />
           )}
 

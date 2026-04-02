@@ -151,6 +151,8 @@ export default function ResidentManagementView({ residentStaff, onRefresh }) {
     company: '',
     phone: '',
     mac: '',
+    approvalStatus: '',
+    seatStatus: '',
   });
 
   const registrationLink =
@@ -182,22 +184,32 @@ export default function ResidentManagementView({ residentStaff, onRefresh }) {
     const normalizedCompany = filters.company.trim().toLowerCase();
     const normalizedPhone = filters.phone.trim().toLowerCase();
     const normalizedMac = filters.mac.trim().toLowerCase();
+    const normalizedApprovalStatus = filters.approvalStatus.trim().toLowerCase();
+    const normalizedSeatStatus = filters.seatStatus.trim().toLowerCase();
 
     return residentStaff.filter((resident) => {
       const devices = resident.devices || [];
       const residentName = String(resident.name || '').toLowerCase();
       const residentCompany = String(resident.company || '').toLowerCase();
       const residentPhone = String(resident.phone || '').toLowerCase();
+      const residentApprovalStatus = String(resident.approval_status || '').toLowerCase();
       const deviceMacText = devices
         .flatMap((device) => [device.wired_mac, device.wireless_mac])
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
+      const seatStatus = resident.needs_seat
+        ? resident.seat_number
+          ? 'assigned'
+          : 'needed'
+        : 'not_needed';
 
       if (normalizedName && !residentName.includes(normalizedName)) return false;
       if (normalizedCompany && !residentCompany.includes(normalizedCompany)) return false;
       if (normalizedPhone && !residentPhone.includes(normalizedPhone)) return false;
       if (normalizedMac && !deviceMacText.includes(normalizedMac)) return false;
+      if (normalizedApprovalStatus && residentApprovalStatus !== normalizedApprovalStatus) return false;
+      if (normalizedSeatStatus && seatStatus !== normalizedSeatStatus) return false;
       return true;
     });
   }, [filters, residentStaff]);
@@ -216,6 +228,8 @@ export default function ResidentManagementView({ residentStaff, onRefresh }) {
       company: '',
       phone: '',
       mac: '',
+      approvalStatus: '',
+      seatStatus: '',
     });
   };
 
@@ -521,7 +535,7 @@ export default function ResidentManagementView({ residentStaff, onRefresh }) {
               当前结果 {filteredResidentStaff.length} / {residentStaff.length}
             </div>
           </div>
-          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
             <FormInput
               label="姓名"
               value={filters.name}
@@ -546,6 +560,38 @@ export default function ResidentManagementView({ residentStaff, onRefresh }) {
               onChange={(event) => setFilters((prev) => ({ ...prev, mac: event.target.value }))}
               placeholder="例如：AA:BB 或 11-22"
             />
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">
+                审批状态
+              </label>
+              <select
+                value={filters.approvalStatus}
+                onChange={(event) => setFilters((prev) => ({ ...prev, approvalStatus: event.target.value }))}
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700"
+              >
+                <option value="">全部状态</option>
+                {approvalOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">
+                座位安排
+              </label>
+              <select
+                value={filters.seatStatus}
+                onChange={(event) => setFilters((prev) => ({ ...prev, seatStatus: event.target.value }))}
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700"
+              >
+                <option value="">全部情况</option>
+                <option value="needed">需要安排且未落实</option>
+                <option value="assigned">已安排座位</option>
+                <option value="not_needed">无需座位</option>
+              </select>
+            </div>
           </div>
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
             <div className="text-xs text-slate-400">

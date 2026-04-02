@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { AlertTriangle, FileSpreadsheet, Loader2, TableProperties, Upload } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, Download, FileSpreadsheet, Loader2, TableProperties, Upload } from 'lucide-react';
 
 import { Modal } from './common/UI';
 import { previewDcimImport, previewIpImport, previewResidentImport } from '../lib/api';
@@ -12,6 +12,9 @@ const CONTEXT_COPY = {
     previewPendingText: '系统正在分析文件结构与编码。',
     ruleTitle: '基础规则',
     modeText: 'IP 台账',
+    objectHeader: '设备 / IP',
+    locationHeader: '网段',
+    failedReportName: 'ipam_import_failed_rows.csv',
   },
   dcim: {
     title: 'DCIM 导入预览',
@@ -20,6 +23,9 @@ const CONTEXT_COPY = {
     previewPendingText: '系统正在分析机柜资产与设备资产工作表。',
     ruleTitle: '导入说明',
     modeText: '机房设备',
+    objectHeader: '对象',
+    locationHeader: '定位',
+    failedReportName: 'dcim_import_failed_rows.csv',
   },
   resident: {
     title: '驻场导入预览',
@@ -28,6 +34,9 @@ const CONTEXT_COPY = {
     previewPendingText: '系统正在分析驻场人员与备案设备信息。',
     ruleTitle: '导入说明',
     modeText: '驻场人员',
+    objectHeader: '人员 / 公司',
+    locationHeader: '项目 / 部门',
+    failedReportName: 'resident_import_failed_rows.csv',
   },
 };
 
@@ -43,6 +52,27 @@ const actionTone = (action) => {
   if (action === 'update') return 'text-cyan-700';
   if (action === 'skip') return 'text-amber-700';
   return 'text-rose-700';
+};
+
+const buildCsvBlob = (rows) => {
+  const header = ['序号', '工作表/分组', '行号', '动作', '对象', '补充信息', '原因'];
+  const escapeCell = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  const content = [header, ...rows]
+    .map((row) => row.map(escapeCell).join(','))
+    .join('\r\n');
+  return new Blob([`\uFEFF${content}`], { type: 'text/csv;charset=utf-8;' });
+};
+
+const triggerDownload = (blob, filename) => {
+  if (typeof window === 'undefined') return;
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
 };
 
 export default function ImportWizardModal({ file, onClose, onConfirm, context = 'ipam' }) {
@@ -76,7 +106,7 @@ export default function ImportWizardModal({ file, onClose, onConfirm, context = 
         }
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
-          throw new Error(data.message || '导入预览失败');
+          throw new Error(data.message || data.detail || '导入预览失败');
         }
         if (!cancelled) {
           setPreview(data);
@@ -103,7 +133,28 @@ export default function ImportWizardModal({ file, onClose, onConfirm, context = 
   const rows = preview?.preview?.rows || [];
   const errors = preview?.preview?.errors || [];
   const warnings = preview?.preview?.warnings || [];
+  const failedRows = preview?.preview?.failed_rows || [];
   const canImport = preview?.preview?.can_import && !previewError;
+
+  const reportRows = useMemo(() => {
+    if (failedRows.length > 0) {
+      return failedRows.map((row, index) => [
+        index + 1,
+        row.sheet || row.record_type || copy.modeText,
+        row.row_number || '-',
+        actionLabel(row.action || 'invalid'),
+        row.title || row.device_name || '未命名对象',
+        row.subtitle || row.ip_address || '',
+        row.reason || '未提供原因',
+      ]);
+    }
+    return errors.map((message, index) => [index + 1, copy.modeText, '-', '异常', '预览校验', '', message]);
+  }, [copy.modeText, errors, failedRows]);
+
+  const handleDownloadFailedReport = () => {
+    if (!reportRows.length) return;
+    triggerDownload(buildCsvBlob(reportRows), copy.failedReportName);
+  };
 
   return (
     <Modal isOpen={true} onClose={onClose} title={copy.title} size="xl">
@@ -135,7 +186,7 @@ export default function ImportWizardModal({ file, onClose, onConfirm, context = 
                       <option value="none">仅导入数据，不做自动映射</option>
                     </select>
                     <p className="mt-1 text-[11px] leading-5 text-slate-400">
-                      例如工作表名称为“03办公网段”或“7F-弱电间”，系统会尝试映射到对应的业务区域或物理位置。
+                      例如工作表名为“3F办公网段”或“7F-弱电间”，系统会尝试映射到对应的业务区域或物理位置。
                     </p>
                   </div>
 
@@ -166,7 +217,7 @@ export default function ImportWizardModal({ file, onClose, onConfirm, context = 
                   ) : (
                     <>
                       <div>默认优先按登记编号匹配已有驻场人员；未提供登记编号时，会回退到“公司 + 姓名 + 联系方式”匹配。</div>
-                      <div>预览会提前指出缺少必填字段的行，并展示每位人员将覆盖还是新增，以及备案设备数量。</div>
+                      <div>预览会提前指出缺少公司或姓名的行，并显示每位人员将覆盖还是新增，以及备案设备数量。</div>
                     </>
                   )}
                 </div>
@@ -298,6 +349,19 @@ export default function ImportWizardModal({ file, onClose, onConfirm, context = 
               </div>
             ) : null}
 
+            {reportRows.length > 0 ? (
+              <div className="flex justify-end">
+                <button
+                  onClick={handleDownloadFailedReport}
+                  type="button"
+                  className="inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs font-bold text-amber-700 hover:bg-amber-50"
+                >
+                  <Download className="h-4 w-4" />
+                  下载失败行报告
+                </button>
+              </div>
+            ) : null}
+
             {errors.length > 0 ? (
               <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
                 <div className="flex items-center gap-2 text-sm font-bold text-rose-700">
@@ -324,13 +388,15 @@ export default function ImportWizardModal({ file, onClose, onConfirm, context = 
             ) : null}
 
             <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-              <div className={`grid gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400 ${
-                isDcim || isResident ? 'grid-cols-[5rem_6rem_1fr_9rem]' : 'grid-cols-[5rem_8rem_1fr_7rem]'
-              }`}>
+              <div
+                className={`grid gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400 ${
+                  isDcim || isResident ? 'grid-cols-[5rem_6rem_1fr_9rem]' : 'grid-cols-[5rem_8rem_1fr_7rem]'
+                }`}
+              >
                 <span>行号</span>
                 <span>动作</span>
-                <span>{isDcim ? '对象' : isResident ? '人员 / 公司' : '设备 / IP'}</span>
-                <span>{isDcim ? '定位' : isResident ? '项目 / 部门' : '网段'}</span>
+                <span>{copy.objectHeader}</span>
+                <span>{copy.locationHeader}</span>
               </div>
               <div className="custom-scrollbar max-h-72 overflow-y-auto">
                 {rows.length === 0 ? (
@@ -338,7 +404,7 @@ export default function ImportWizardModal({ file, onClose, onConfirm, context = 
                 ) : (
                   rows.map((row) => (
                     <div
-                      key={`${row.sheet || 'sheet'}-${row.row_number}-${row.ip_address || row.title}`}
+                      key={`${row.sheet || row.sheet_name || 'sheet'}-${row.row_number}-${row.ip_address || row.title || row.device_name}`}
                       className={`grid gap-3 border-b border-slate-100 px-4 py-3 text-sm last:border-b-0 ${
                         isDcim || isResident ? 'grid-cols-[5rem_6rem_1fr_9rem]' : 'grid-cols-[5rem_8rem_1fr_7rem]'
                       }`}

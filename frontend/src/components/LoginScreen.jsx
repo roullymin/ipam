@@ -56,7 +56,7 @@ export default function LoginScreen({ onLogin }) {
               <Radar className="h-5 w-5 text-cyan-300" />
               <div className="mt-3 text-sm font-bold text-white">统一态势入口</div>
               <div className="mt-1 text-xs leading-5 text-slate-300/78">
-                将 IP、机房、人员与审计放进同一张工作台。
+                把 IP、机房、人员与审计放进同一张工作台。
               </div>
             </div>
             <div className="login-feature-card">
@@ -79,10 +79,8 @@ export default function LoginScreen({ onLogin }) {
         <section className="login-panel px-6 py-8 md:px-10 md:py-12">
           <div className="mx-auto w-full max-w-md">
             <div className="mb-8">
-              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
-                安全登录
-              </div>
-              <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-950">进入控制台</h2>
+              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">安全登录</div>
+              <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-950">进入系统</h2>
               <p className="mt-2 text-sm leading-6 text-slate-500">
                 使用平台账号进入 {BRAND.shortName}，继续处理网络地址、机房设备和运营流程。
               </p>
@@ -130,7 +128,7 @@ export default function LoginScreen({ onLogin }) {
                 当前版本已统一品牌和入口壳层
               </div>
               <div className="mt-2 text-xs leading-6 text-slate-500">
-                下一步建议继续重做总览页、网络地址页和机房设备页的信息层级，让页面行为更接近真实运维驾驶舱。
+                下一步建议继续优化总览页、网络地址页和机房设备页的信息层级，让页面行为更贴近真实运维驾驶台。
               </div>
             </div>
           </div>
@@ -138,7 +136,7 @@ export default function LoginScreen({ onLogin }) {
       </div>
 
       <div className="mx-auto mt-5 max-w-6xl px-1 text-xs text-slate-500">
-        <span className="font-semibold text-slate-700">{BRAND.name}</span> · {BRAND.tagline}
+        <span className="font-semibold text-slate-700">{BRAND.name}</span> / {BRAND.tagline}
       </div>
       <div className="mx-auto mt-3 max-w-6xl px-1 text-[11px] leading-5 text-slate-400">
         当前版本优先保留现有账号与业务数据，同时逐步补齐更适合生产环境的认证、角色、审计和恢复能力。

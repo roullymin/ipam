@@ -5,6 +5,9 @@
 这份文档用于固定化服务器更新后的验收步骤，帮助快速判断“代码是否真的生效”。  
 This document provides a fixed post-deployment acceptance checklist so you can quickly verify whether an update actually took effect.
 
+如需执行乱码修复前后的专项抽样核对，请同时参考 `docs/ENCODING_CLEANUP_BATCH_01.md`。  
+For dedicated sampling checks before and after encoding cleanup, also see `docs/ENCODING_CLEANUP_BATCH_01.md`.
+
 ## 第一步：检查仓库状态 / Step 1: Check Repository State
 
 在服务器仓库根目录执行：  
