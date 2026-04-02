@@ -1211,6 +1211,155 @@ def _build_change_request_pdf(response_buffer, change_request):
     doc.build(elements)
 
 
+def _build_change_device_defaults(change_request, item):
+    device_name = (
+        (item.device_name or '').strip()
+        or (item.rack_device.name if item.rack_device else '').strip()
+        or f'{change_request.request_code}-设备{item.pk}'
+    )
+    specs_parts = []
+    if item.device_model:
+        specs_parts.append(f'型号: {item.device_model}')
+    if item.notes:
+        specs_parts.append(f'备注: {item.notes}')
+    return {
+        'name': device_name,
+        'position': item.target_u_start or item.source_u_start or 1,
+        'u_height': max(1, int(item.u_height or 1)),
+        'device_type': 'other',
+        'mgmt_ip': (item.assigned_management_ip or '').strip() or None,
+        'project': (change_request.project_name or '').strip(),
+        'contact': (change_request.applicant_name or '').strip(),
+        'power_usage': int(item.power_watts or 0),
+        'specs': '\n'.join(specs_parts).strip(),
+        'sn': (item.serial_number or '').strip() or None,
+        'status': 'active',
+    }
+
+
+def _resolve_existing_change_device(item):
+    if item.rack_device_id:
+        return item.rack_device
+    if item.source_rack_id and item.source_u_start:
+        return RackDevice.objects.filter(rack_id=item.source_rack_id, position=item.source_u_start).first()
+    return None
+
+
+def _sync_change_request_ip(item, change_request, device_name, activate=True):
+    management_ip = (item.assigned_management_ip or '').strip()
+    if not management_ip:
+        return None
+
+    description = f'设备变更申请 {change_request.request_code} / {change_request.title or change_request.request_type}'
+    ip_record, _ = IPAddress.objects.update_or_create(
+        ip_address=management_ip,
+        defaults={
+            'status': 'online' if activate else 'offline',
+            'device_name': device_name if activate else '',
+            'device_type': 'other',
+            'owner': (change_request.applicant_name or change_request.company or '').strip(),
+            'description': description,
+        },
+    )
+    return ip_record
+
+
+def _apply_change_request_execution(change_request):
+    execution_rows = []
+
+    for item in change_request.items.select_related('rack_device', 'source_rack', 'target_rack').all():
+        request_type = change_request.request_type
+        existing_device = _resolve_existing_change_device(item)
+        device_name = ((item.device_name or '').strip() or (existing_device.name if existing_device else '').strip() or f'{change_request.request_code}-设备{item.pk}')
+        synced_ip = None
+
+        if request_type in {'rack_in', 'move_in'}:
+            if not item.target_rack_id or not item.target_u_start:
+                raise serializers.ValidationError({'items': ['上架/搬入执行时必须填写目标机柜和目标 U 位。']})
+
+            defaults = _build_change_device_defaults(change_request, item)
+            if existing_device:
+                for field, value in defaults.items():
+                    setattr(existing_device, field, value)
+                existing_device.rack_id = item.target_rack_id
+                existing_device.position = item.target_u_start
+                existing_device.save()
+                device = existing_device
+                action = 'update_device'
+            else:
+                device = RackDevice.objects.create(rack_id=item.target_rack_id, **defaults)
+                item.rack_device = device
+                item.save(update_fields=['rack_device', 'updated_at'])
+                action = 'create_device'
+            synced_ip = _sync_change_request_ip(item, change_request, device.name, activate=True)
+
+        elif request_type == 'relocate':
+            if not item.target_rack_id or not item.target_u_start:
+                raise serializers.ValidationError({'items': ['迁移执行时必须填写目标机柜和目标 U 位。']})
+
+            defaults = _build_change_device_defaults(change_request, item)
+            if existing_device:
+                for field, value in defaults.items():
+                    setattr(existing_device, field, value)
+                existing_device.rack_id = item.target_rack_id
+                existing_device.position = item.target_u_start
+                existing_device.save()
+                device = existing_device
+                action = 'relocate_device'
+            else:
+                device = RackDevice.objects.create(rack_id=item.target_rack_id, **defaults)
+                item.rack_device = device
+                item.save(update_fields=['rack_device', 'updated_at'])
+                action = 'create_and_relocate'
+            synced_ip = _sync_change_request_ip(item, change_request, device.name, activate=True)
+
+        elif request_type in {'rack_out', 'move_out', 'decommission'}:
+            device = existing_device
+            if device:
+                device.status = 'decommissioned' if request_type == 'decommission' else 'removed'
+                device.save(update_fields=['status', 'updated_at'])
+                device_name = device.name
+                action = 'deactivate_device'
+            else:
+                action = 'record_only'
+            if item.ip_action in {'release', 'change'}:
+                synced_ip = _sync_change_request_ip(item, change_request, device_name, activate=False)
+
+        elif request_type == 'power_change':
+            device = existing_device
+            action = 'record_only'
+            if device:
+                changed_fields = []
+                target_power = int(item.power_watts or 0)
+                if target_power and device.power_usage != target_power:
+                    device.power_usage = target_power
+                    changed_fields.append('power_usage')
+                management_ip = (item.assigned_management_ip or '').strip()
+                if management_ip and device.mgmt_ip != management_ip:
+                    device.mgmt_ip = management_ip
+                    changed_fields.append('mgmt_ip')
+                if changed_fields:
+                    changed_fields.append('updated_at')
+                    device.save(update_fields=changed_fields)
+                    action = 'update_device'
+                device_name = device.name
+            synced_ip = _sync_change_request_ip(item, change_request, device_name, activate=True)
+
+        else:
+            action = 'record_only'
+
+        execution_rows.append(
+            {
+                'item_id': item.id,
+                'device_name': device_name,
+                'action': action,
+                'management_ip': synced_ip.ip_address if synced_ip else (item.assigned_management_ip or ''),
+            }
+        )
+
+    return execution_rows
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 @authentication_classes([])
@@ -2157,13 +2306,35 @@ class DatacenterChangeRequestViewSet(OptionalPaginationMixin, BaseViewSet):
     @action(detail=True, methods=['post'])
     def complete(self, request, pk=None):
         change_request = self.get_object()
-        change_request.status = 'completed'
-        change_request.executor_name = request.data.get('executor_name') or get_actor_name(request.user)
-        change_request.execution_comment = request.data.get('execution_comment', change_request.execution_comment)
-        change_request.executed_at = timezone.now()
-        change_request.save(update_fields=['status', 'executor_name', 'execution_comment', 'executed_at', 'updated_at'])
-        record_audit(request, self.audit_module, 'complete', change_request, '机房设备变更申请已执行完成')
-        return Response({'status': 'success', 'request': self.get_serializer(change_request).data})
+        items_payload = request.data.get('items')
+
+        with transaction.atomic():
+            if items_payload is not None:
+                serializer = self.get_serializer(change_request, data={'items': items_payload}, partial=True)
+                serializer.is_valid(raise_exception=True)
+                change_request = serializer.save()
+
+            execution_rows = _apply_change_request_execution(change_request)
+            change_request.status = 'completed'
+            change_request.executor_name = request.data.get('executor_name') or get_actor_name(request.user)
+            change_request.execution_comment = request.data.get('execution_comment', change_request.execution_comment)
+            change_request.executed_at = timezone.now()
+            change_request.save(update_fields=['status', 'executor_name', 'execution_comment', 'executed_at', 'updated_at'])
+
+        record_audit(
+            request,
+            self.audit_module,
+            'complete',
+            change_request,
+            f'机房设备变更申请已执行完成，回填 {len(execution_rows)} 条设备结果',
+        )
+        return Response(
+            {
+                'status': 'success',
+                'request': self.get_serializer(change_request).data,
+                'execution_report': execution_rows,
+            }
+        )
 
     @action(detail=True, methods=['post'])
     def regenerate_link(self, request, pk=None):

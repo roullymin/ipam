@@ -445,6 +445,82 @@ class DatacenterChangeRequestTests(BaseApiTestCase):
         self.assertEqual(change_request.execution_comment, '璁惧宸叉惉杩佸畬鎴?')
         self.assertIsNotNone(change_request.executed_at)
 
+    def test_complete_rack_in_creates_rack_device_and_updates_ip(self):
+        change_request = DatacenterChangeRequest.objects.create(
+            request_type='rack_in',
+            status='approved',
+            title='新设备上架',
+            applicant_name='执行人A',
+            project_name='新项目',
+        )
+        change_request.items.create(
+            device_name='接入交换机A',
+            device_model='S5700',
+            serial_number='SN-RACKIN-001',
+            quantity=1,
+            u_height=2,
+            power_watts=260,
+            network_role='command',
+            ip_action='allocate',
+            assigned_management_ip='10.10.10.20',
+            target_datacenter=self.datacenter,
+            target_rack=self.rack,
+            target_u_start=18,
+            target_u_end=17,
+        )
+
+        response = self.client.post(
+            f'/api/datacenter-change-requests/{change_request.id}/complete/',
+            {'executor_name': '执行工程师', 'execution_comment': '已完成上架并接入管理网络'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        change_request.refresh_from_db()
+        item = change_request.items.get()
+        self.assertEqual(change_request.status, 'completed')
+        self.assertIsNotNone(item.rack_device_id)
+        self.assertEqual(item.rack_device.rack_id, self.rack.id)
+        self.assertEqual(item.rack_device.position, 18)
+        self.assertEqual(item.rack_device.mgmt_ip, '10.10.10.20')
+        ip_record = IPAddress.objects.get(ip_address='10.10.10.20')
+        self.assertEqual(ip_record.status, 'online')
+        self.assertEqual(ip_record.device_name, '接入交换机A')
+
+    def test_complete_rack_out_marks_device_removed_and_releases_ip(self):
+        change_request = DatacenterChangeRequest.objects.create(
+            request_type='rack_out',
+            status='approved',
+            title='旧设备下架',
+            applicant_name='执行人B',
+        )
+        change_request.items.create(
+            rack_device=self.device,
+            device_name=self.device.name,
+            quantity=1,
+            u_height=2,
+            ip_action='release',
+            assigned_management_ip=self.device.mgmt_ip,
+            source_datacenter=self.datacenter,
+            source_rack=self.rack,
+            source_u_start=self.device.position,
+            source_u_end=self.device.position - self.device.u_height + 1,
+        )
+        IPAddress.objects.create(ip_address=self.device.mgmt_ip, status='online', device_name=self.device.name, nat_type='none')
+
+        response = self.client.post(
+            f'/api/datacenter-change-requests/{change_request.id}/complete/',
+            {'execution_comment': '设备已下架并释放地址'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.device.refresh_from_db()
+        self.assertEqual(self.device.status, 'removed')
+        ip_record = IPAddress.objects.get(ip_address=self.device.mgmt_ip)
+        self.assertEqual(ip_record.status, 'offline')
+        self.assertEqual(ip_record.device_name, '')
+
     def test_public_change_request_detail_works_with_token(self):
         change_request = DatacenterChangeRequest.objects.create(
             request_type='move_in',
