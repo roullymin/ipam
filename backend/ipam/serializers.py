@@ -370,6 +370,23 @@ class DatacenterChangeItemSerializer(serializers.ModelSerializer):
             'updated_at',
         ]
         read_only_fields = ['created_at', 'updated_at']
+        extra_kwargs = {
+            'device_name': {'required': False, 'allow_blank': True},
+            'device_model': {'required': False, 'allow_blank': True},
+            'serial_number': {'required': False, 'allow_blank': True},
+            'power_circuit': {'required': False, 'allow_blank': True},
+            'assigned_management_ip': {'required': False, 'allow_blank': True},
+            'assigned_service_ip': {'required': False, 'allow_blank': True},
+            'notes': {'required': False, 'allow_blank': True},
+            'source_datacenter': {'required': False, 'allow_null': True},
+            'source_rack': {'required': False, 'allow_null': True},
+            'target_datacenter': {'required': False, 'allow_null': True},
+            'target_rack': {'required': False, 'allow_null': True},
+            'source_u_start': {'required': False, 'allow_null': True},
+            'source_u_end': {'required': False, 'allow_null': True},
+            'target_u_start': {'required': False, 'allow_null': True},
+            'target_u_end': {'required': False, 'allow_null': True},
+        }
 
 
 class DatacenterChangeRequestSerializer(serializers.ModelSerializer):

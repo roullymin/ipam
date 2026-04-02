@@ -20,6 +20,36 @@ const formatDateTime = (value) => {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('zh-CN', { hour12: false });
 };
 
+const formatApiError = (payload, fallback) => {
+  if (!payload) return fallback;
+  if (typeof payload === 'string') return payload;
+  if (payload.detail) return payload.detail;
+  if (payload.message) return payload.message;
+
+  const messages = [];
+  Object.entries(payload).forEach(([field, value]) => {
+    if (Array.isArray(value)) {
+      messages.push(`${field}: ${value.join('；')}`);
+      return;
+    }
+    if (value && typeof value === 'object') {
+      Object.entries(value).forEach(([nestedField, nestedValue]) => {
+        if (Array.isArray(nestedValue)) {
+          messages.push(`${field}.${nestedField}: ${nestedValue.join('；')}`);
+        } else if (nestedValue && typeof nestedValue === 'object') {
+          messages.push(`${field}.${nestedField}: ${JSON.stringify(nestedValue)}`);
+        } else {
+          messages.push(`${field}.${nestedField}: ${nestedValue}`);
+        }
+      });
+      return;
+    }
+    messages.push(`${field}: ${value}`);
+  });
+
+  return messages.filter(Boolean).join(' | ') || fallback;
+};
+
 const isLinkActive = (item) => item?.token_expires_at && new Date(item.token_expires_at).getTime() > Date.now();
 const findRack = (topology, dcId, rackId) => topology.find((dc) => String(dc.id) === String(dcId))?.racks?.find((rack) => String(rack.id) === String(rackId));
 
@@ -104,7 +134,7 @@ export default function DatacenterChangeRequestView() {
     try {
       const response = await safeFetch('/api/datacenter-change-requests/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, items: form.items.map(normalizeItem) }) });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || result.message || '创建草稿失败。');
+      if (!response.ok) throw new Error(formatApiError(result, '创建草稿失败。'));
       setNotice(`已生成独立链接：${result.request_code}`);
       setOpen(false);
       resetForm();
@@ -121,7 +151,7 @@ export default function DatacenterChangeRequestView() {
     try {
       const response = await safeFetch(`/api/datacenter-change-requests/${id}/${action}/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || result.message || '操作失败。');
+      if (!response.ok) throw new Error(formatApiError(result, '操作失败。'));
       setNotice(message);
       await loadData();
     } catch (requestError) {

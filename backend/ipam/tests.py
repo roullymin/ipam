@@ -339,6 +339,36 @@ class DatacenterChangeRequestTests(BaseApiTestCase):
         self.assertEqual(change_request.items.count(), 1)
         self.assertEqual(change_request.created_by, self.dc_operator)
 
+    def test_can_create_draft_with_only_location_and_ip_prefill(self):
+        response = self.client.post(
+            '/api/datacenter-change-requests/',
+            {
+                'request_type': 'rack_in',
+                'items': [
+                    {
+                        'network_role': 'command',
+                        'ip_action': 'allocate',
+                        'assigned_management_ip': '10.10.10.10',
+                        'target_datacenter': self.datacenter.id,
+                        'target_rack': self.rack.id,
+                        'target_u_start': 10,
+                    }
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['status'], 'draft')
+        self.assertEqual(response.data['item_count'], 1)
+
+        change_request = DatacenterChangeRequest.objects.get(pk=response.data['id'])
+        item = change_request.items.get()
+        self.assertEqual(item.assigned_management_ip, '10.10.10.10')
+        self.assertEqual(item.target_rack_id, self.rack.id)
+        self.assertEqual(item.network_role, 'command')
+        self.assertEqual(item.ip_action, 'allocate')
+
     def test_can_approve_change_request(self):
         change_request = DatacenterChangeRequest.objects.create(
             request_type='rack_in',
