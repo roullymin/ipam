@@ -354,10 +354,13 @@ CHANGE_REQUEST_STATUS_CHOICES = [
 
 
 NETWORK_ROLE_CHOICES = [
-    ('management', '管理网络'),
-    ('service', '业务网络'),
-    ('dual', '双网'),
     ('none', '无需网络'),
+    ('command', '指挥网'),
+    ('government', '政务外网'),
+    ('other', '其他'),
+    ('management', '指挥网（旧值兼容）'),
+    ('service', '政务外网（旧值兼容）'),
+    ('dual', '双网（旧值兼容）'),
 ]
 
 

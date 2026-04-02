@@ -1,9 +1,37 @@
 import React, { useState } from 'react';
-import { CheckCircle2, Layers3, Radar, ShieldCheck } from 'lucide-react';
+import {
+  ArrowRight,
+  CheckCircle2,
+  Layers3,
+  Radar,
+  ShieldCheck,
+  Sparkles,
+} from 'lucide-react';
 
 import BrandLockup from './BrandLockup';
 import { BRAND } from '../lib/brand';
 import { loginRequest } from '../lib/api';
+
+const FEATURE_CARDS = [
+  {
+    icon: Radar,
+    title: '统一态势入口',
+    description: '把 IP、机房、人员与审计统一放到同一张工作台上，减少来回切换。',
+    accent: 'text-cyan-300',
+  },
+  {
+    icon: ShieldCheck,
+    title: '审计过程可追溯',
+    description: '围绕高风险操作保留上下文和责任链，方便复盘、核查与验收。',
+    accent: 'text-emerald-300',
+  },
+  {
+    icon: Layers3,
+    title: '多模块协同联动',
+    description: '支持 IPAM、DCIM、驻场运营与备份恢复在同一平台协同处理。',
+    accent: 'text-amber-300',
+  },
+];
 
 export default function LoginScreen({ onLogin }) {
   const [username, setUsername] = useState('');
@@ -31,58 +59,60 @@ export default function LoginScreen({ onLogin }) {
   };
 
   return (
-    <div className="login-stage min-h-screen px-5 py-8 md:px-8 md:py-10">
+    <div className="login-stage flex min-h-screen items-center justify-center px-5 py-8 md:px-8 md:py-10">
       <div className="ambient-orb ambient-orb-a"></div>
       <div className="ambient-orb ambient-orb-b"></div>
+      <div className="ambient-grid"></div>
 
-      <div className="login-shell relative z-10 mx-auto grid w-full max-w-6xl overflow-hidden rounded-[36px] border border-white/12">
-        <section className="login-hero px-6 py-8 md:px-10 md:py-12">
-          <BrandLockup inverse size="lg" showTagline />
+      <div className="login-shell relative z-10 grid w-full max-w-6xl overflow-hidden rounded-[36px] border border-white/14">
+        <section className="login-hero flex flex-col justify-between px-7 py-8 md:px-10 md:py-11">
+          <div>
+            <BrandLockup inverse size="lg" showTagline />
 
-          <div className="mt-8 max-w-xl">
-            <div className="inline-flex items-center rounded-full border border-cyan-300/18 bg-cyan-300/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-100/80">
-              {BRAND.consoleLabel}
+            <div className="mt-8 max-w-xl">
+              <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/18 bg-cyan-300/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-100/82">
+                <Sparkles className="h-3.5 w-3.5" />
+                {BRAND.consoleLabel}
+              </div>
+              <h1 className="mt-5 max-w-2xl text-4xl font-black tracking-tight text-white md:text-[4rem] md:leading-[0.95]">
+                {BRAND.loginHeadline}
+              </h1>
+              <p className="mt-5 max-w-xl text-sm leading-7 text-slate-200/82 md:text-base">
+                {BRAND.loginDescription}
+              </p>
             </div>
-            <h1 className="mt-4 text-3xl font-black tracking-tight text-white md:text-5xl">
-              {BRAND.loginHeadline}
-            </h1>
-            <p className="mt-4 max-w-lg text-sm leading-7 text-slate-200/82 md:text-base">
-              {BRAND.loginDescription}
-            </p>
+
+            <div className="mt-8 rounded-[28px] border border-white/10 bg-white/6 p-4 backdrop-blur-sm">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.24em] text-cyan-100/80">
+                <CheckCircle2 className="h-4 w-4 text-cyan-300" />
+                当前版本聚焦
+              </div>
+              <div className="mt-3 text-sm leading-7 text-slate-200/78">
+                已完成统一品牌入口、部署状态可见化、驻场工作台增强、导入预览和乱码清洗工具链。
+              </div>
+            </div>
           </div>
 
           <div className="mt-8 grid gap-4 md:grid-cols-3">
-            <div className="login-feature-card">
-              <Radar className="h-5 w-5 text-cyan-300" />
-              <div className="mt-3 text-sm font-bold text-white">统一态势入口</div>
-              <div className="mt-1 text-xs leading-5 text-slate-300/78">
-                把 IP、机房、人员与审计放进同一张工作台。
+            {FEATURE_CARDS.map(({ icon: Icon, title, description, accent }) => (
+              <div key={title} className="login-feature-card">
+                <Icon className={`h-5 w-5 ${accent}`} />
+                <div className="mt-3 text-sm font-bold text-white">{title}</div>
+                <div className="mt-1 text-xs leading-5 text-slate-300/78">{description}</div>
               </div>
-            </div>
-            <div className="login-feature-card">
-              <ShieldCheck className="h-5 w-5 text-emerald-300" />
-              <div className="mt-3 text-sm font-bold text-white">审计可追溯</div>
-              <div className="mt-1 text-xs leading-5 text-slate-300/78">
-                围绕高风险操作保留审计上下文和角色边界。
-              </div>
-            </div>
-            <div className="login-feature-card">
-              <Layers3 className="h-5 w-5 text-amber-300" />
-              <div className="mt-3 text-sm font-bold text-white">多模块联动</div>
-              <div className="mt-1 text-xs leading-5 text-slate-300/78">
-                支持 IPAM、DCIM、驻场运营与备份恢复协同运行。
-              </div>
-            </div>
+            ))}
           </div>
         </section>
 
-        <section className="login-panel px-6 py-8 md:px-10 md:py-12">
+        <section className="login-panel flex items-center px-6 py-8 md:px-10 md:py-11">
           <div className="mx-auto w-full max-w-md">
             <div className="mb-8">
               <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">安全登录</div>
-              <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-950">进入系统</h2>
-              <p className="mt-2 text-sm leading-6 text-slate-500">
-                使用平台账号进入 {BRAND.shortName}，继续处理网络地址、机房设备和运营流程。
+              <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-950 md:text-[2.7rem]">
+                进入系统
+              </h2>
+              <p className="mt-3 text-sm leading-7 text-slate-500">
+                使用平台账号进入 {BRAND.shortName}，继续处理网络地址、机房设备、驻场信息与审计流程。
               </p>
             </div>
 
@@ -116,37 +146,35 @@ export default function LoginScreen({ onLogin }) {
               <button
                 type="submit"
                 disabled={loading}
-                className="login-button flex w-full items-center justify-center py-3.5 text-sm font-bold text-white transition-all"
+                className="login-button flex w-full items-center justify-center gap-2 py-3.5 text-sm font-bold text-white transition-all"
               >
-                {loading ? '登录中...' : '进入系统'}
+                <span>{loading ? '登录中...' : '进入系统'}</span>
+                {!loading ? <ArrowRight className="h-4 w-4" /> : null}
               </button>
             </form>
 
-            <div className="mt-6 rounded-[24px] border border-slate-200/80 bg-slate-50/90 p-4">
-              <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
-                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                当前版本已统一品牌和入口壳层
+            <div className="mt-6 space-y-4">
+              <div className="rounded-[24px] border border-slate-200/80 bg-slate-50/92 p-4">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                  当前入口已完成品牌与信息层级统一
+                </div>
+                <div className="mt-2 text-xs leading-6 text-slate-500">
+                  后续将继续优化申请流程、设备变更中心、告警中心与全局搜索，让入口页更像正式运维平台。
+                </div>
               </div>
-              <div className="mt-2 text-xs leading-6 text-slate-500">
-                下一步建议继续优化总览页、网络地址页和机房设备页的信息层级，让页面行为更贴近真实运维驾驶台。
+
+              <div className="rounded-[24px] border border-sky-100 bg-sky-50/85 p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">
+                  平台覆盖范围
+                </div>
+                <div className="mt-2 text-sm leading-7 text-slate-600">
+                  {BRAND.tagline}
+                </div>
               </div>
             </div>
           </div>
         </section>
-      </div>
-
-      <div className="mx-auto mt-5 max-w-6xl px-1 text-xs text-slate-500">
-        <span className="font-semibold text-slate-700">{BRAND.name}</span> / {BRAND.tagline}
-      </div>
-      <div className="mx-auto mt-3 max-w-6xl px-1 text-[11px] leading-5 text-slate-400">
-        当前版本优先保留现有账号与业务数据，同时逐步补齐更适合生产环境的认证、角色、审计和恢复能力。
-      </div>
-      <div className="mx-auto mt-3 flex max-w-6xl items-center gap-2 px-1 text-[11px] uppercase tracking-[0.22em] text-slate-400">
-        <span>{BRAND.shortName}</span>
-        <span className="text-slate-300">/</span>
-        <span>基础设施运营</span>
-        <span className="text-slate-300">/</span>
-        <span>控制台</span>
       </div>
     </div>
   );

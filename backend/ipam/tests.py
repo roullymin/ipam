@@ -330,10 +330,10 @@ class DatacenterChangeRequestTests(BaseApiTestCase):
         )
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data['status'], 'submitted')
+        self.assertEqual(response.data['status'], 'draft')
         self.assertEqual(response.data['item_count'], 1)
         self.assertTrue(response.data['public_token'])
-        self.assertTrue(response.data['public_link'].endswith(f"/api/public/change-requests/{response.data['public_token']}/"))
+        self.assertTrue(response.data['public_link'].endswith(f"/?change-request-intake=1&token={response.data['public_token']}"))
 
         change_request = DatacenterChangeRequest.objects.get(pk=response.data['id'])
         self.assertEqual(change_request.items.count(), 1)
@@ -359,6 +359,25 @@ class DatacenterChangeRequestTests(BaseApiTestCase):
         self.assertEqual(change_request.status, 'approved')
         self.assertEqual(change_request.review_comment, '批准实施')
         self.assertTrue(change_request.reviewer_name)
+
+    def test_can_submit_draft_change_request(self):
+        change_request = DatacenterChangeRequest.objects.create(
+            request_type='rack_in',
+            status='draft',
+            title='测试草稿提交',
+            applicant_name='',
+            applicant_phone='',
+        )
+
+        response = self.client.post(
+            f'/api/datacenter-change-requests/{change_request.id}/submit/',
+            {},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        change_request.refresh_from_db()
+        self.assertEqual(change_request.status, 'submitted')
 
     def test_can_schedule_and_complete_change_request(self):
         change_request = DatacenterChangeRequest.objects.create(
@@ -452,6 +471,65 @@ class DatacenterChangeRequestTests(BaseApiTestCase):
         self.assertTrue(change_request.requires_power_down)
         self.assertEqual(change_request.items.count(), 1)
 
+    def test_can_set_revoke_and_restore_public_link(self):
+        change_request = DatacenterChangeRequest.objects.create(
+            request_type='rack_in',
+            status='draft',
+            title='Public Link Controls',
+            applicant_name='Tester',
+        )
+
+        set_response = self.client.post(
+            f'/api/datacenter-change-requests/{change_request.id}/set_link_expiry/',
+            {'expires_in_days': 7},
+            format='json',
+        )
+        self.assertEqual(set_response.status_code, 200)
+
+        revoke_response = self.client.post(
+            f'/api/datacenter-change-requests/{change_request.id}/revoke_link/',
+            {},
+            format='json',
+        )
+        self.assertEqual(revoke_response.status_code, 200)
+
+        public_response = self.client.get(f'/api/public/change-requests/{change_request.public_token}/')
+        self.assertEqual(public_response.status_code, 410)
+
+        restore_response = self.client.post(
+            f'/api/datacenter-change-requests/{change_request.id}/restore_link/',
+            {'expires_in_days': 30},
+            format='json',
+        )
+        self.assertEqual(restore_response.status_code, 200)
+
+        public_response = self.client.get(f'/api/public/change-requests/{change_request.public_token}/')
+        self.assertEqual(public_response.status_code, 200)
+
+    def test_can_export_change_request_pdf(self):
+        change_request = DatacenterChangeRequest.objects.create(
+            request_type='rack_out',
+            status='submitted',
+            title='PDF Export',
+            applicant_name='Tester',
+            applicant_phone='13500000000',
+        )
+        change_request.items.create(
+            device_name='Core Switch',
+            quantity=1,
+            u_height=2,
+            network_role='command',
+            ip_action='release',
+        )
+
+        response = self.client.get(f'/api/datacenter-change-requests/{change_request.id}/export_pdf/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+
+        public_response = self.client.get(f'/api/public/change-requests/{change_request.public_token}/export-pdf/')
+        self.assertEqual(public_response.status_code, 200)
+        self.assertEqual(public_response['Content-Type'], 'application/pdf')
+
     def test_topology_endpoint_returns_datacenter_racks_and_occupied_ranges(self):
         response = self.client.get('/api/datacenter-change-requests/topology/')
 
@@ -459,6 +537,7 @@ class DatacenterChangeRequestTests(BaseApiTestCase):
         self.assertEqual(response.data['status'], 'success')
         self.assertEqual(len(response.data['datacenters']), 1)
         rack_row = response.data['datacenters'][0]['racks'][0]
+        self.assertEqual(rack_row['devices'][0]['id'], self.device.id)
         self.assertEqual(rack_row['code'], 'R-01')
         self.assertEqual(rack_row['occupied_ranges'][0]['name'], '核心交换机')
 

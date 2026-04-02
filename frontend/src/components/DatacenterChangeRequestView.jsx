@@ -1,251 +1,158 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowLeftRight, CheckCircle2, Copy, Plus, RefreshCw, XCircle } from 'lucide-react';
+import { CheckCircle2, Copy, ExternalLink, FileText, Link2Off, Plus, RefreshCw, RotateCcw, Send, Trash2, XCircle } from 'lucide-react';
 
-import { FormInput, Modal, StatusBadge } from './common/UI';
+import { Modal } from './common/UI';
 import { safeFetch } from '../lib/api';
 
-const STATUS_STYLES = {
-  draft: { label: '草稿', bg: 'bg-slate-50', text: 'text-slate-700', border: 'border-slate-200', dot: 'bg-slate-400' },
-  submitted: { label: '待审批', bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', dot: 'bg-amber-500' },
-  approved: { label: '已批准', bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', dot: 'bg-emerald-500' },
-  rejected: { label: '已驳回', bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200', dot: 'bg-rose-500' },
-  scheduled: { label: '待执行', bg: 'bg-sky-50', text: 'text-sky-700', border: 'border-sky-200', dot: 'bg-sky-500' },
-  completed: { label: '已完成', bg: 'bg-cyan-50', text: 'text-cyan-700', border: 'border-cyan-200', dot: 'bg-cyan-500' },
-  cancelled: { label: '已取消', bg: 'bg-slate-50', text: 'text-slate-500', border: 'border-slate-200', dot: 'bg-slate-300' },
+const REQUEST_TYPES = [['rack_in', '设备上架'], ['rack_out', '设备下架'], ['move_in', '设备搬入'], ['move_out', '设备搬出'], ['relocate', '位置迁移'], ['decommission', '设备退役'], ['power_change', '电力变更']];
+const NETWORK_ROLES = [['none', '无需网络'], ['command', '指挥网'], ['government', '政务外网'], ['other', '其他']];
+const IP_ACTIONS = [['allocate', '新分配'], ['keep', '保留原 IP'], ['change', '调整 IP'], ['release', '释放原 IP'], ['none', '不涉及']];
+const STATUS_LABELS = { draft: '草稿', submitted: '待审批', approved: '已批准', rejected: '已驳回', scheduled: '待执行', completed: '已完成', cancelled: '已取消' };
+const OUTBOUND_TYPES = new Set(['rack_out', 'move_out', 'relocate', 'decommission', 'power_change']);
+const TARGET_TYPES = new Set(['rack_in', 'move_in', 'relocate']);
+
+const createItem = (datacenterId = '') => ({ rack_device: '', device_name: '', device_model: '', serial_number: '', quantity: 1, u_height: 1, power_watts: 0, power_circuit: '', network_role: 'none', ip_quantity: 0, requires_static_ip: false, ip_action: 'allocate', assigned_management_ip: '', assigned_service_ip: '', source_datacenter: datacenterId, source_rack: '', source_u_start: '', source_u_end: '', target_datacenter: datacenterId, target_rack: '', target_u_start: '', target_u_end: '', notes: '' });
+const createForm = (datacenterId = '') => ({ request_type: 'rack_in', title: '', applicant_name: '', applicant_phone: '', applicant_email: '', company: '', department: '', project_name: '', reason: '', impact_scope: '', items: [createItem(datacenterId)] });
+
+const formatDateTime = (value) => {
+  if (!value) return '未设置';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('zh-CN', { hour12: false });
 };
 
-const REQUEST_TYPES = [
-  ['rack_in', '设备上架'],
-  ['rack_out', '设备下架'],
-  ['move_in', '设备搬入'],
-  ['move_out', '设备搬出'],
-  ['relocate', '位置迁移'],
-  ['decommission', '设备退役'],
-  ['power_change', '电力变更'],
-];
-
-const NETWORK_ROLES = [
-  ['none', '无需网络'],
-  ['management', '管理网络'],
-  ['service', '业务网络'],
-  ['dual', '双网'],
-];
-
-const IP_ACTIONS = [
-  ['allocate', '新分配'],
-  ['keep', '保留原 IP'],
-  ['change', '变更 IP'],
-  ['release', '释放旧 IP'],
-  ['none', '不涉及'],
-];
-
-const EMPTY_FORM = {
-  request_type: 'rack_in',
-  title: '',
-  applicant_name: '',
-  applicant_phone: '',
-  company: '',
-  department: '',
-  project_name: '',
-  reason: '',
-  item: {
-    device_name: '',
-    device_model: '',
-    serial_number: '',
-    quantity: 1,
-    u_height: 1,
-    power_watts: 0,
-    network_role: 'none',
-    ip_quantity: 0,
-    requires_static_ip: false,
-    ip_action: 'allocate',
-    source_datacenter: '',
-    source_rack: '',
-    source_u_start: '',
-    source_u_end: '',
-    target_datacenter: '',
-    target_rack: '',
-    target_u_start: '',
-    target_u_end: '',
-    notes: '',
-  },
-};
-
-const normalizeList = (payload) => (Array.isArray(payload) ? payload : payload?.results || []);
-
-function SummaryCard({ label, value }) {
-  return (
-    <div className="rounded-[22px] border border-slate-200 bg-white px-5 py-4 shadow-sm">
-      <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">{label}</div>
-      <div className="mt-3 text-[26px] font-black leading-none text-slate-900">{value}</div>
-    </div>
-  );
-}
-
-function RackHint({ rack, title }) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
-      <div className="font-semibold uppercase tracking-[0.14em] text-slate-400">{title}</div>
-      {rack ? (
-        <>
-          <div className="mt-2 text-sm font-bold text-slate-800">{rack.name || rack.code}</div>
-          <div className="mt-1">高度 {rack.height}U，已占用 {rack.occupied_ranges.length} 段</div>
-        </>
-      ) : (
-        <div className="mt-2">请选择机房和机柜后查看占用情况。</div>
-      )}
-    </div>
-  );
-}
+const isLinkActive = (item) => item?.token_expires_at && new Date(item.token_expires_at).getTime() > Date.now();
+const findRack = (topology, dcId, rackId) => topology.find((dc) => String(dc.id) === String(dcId))?.racks?.find((rack) => String(rack.id) === String(rackId));
 
 export default function DatacenterChangeRequestView() {
   const [requests, setRequests] = useState([]);
   const [topology, setTopology] = useState([]);
+  const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState(EMPTY_FORM);
+  const [form, setForm] = useState(createForm(''));
 
   const loadData = async () => {
     setLoading(true);
     setError('');
     try {
-      const [listResponse, topologyResponse] = await Promise.all([
-        safeFetch('/api/datacenter-change-requests/'),
-        safeFetch('/api/datacenter-change-requests/topology/'),
-      ]);
-      const listPayload = await listResponse.json();
-      const topologyPayload = await topologyResponse.json();
-      if (!listResponse.ok) throw new Error(listPayload.detail || listPayload.message || '加载申请列表失败');
-      if (!topologyResponse.ok) throw new Error(topologyPayload.detail || topologyPayload.message || '加载机房拓扑失败');
-      setRequests(normalizeList(listPayload));
-      setTopology(topologyPayload.datacenters || []);
-    } catch (err) {
-      setError(err.message || '加载机房设备变更申请失败');
+      const [listRes, topologyRes] = await Promise.all([safeFetch('/api/datacenter-change-requests/'), safeFetch('/api/datacenter-change-requests/topology/')]);
+      const listData = await listRes.json();
+      const topologyData = await topologyRes.json();
+      if (!listRes.ok) throw new Error(listData.detail || listData.message || '加载申请列表失败。');
+      if (!topologyRes.ok) throw new Error(topologyData.detail || topologyData.message || '加载机房拓扑失败。');
+      setRequests(Array.isArray(listData) ? listData : listData?.results || []);
+      setTopology(topologyData.datacenters || []);
+    } catch (requestError) {
+      setError(requestError.message || '加载设备变更申请失败。');
     } finally {
       setLoading(false);
     }
   };
 
+  useEffect(() => { loadData(); }, []);
+
+  const singleDatacenter = topology.length === 1 ? topology[0] : null;
   useEffect(() => {
-    loadData();
-  }, []);
+    if (!singleDatacenter) return;
+    setForm((prev) => ({ ...prev, items: prev.items.map((item) => ({ ...item, source_datacenter: item.source_datacenter || String(singleDatacenter.id), target_datacenter: item.target_datacenter || String(singleDatacenter.id) })) }));
+  }, [singleDatacenter]);
 
   const summary = useMemo(() => ({
     total: requests.length,
+    draft: requests.filter((item) => item.status === 'draft').length,
     submitted: requests.filter((item) => item.status === 'submitted').length,
-    approved: requests.filter((item) => item.status === 'approved').length,
     completed: requests.filter((item) => item.status === 'completed').length,
   }), [requests]);
 
-  const setField = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
-  const setItemField = (key, value) => setForm((prev) => ({ ...prev, item: { ...prev.item, [key]: value } }));
+  const updateField = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
+  const updateItem = (index, key, value) => setForm((prev) => ({ ...prev, items: prev.items.map((item, itemIndex) => itemIndex === index ? { ...item, [key]: value } : item) }));
+  const addItem = () => setForm((prev) => ({ ...prev, items: [...prev.items, createItem(singleDatacenter ? String(singleDatacenter.id) : '')] }));
+  const removeItem = (index) => setForm((prev) => ({ ...prev, items: prev.items.filter((_, itemIndex) => itemIndex !== index) }));
+  const resetForm = () => setForm(createForm(singleDatacenter ? String(singleDatacenter.id) : ''));
 
-  const sourceDatacenter = topology.find((item) => String(item.id) === String(form.item.source_datacenter));
-  const targetDatacenter = topology.find((item) => String(item.id) === String(form.item.target_datacenter));
-  const sourceRack = sourceDatacenter?.racks?.find((item) => String(item.id) === String(form.item.source_rack));
-  const targetRack = targetDatacenter?.racks?.find((item) => String(item.id) === String(form.item.target_rack));
+  const applyDevicePreset = (index, rackId, rackDeviceId) => {
+    const datacenterId = singleDatacenter ? String(singleDatacenter.id) : form.items[index]?.source_datacenter;
+    const rack = findRack(topology, datacenterId, rackId);
+    const device = rack?.devices?.find((candidate) => String(candidate.id) === String(rackDeviceId));
+    if (!device) return;
+    setForm((prev) => ({
+      ...prev,
+      items: prev.items.map((item, itemIndex) => itemIndex === index ? {
+        ...item,
+        rack_device: String(device.id),
+        device_name: device.name || item.device_name,
+        device_model: device.model || device.device_type || item.device_model,
+        serial_number: device.serial_number || item.serial_number,
+        quantity: 1,
+        u_height: device.u_height || item.u_height || 1,
+        power_watts: device.power_usage || item.power_watts || 0,
+        assigned_management_ip: item.assigned_management_ip || device.mgmt_ip || '',
+        source_rack: String(rackId),
+        source_u_start: device.position || '',
+        source_u_end: device.position && device.u_height ? device.position - device.u_height + 1 : '',
+      } : item),
+    }));
+  };
 
-  const submit = async () => {
+  const normalizeItem = (item) => ({ ...item, quantity: Number(item.quantity || 1), u_height: Number(item.u_height || 1), power_watts: Number(item.power_watts || 0), ip_quantity: Number(item.ip_quantity || 0), source_datacenter: item.source_datacenter || (singleDatacenter ? singleDatacenter.id : null), target_datacenter: item.target_datacenter || (singleDatacenter ? singleDatacenter.id : null), source_rack: item.source_rack || null, target_rack: item.target_rack || null, source_u_start: item.source_u_start || null, source_u_end: item.source_u_end || null, target_u_start: item.target_u_start || null, target_u_end: item.target_u_end || null });
+
+  const submitDraft = async () => {
     setSaving(true);
     setError('');
     try {
-      const payload = {
-        request_type: form.request_type,
-        title: form.title,
-        applicant_name: form.applicant_name,
-        applicant_phone: form.applicant_phone,
-        company: form.company,
-        department: form.department,
-        project_name: form.project_name,
-        reason: form.reason,
-        items: [{
-          ...form.item,
-          quantity: Number(form.item.quantity || 1),
-          u_height: Number(form.item.u_height || 1),
-          power_watts: Number(form.item.power_watts || 0),
-          ip_quantity: Number(form.item.ip_quantity || 0),
-          source_datacenter: form.item.source_datacenter || null,
-          source_rack: form.item.source_rack || null,
-          source_u_start: form.item.source_u_start || null,
-          source_u_end: form.item.source_u_end || null,
-          target_datacenter: form.item.target_datacenter || null,
-          target_rack: form.item.target_rack || null,
-          target_u_start: form.item.target_u_start || null,
-          target_u_end: form.item.target_u_end || null,
-        }],
-      };
-
-      const response = await safeFetch('/api/datacenter-change-requests/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const response = await safeFetch('/api/datacenter-change-requests/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, items: form.items.map(normalizeItem) }) });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || result.message || '创建申请失败');
-      setNotice(`申请已提交：${result.request_code}`);
+      if (!response.ok) throw new Error(result.detail || result.message || '创建草稿失败。');
+      setNotice(`已生成独立链接：${result.request_code}`);
       setOpen(false);
-      setForm(EMPTY_FORM);
+      resetForm();
       await loadData();
-    } catch (err) {
-      setError(err.message || '创建申请失败');
+    } catch (requestError) {
+      setError(requestError.message || '创建草稿失败。');
     } finally {
       setSaving(false);
     }
   };
 
-  const runAction = async (id, action, message) => {
+  const triggerAction = async (id, action, message, body = {}) => {
     setError('');
     try {
-      const response = await safeFetch(`/api/datacenter-change-requests/${id}/${action}/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
+      const response = await safeFetch(`/api/datacenter-change-requests/${id}/${action}/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || result.message || '操作失败');
+      if (!response.ok) throw new Error(result.detail || result.message || '操作失败。');
       setNotice(message);
       await loadData();
-    } catch (err) {
-      setError(err.message || '操作失败');
+    } catch (requestError) {
+      setError(requestError.message || '操作失败。');
     }
   };
 
   const copyLink = async (link) => {
     try {
       await navigator.clipboard.writeText(link);
-      setNotice('公开申请链接已复制');
+      setNotice('独立链接已复制。');
     } catch {
-      setError('复制链接失败，请手动复制');
+      setError('复制链接失败，请手动复制。');
     }
   };
+
+  const metrics = [{ label: '总申请数', value: summary.total }, { label: '草稿待发', value: summary.draft }, { label: '待审批', value: summary.submitted }, { label: '已完成', value: summary.completed }];
 
   return (
     <div className="custom-scrollbar h-full overflow-y-auto p-6 xl:p-8">
       <div className="mx-auto max-w-7xl space-y-5">
         <section className="rounded-[28px] border border-slate-200 bg-white px-6 py-6 shadow-sm">
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+          <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
-              <div className="flex items-center gap-2 text-sm font-semibold text-sky-600">
-                <ArrowLeftRight className="h-4 w-4" />
-                机房设备变更申请中心
-              </div>
-              <h2 className="mt-3 text-[30px] font-black tracking-tight text-slate-900">上架、下架、搬入、搬出统一入口</h2>
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500">
-                这一版先提供最小可用闭环：创建申请、审批、独立链接，以及机房 / 机柜 / U 位联动。
-              </p>
+              <div className="text-sm font-semibold text-sky-600">机房设备变更申请中心</div>
+              <h2 className="mt-3 text-[30px] font-black tracking-tight text-slate-900">支持独立链接、有效期控制、作废恢复和 PDF 导出</h2>
+              <p className="mt-3 max-w-4xl text-sm leading-6 text-slate-500">管理员先预填机柜、U 位、IP 需求和已有设备，再生成一单一链接发给对方补充信息。公开页支持正式打印版和 PDF 下载。</p>
             </div>
             <div className="flex flex-wrap gap-3">
-              <button onClick={loadData} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50" type="button">
-                <RefreshCw className="h-4 w-4" />
-                刷新
-              </button>
-              <button onClick={() => setOpen(true)} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700" type="button">
-                <Plus className="h-4 w-4" />
-                新建申请
-              </button>
+              <button onClick={loadData} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50" type="button"><RefreshCw className="h-4 w-4" />刷新</button>
+              <button onClick={() => { resetForm(); setOpen(true); }} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700" type="button"><Plus className="h-4 w-4" />新建草稿</button>
             </div>
           </div>
           {error ? <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
@@ -253,54 +160,28 @@ export default function DatacenterChangeRequestView() {
         </section>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <SummaryCard label="总申请数" value={summary.total} />
-          <SummaryCard label="待审批" value={summary.submitted} />
-          <SummaryCard label="已批准" value={summary.approved} />
-          <SummaryCard label="已完成" value={summary.completed} />
+          {metrics.map((metric) => <div key={metric.label} className="rounded-[22px] border border-slate-200 bg-white px-5 py-4 shadow-sm"><div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">{metric.label}</div><div className="mt-3 text-[26px] font-black leading-none text-slate-900">{metric.value}</div></div>)}
         </div>
 
         <section className="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 px-6 py-4">
-            <h3 className="text-lg font-black text-slate-900">申请列表</h3>
-          </div>
+          <div className="border-b border-slate-100 px-6 py-4"><h3 className="text-lg font-black text-slate-900">申请列表</h3></div>
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
-              <thead className="border-b border-slate-100 bg-slate-50/80 text-xs uppercase tracking-[0.16em] text-slate-400">
-                <tr>
-                  <th className="px-6 py-4 font-bold">申请信息</th>
-                  <th className="px-6 py-4 font-bold">类型</th>
-                  <th className="px-6 py-4 font-bold">申请人</th>
-                  <th className="px-6 py-4 font-bold">设备</th>
-                  <th className="px-6 py-4 font-bold">状态</th>
-                  <th className="px-6 py-4 font-bold">链接</th>
-                  <th className="px-6 py-4 font-bold text-right">操作</th>
-                </tr>
-              </thead>
+              <thead className="border-b border-slate-100 bg-slate-50/80 text-xs uppercase tracking-[0.16em] text-slate-400"><tr><th className="px-6 py-4">申请信息</th><th className="px-6 py-4">申请人</th><th className="px-6 py-4">设备</th><th className="px-6 py-4">状态</th><th className="px-6 py-4">链接</th><th className="px-6 py-4">控制</th></tr></thead>
               <tbody className="divide-y divide-slate-100">
-                {loading ? <tr><td colSpan={7} className="px-6 py-10 text-center text-slate-400">正在加载...</td></tr> : null}
-                {!loading && !requests.length ? <tr><td colSpan={7} className="px-6 py-10 text-center text-slate-400">当前还没有机房设备变更申请。</td></tr> : null}
+                {loading ? <tr><td colSpan={6} className="px-6 py-10 text-center text-slate-400">正在加载...</td></tr> : null}
+                {!loading && !requests.length ? <tr><td colSpan={6} className="px-6 py-10 text-center text-slate-400">当前还没有设备变更申请。</td></tr> : null}
                 {requests.map((request) => {
-                  const typeLabel = REQUEST_TYPES.find((item) => item[0] === request.request_type)?.[1] || request.request_type;
                   const item = request.items?.[0];
+                  const active = isLinkActive(request);
                   return (
-                    <tr key={request.id} className="hover:bg-slate-50/60">
-                      <td className="px-6 py-4"><div className="font-semibold text-slate-900">{request.title}</div><div className="mt-1 text-xs text-slate-500">{request.request_code}</div></td>
-                      <td className="px-6 py-4 text-slate-700">{typeLabel}</td>
-                      <td className="px-6 py-4"><div className="font-semibold text-slate-800">{request.applicant_name}</div><div className="mt-1 text-xs text-slate-500">{request.applicant_phone || '未填写电话'}</div></td>
-                      <td className="px-6 py-4"><div className="font-semibold text-slate-800">{item?.device_name || '未填写设备'}</div><div className="mt-1 text-xs text-slate-500">{item?.device_model || '未填写型号'}</div></td>
-                      <td className="px-6 py-4"><StatusBadge status={request.status} styles={STATUS_STYLES} /></td>
-                      <td className="px-6 py-4"><button onClick={() => copyLink(request.public_link)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button">复制链接</button></td>
-                      <td className="px-6 py-4">
-                        <div className="flex justify-end gap-2">
-                          {request.status === 'submitted' ? (
-                            <>
-                              <button onClick={() => runAction(request.id, 'approve', `申请 ${request.request_code} 已批准`)} className="inline-flex items-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700" type="button"><CheckCircle2 className="h-3.5 w-3.5" />批准</button>
-                              <button onClick={() => runAction(request.id, 'reject', `申请 ${request.request_code} 已驳回`)} className="inline-flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700" type="button"><XCircle className="h-3.5 w-3.5" />驳回</button>
-                            </>
-                          ) : null}
-                          <button onClick={() => runAction(request.id, 'regenerate_link', `申请 ${request.request_code} 的公开链接已重置`)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button">重置链接</button>
-                        </div>
-                      </td>
+                    <tr key={request.id} className="align-top hover:bg-slate-50/60">
+                      <td className="px-6 py-4"><div className="font-semibold text-slate-900">{request.title || '未填写标题'}</div><div className="mt-1 text-xs text-slate-500">{request.request_code} / {STATUS_LABELS[request.request_type] || request.request_type}</div></td>
+                      <td className="px-6 py-4"><div className="font-semibold text-slate-800">{request.applicant_name || '待对方补充'}</div><div className="mt-1 text-xs text-slate-500">{request.applicant_phone || request.company || '待补充联系信息'}</div></td>
+                      <td className="px-6 py-4"><div className="font-semibold text-slate-800">{item?.device_name || '未填写设备'}</div><div className="mt-1 text-xs text-slate-500">{item?.assigned_management_ip || item?.device_model || '等待补充'}</div></td>
+                      <td className="px-6 py-4"><span className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${active ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>{STATUS_LABELS[request.status] || request.status}</span><div className="mt-2 text-xs text-slate-500">{active ? '链接有效' : '链接失效'} / {formatDateTime(request.token_expires_at)}</div></td>
+                      <td className="px-6 py-4"><div className="flex flex-wrap gap-2"><button onClick={() => copyLink(request.public_link)} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button"><Copy className="h-3.5 w-3.5" />复制</button><button onClick={() => window.open(request.public_link, '_blank', 'noopener,noreferrer')} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button"><ExternalLink className="h-3.5 w-3.5" />打开</button><button onClick={() => window.open(`/api/datacenter-change-requests/${request.id}/export_pdf/`, '_blank', 'noopener,noreferrer')} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button"><FileText className="h-3.5 w-3.5" />PDF</button></div></td>
+                      <td className="px-6 py-4"><div className="flex flex-wrap justify-end gap-2">{request.status === 'draft' ? <button onClick={() => triggerAction(request.id, 'submit', `申请 ${request.request_code} 已提交审批。`)} className="inline-flex items-center gap-1 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700" type="button"><Send className="h-3.5 w-3.5" />提交</button> : null}{request.status === 'submitted' ? <><button onClick={() => triggerAction(request.id, 'approve', `申请 ${request.request_code} 已批准。`)} className="inline-flex items-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700" type="button"><CheckCircle2 className="h-3.5 w-3.5" />批准</button><button onClick={() => triggerAction(request.id, 'reject', `申请 ${request.request_code} 已驳回。`)} className="inline-flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700" type="button"><XCircle className="h-3.5 w-3.5" />驳回</button></> : null}<button onClick={() => triggerAction(request.id, 'set_link_expiry', '链接有效期已设置为 7 天。', { expires_in_days: 7 })} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button">7天</button><button onClick={() => triggerAction(request.id, 'set_link_expiry', '链接有效期已设置为 30 天。', { expires_in_days: 30 })} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button">30天</button>{active ? <button onClick={() => triggerAction(request.id, 'revoke_link', '公开申请链接已作废。')} className="inline-flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700" type="button"><Link2Off className="h-3.5 w-3.5" />作废</button> : <button onClick={() => triggerAction(request.id, 'restore_link', '公开申请链接已恢复。', { expires_in_days: 14 })} className="inline-flex items-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700" type="button"><RotateCcw className="h-3.5 w-3.5" />恢复</button>}</div></td>
                     </tr>
                   );
                 })}
@@ -310,61 +191,53 @@ export default function DatacenterChangeRequestView() {
         </section>
       </div>
 
-      <Modal isOpen={open} onClose={() => setOpen(false)} title="新建机房设备变更申请" size="xl">
-        <div className="space-y-6">
+      <Modal isOpen={open} onClose={() => setOpen(false)} title="新建设备变更草稿并生成独立链接" size="xl">
+        <div className="space-y-5">
+          <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">管理员先预填位置和网络信息，再把独立链接发给对方补充信息。单机房场景下默认隐藏机房选择。</div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div className="mb-4"><label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">申请类型</label><select value={form.request_type} onChange={(event) => setField('request_type', event.target.value)} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">{REQUEST_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>
-            <FormInput label="申请标题" value={form.title} onChange={(event) => setField('title', event.target.value)} required />
-            <FormInput label="申请人" value={form.applicant_name} onChange={(event) => setField('applicant_name', event.target.value)} required />
-            <FormInput label="联系电话" value={form.applicant_phone} onChange={(event) => setField('applicant_phone', event.target.value)} />
-            <FormInput label="所属单位" value={form.company} onChange={(event) => setField('company', event.target.value)} />
-            <FormInput label="所属部门" value={form.department} onChange={(event) => setField('department', event.target.value)} />
-            <FormInput label="所属项目" value={form.project_name} onChange={(event) => setField('project_name', event.target.value)} />
+            <label className="text-sm text-slate-700">申请类型<select value={form.request_type} onChange={(e) => updateField('request_type', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5">{REQUEST_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+            <label className="text-sm text-slate-700">申请标题<input value={form.title} onChange={(e) => updateField('title', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            <label className="text-sm text-slate-700">申请人<input value={form.applicant_name} onChange={(e) => updateField('applicant_name', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            <label className="text-sm text-slate-700">联系电话<input value={form.applicant_phone} onChange={(e) => updateField('applicant_phone', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
           </div>
 
-          <div className="mb-4"><label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">申请原因</label><textarea value={form.reason} onChange={(event) => setField('reason', event.target.value)} className="h-24 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" /></div>
-
-          <div className="rounded-[24px] border border-slate-200 bg-slate-50/70 p-5">
-            <div className="text-sm font-bold text-slate-900">设备与网络需求</div>
-            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-              <FormInput label="设备名称" value={form.item.device_name} onChange={(event) => setItemField('device_name', event.target.value)} required />
-              <FormInput label="设备型号" value={form.item.device_model} onChange={(event) => setItemField('device_model', event.target.value)} />
-              <FormInput label="序列号" value={form.item.serial_number} onChange={(event) => setItemField('serial_number', event.target.value)} />
-              <FormInput label="数量" type="number" min="1" value={form.item.quantity} onChange={(event) => setItemField('quantity', event.target.value)} />
-              <FormInput label="占用 U 数" type="number" min="1" value={form.item.u_height} onChange={(event) => setItemField('u_height', event.target.value)} />
-              <FormInput label="功率需求(W)" type="number" min="0" value={form.item.power_watts} onChange={(event) => setItemField('power_watts', event.target.value)} />
-              <FormInput label="所需 IP 数量" type="number" min="0" value={form.item.ip_quantity} onChange={(event) => setItemField('ip_quantity', event.target.value)} />
-              <div className="mb-4"><label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">网络需求</label><select value={form.item.network_role} onChange={(event) => setItemField('network_role', event.target.value)} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">{NETWORK_ROLES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>
-              <div className="mb-4"><label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">IP 动作</label><select value={form.item.ip_action} onChange={(event) => setItemField('ip_action', event.target.value)} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">{IP_ACTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>
-            </div>
-            <label className="mt-2 flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={form.item.requires_static_ip} onChange={(event) => setItemField('requires_static_ip', event.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-200" />需要固定 IP</label>
-          </div>
-
-          <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-            <div className="rounded-[24px] border border-slate-200 bg-white p-5">
-              <div className="text-sm font-bold text-slate-900">源位置</div>
-              <div className="mt-4 grid grid-cols-1 gap-4">
-                <div className="mb-4"><label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">源机房</label><select value={form.item.source_datacenter} onChange={(event) => setForm((prev) => ({ ...prev, item: { ...prev.item, source_datacenter: event.target.value, source_rack: '' } }))} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"><option value="">请选择</option>{topology.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div>
-                <div className="mb-4"><label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">源机柜</label><select value={form.item.source_rack} onChange={(event) => setItemField('source_rack', event.target.value)} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"><option value="">请选择</option>{(sourceDatacenter?.racks || []).map((item) => <option key={item.id} value={item.id}>{item.name || item.code}</option>)}</select></div>
-                <div className="grid grid-cols-2 gap-4"><FormInput label="源起始 U 位" type="number" min="1" value={form.item.source_u_start} onChange={(event) => setItemField('source_u_start', event.target.value)} /><FormInput label="源结束 U 位" type="number" min="1" value={form.item.source_u_end} onChange={(event) => setItemField('source_u_end', event.target.value)} /></div>
-                <RackHint rack={sourceRack} title="当前占用情况" />
+          {form.items.map((item, index) => {
+            const sourceDatacenterId = item.source_datacenter || (singleDatacenter ? String(singleDatacenter.id) : '');
+            const targetDatacenterId = item.target_datacenter || (singleDatacenter ? String(singleDatacenter.id) : '');
+            const sourceDatacenter = topology.find((dc) => String(dc.id) === String(sourceDatacenterId));
+            const targetDatacenter = topology.find((dc) => String(dc.id) === String(targetDatacenterId));
+            const sourceRack = sourceDatacenter?.racks?.find((rack) => String(rack.id) === String(item.source_rack));
+            const targetRack = targetDatacenter?.racks?.find((rack) => String(rack.id) === String(item.target_rack));
+            const showSource = OUTBOUND_TYPES.has(form.request_type);
+            const showTarget = TARGET_TYPES.has(form.request_type);
+            return (
+              <div key={index} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+                <div className="flex items-center justify-between"><div className="font-bold text-slate-900">设备 {index + 1}</div>{form.items.length > 1 ? <button onClick={() => removeItem(index)} className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-bold text-rose-600" type="button"><Trash2 className="h-3.5 w-3.5" />删除</button> : null}</div>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {showSource && !singleDatacenter ? <label className="text-sm text-slate-700">源机房<select value={item.source_datacenter} onChange={(e) => { updateItem(index, 'source_datacenter', e.target.value); updateItem(index, 'source_rack', ''); updateItem(index, 'rack_device', ''); }} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5"><option value="">请选择</option>{topology.map((dc) => <option key={dc.id} value={dc.id}>{dc.name}</option>)}</select></label> : null}
+                  {showSource ? <label className="text-sm text-slate-700">源机柜<select value={item.source_rack} onChange={(e) => { updateItem(index, 'source_rack', e.target.value); updateItem(index, 'rack_device', ''); }} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5"><option value="">请选择</option>{(sourceDatacenter?.racks || []).map((rack) => <option key={rack.id} value={rack.id}>{rack.name || rack.code}</option>)}</select></label> : null}
+                  {showSource ? <label className="text-sm text-slate-700">现有设备<select value={item.rack_device} onChange={(e) => { updateItem(index, 'rack_device', e.target.value); applyDevicePreset(index, item.source_rack, e.target.value); }} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5"><option value="">可选</option>{(sourceRack?.devices || []).map((device) => <option key={device.id} value={device.id}>{device.name}{device.mgmt_ip ? ` / ${device.mgmt_ip}` : ''}</option>)}</select></label> : null}
+                  <label className="text-sm text-slate-700">设备名称<input value={item.device_name} onChange={(e) => updateItem(index, 'device_name', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+                  <label className="text-sm text-slate-700">设备型号<input value={item.device_model} onChange={(e) => updateItem(index, 'device_model', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+                  <label className="text-sm text-slate-700">序列号<input value={item.serial_number} onChange={(e) => updateItem(index, 'serial_number', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+                  <label className="text-sm text-slate-700">数量<input type="number" min="1" value={item.quantity} onChange={(e) => updateItem(index, 'quantity', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+                  <label className="text-sm text-slate-700">占用 U 数<input type="number" min="1" value={item.u_height} onChange={(e) => updateItem(index, 'u_height', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+                  <label className="text-sm text-slate-700">网络需求<select value={item.network_role} onChange={(e) => updateItem(index, 'network_role', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5">{NETWORK_ROLES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                  <label className="text-sm text-slate-700">IP 动作<select value={item.ip_action} onChange={(e) => updateItem(index, 'ip_action', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5">{IP_ACTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                  <label className="text-sm text-slate-700">预分配管理 IP<input value={item.assigned_management_ip} onChange={(e) => updateItem(index, 'assigned_management_ip', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+                  <label className="text-sm text-slate-700">预分配业务 IP<input value={item.assigned_service_ip} onChange={(e) => updateItem(index, 'assigned_service_ip', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+                  {showTarget && !singleDatacenter ? <label className="text-sm text-slate-700">目标机房<select value={item.target_datacenter} onChange={(e) => { updateItem(index, 'target_datacenter', e.target.value); updateItem(index, 'target_rack', ''); }} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5"><option value="">请选择</option>{topology.map((dc) => <option key={dc.id} value={dc.id}>{dc.name}</option>)}</select></label> : null}
+                  {showTarget ? <label className="text-sm text-slate-700">目标机柜<select value={item.target_rack} onChange={(e) => updateItem(index, 'target_rack', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5"><option value="">请选择</option>{(targetDatacenter?.racks || []).map((rack) => <option key={rack.id} value={rack.id}>{rack.name || rack.code}</option>)}</select></label> : null}
+                  {showSource ? <label className="text-sm text-slate-700">源 U 位<input value={item.source_u_start} onChange={(e) => updateItem(index, 'source_u_start', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label> : null}
+                  {showTarget ? <label className="text-sm text-slate-700">目标 U 位<input value={item.target_u_start} onChange={(e) => updateItem(index, 'target_u_start', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label> : null}
+                </div>
+                {showSource ? <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600">源机柜占用：{sourceRack ? `${sourceRack.name || sourceRack.code} / ${sourceRack.height}U / 已占用 ${sourceRack.occupied_ranges?.length || 0} 段` : '请选择机柜'}</div> : null}
+                {showTarget ? <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600">目标机柜占用：{targetRack ? `${targetRack.name || targetRack.code} / ${targetRack.height}U / 已占用 ${targetRack.occupied_ranges?.length || 0} 段` : '请选择机柜'}</div> : null}
               </div>
-            </div>
-            <div className="rounded-[24px] border border-slate-200 bg-white p-5">
-              <div className="text-sm font-bold text-slate-900">目标位置</div>
-              <div className="mt-4 grid grid-cols-1 gap-4">
-                <div className="mb-4"><label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">目标机房</label><select value={form.item.target_datacenter} onChange={(event) => setForm((prev) => ({ ...prev, item: { ...prev.item, target_datacenter: event.target.value, target_rack: '' } }))} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"><option value="">请选择</option>{topology.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div>
-                <div className="mb-4"><label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">目标机柜</label><select value={form.item.target_rack} onChange={(event) => setItemField('target_rack', event.target.value)} className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"><option value="">请选择</option>{(targetDatacenter?.racks || []).map((item) => <option key={item.id} value={item.id}>{item.name || item.code}</option>)}</select></div>
-                <div className="grid grid-cols-2 gap-4"><FormInput label="目标起始 U 位" type="number" min="1" value={form.item.target_u_start} onChange={(event) => setItemField('target_u_start', event.target.value)} /><FormInput label="目标结束 U 位" type="number" min="1" value={form.item.target_u_end} onChange={(event) => setItemField('target_u_end', event.target.value)} /></div>
-                <RackHint rack={targetRack} title="目标机柜占用情况" />
-              </div>
-            </div>
-          </div>
+            );
+          })}
 
-          <div className="flex items-center justify-end gap-3 border-t border-slate-100 pt-4">
-            <button onClick={() => setOpen(false)} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50" type="button">取消</button>
-            <button onClick={submit} disabled={saving} className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:bg-slate-300" type="button">{saving ? '提交中...' : '提交申请'}</button>
-          </div>
+          <div className="flex items-center justify-between"><button onClick={addItem} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50" type="button">增加设备</button><div className="flex gap-3"><button onClick={() => setOpen(false)} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50" type="button">取消</button><button onClick={submitDraft} disabled={saving} className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:bg-slate-300" type="button">{saving ? '生成中...' : '生成独立链接'}</button></div></div>
         </div>
       </Modal>
     </div>

@@ -995,6 +995,222 @@ def _build_resident_batch_pdf(response_buffer, residents, request):
     doc.build(elements)
 
 
+def _format_change_datetime(value):
+    if not value:
+        return '未填写'
+    if isinstance(value, datetime):
+        if timezone.is_aware(value):
+            value = timezone.localtime(value)
+        return value.strftime('%Y-%m-%d %H:%M')
+    return str(value)
+
+
+def _format_change_link_status(change_request):
+    if change_request.token_expires_at and change_request.token_expires_at < timezone.now():
+        return '已作废或已过期'
+    return f'有效期至：{_format_change_datetime(change_request.token_expires_at)}'
+
+
+def _build_change_request_pdf(response_buffer, change_request):
+    try:
+        registerFont(UnicodeCIDFont('STSong-Light'))
+    except Exception:
+        pass
+
+    styles = getSampleStyleSheet()
+    base_font = 'STSong-Light'
+    title_style = ParagraphStyle(
+        'ChangeRequestTitle',
+        parent=styles['Title'],
+        fontName=base_font,
+        fontSize=18,
+        leading=24,
+        textColor=colors.HexColor('#0f172a'),
+        spaceAfter=10,
+    )
+    heading_style = ParagraphStyle(
+        'ChangeRequestHeading',
+        parent=styles['Heading2'],
+        fontName=base_font,
+        fontSize=12,
+        leading=18,
+        textColor=colors.HexColor('#1d4ed8'),
+        spaceAfter=6,
+    )
+    body_style = ParagraphStyle(
+        'ChangeRequestBody',
+        parent=styles['BodyText'],
+        fontName=base_font,
+        fontSize=10,
+        leading=15,
+        textColor=colors.HexColor('#334155'),
+    )
+
+    doc = SimpleDocTemplate(
+        response_buffer,
+        pagesize=A4,
+        leftMargin=16 * mm,
+        rightMargin=16 * mm,
+        topMargin=14 * mm,
+        bottomMargin=14 * mm,
+    )
+
+    type_label = dict(DatacenterChangeRequest._meta.get_field('request_type').choices).get(
+        change_request.request_type,
+        change_request.request_type,
+    )
+    status_label = dict(DatacenterChangeRequest._meta.get_field('status').choices).get(
+        change_request.status,
+        change_request.status,
+    )
+
+    elements = [
+        Paragraph('机房设备变更申请单', title_style),
+        Paragraph(
+            f'申请编号：{change_request.request_code}　　导出时间：{timezone.localtime().strftime("%Y-%m-%d %H:%M")}',
+            body_style,
+        ),
+        Spacer(1, 5 * mm),
+    ]
+
+    info_rows = [
+        ['申请类型', type_label, '当前状态', status_label],
+        ['申请标题', change_request.title or '未填写', '审批编号', change_request.approval_code or '未填写'],
+        ['申请人', change_request.applicant_name or '未填写', '联系电话', change_request.applicant_phone or '未填写'],
+        ['联系邮箱', change_request.applicant_email or '未填写', '所属单位', change_request.company or '未填写'],
+        ['所属部门', change_request.department or '未填写', '所属项目', change_request.project_name or '未填写'],
+        ['计划执行时间', _format_change_datetime(change_request.planned_execute_at), '链接状态', _format_change_link_status(change_request)],
+        ['是否需要下电', '是' if change_request.requires_power_down else '否', '创建人', get_actor_name(change_request.created_by)],
+    ]
+
+    elements.append(Paragraph('一、申请信息', heading_style))
+    info_table = Table(info_rows, colWidths=[24 * mm, 58 * mm, 24 * mm, 56 * mm])
+    info_table.setStyle(
+        TableStyle(
+            [
+                ('FONTNAME', (0, 0), (-1, -1), base_font),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('LEADING', (0, 0), (-1, -1), 14),
+                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#eff6ff')),
+                ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#eff6ff')),
+                ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#334155')),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    elements.append(info_table)
+    elements.append(Spacer(1, 5 * mm))
+
+    elements.append(Paragraph('二、变更说明', heading_style))
+    elements.append(Paragraph(f'申请原因：{change_request.reason or "未填写"}', body_style))
+    elements.append(Spacer(1, 2 * mm))
+    elements.append(Paragraph(f'影响范围：{change_request.impact_scope or "未填写"}', body_style))
+    elements.append(Spacer(1, 5 * mm))
+
+    elements.append(Paragraph('三、设备明细', heading_style))
+    item_rows = [[
+        '设备名称',
+        '型号/序列号',
+        '数量/U',
+        '网络',
+        'IP/动作',
+        '位置',
+        '备注',
+    ]]
+    for item in change_request.items.all():
+        network_label = dict(DatacenterChangeItem._meta.get_field('network_role').choices).get(
+            item.network_role,
+            item.network_role,
+        )
+        ip_action_label = dict(DatacenterChangeItem._meta.get_field('ip_action').choices).get(
+            item.ip_action,
+            item.ip_action,
+        )
+        ip_lines = []
+        if item.assigned_management_ip:
+            ip_lines.append(f'管理：{item.assigned_management_ip}')
+        if item.assigned_service_ip:
+            ip_lines.append(f'业务：{item.assigned_service_ip}')
+        ip_lines.append(f'动作：{ip_action_label}')
+        location_lines = []
+        if item.source_rack_id:
+            location_lines.append(f'源：{item.source_rack.code} / {item.source_u_start or "-"}-{item.source_u_end or "-"}')
+        if item.target_rack_id:
+            location_lines.append(f'目标：{item.target_rack.code} / {item.target_u_start or "-"}-{item.target_u_end or "-"}')
+        item_rows.append(
+            [
+                item.device_name or '未填写',
+                ' / '.join(filter(None, [item.device_model, item.serial_number])) or '未填写',
+                f'{item.quantity} 台 / {item.u_height}U',
+                network_label,
+                '\n'.join(ip_lines),
+                '\n'.join(location_lines) or '未填写',
+                item.notes or '未填写',
+            ]
+        )
+
+    item_table = Table(
+        item_rows,
+        colWidths=[28 * mm, 34 * mm, 18 * mm, 18 * mm, 30 * mm, 34 * mm, 20 * mm],
+        repeatRows=1,
+    )
+    item_table.setStyle(
+        TableStyle(
+            [
+                ('FONTNAME', (0, 0), (-1, -1), base_font),
+                ('FONTSIZE', (0, 0), (-1, 0), 9),
+                ('FONTSIZE', (0, 1), (-1, -1), 8.5),
+                ('LEADING', (0, 0), (-1, -1), 12),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#dbeafe')),
+                ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#334155')),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 5),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ]
+        )
+    )
+    elements.append(item_table)
+    elements.append(Spacer(1, 5 * mm))
+
+    elements.append(Paragraph('四、审批与执行', heading_style))
+    action_rows = [
+        ['部门意见', change_request.department_comment or '未填写'],
+        ['信息化意见', change_request.it_comment or '未填写'],
+        ['审批意见', change_request.review_comment or '未填写'],
+        ['审批人 / 时间', f'{change_request.reviewer_name or "未填写"} / {_format_change_datetime(change_request.reviewed_at)}'],
+        ['执行人 / 时间', f'{change_request.executor_name or "未填写"} / {_format_change_datetime(change_request.executed_at)}'],
+        ['执行备注', change_request.execution_comment or '未填写'],
+    ]
+    action_table = Table(action_rows, colWidths=[28 * mm, 136 * mm])
+    action_table.setStyle(
+        TableStyle(
+            [
+                ('FONTNAME', (0, 0), (-1, -1), base_font),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('LEADING', (0, 0), (-1, -1), 14),
+                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#eff6ff')),
+                ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#334155')),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    elements.append(action_table)
+    doc.build(elements)
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 @authentication_classes([])
@@ -1720,7 +1936,7 @@ def public_change_request_detail(request, token):
         return Response({'detail': '申请链接已过期。'}, status=status.HTTP_410_GONE)
 
     if request.method == 'POST':
-        if change_request.status in {'completed', 'cancelled'}:
+        if change_request.status in {'completed', 'cancelled', 'approved', 'scheduled'}:
             return Response({'detail': '当前申请不允许继续填写。'}, status=status.HTTP_400_BAD_REQUEST)
         serializer = DatacenterChangeRequestPublicSubmitSerializer(change_request, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -1735,6 +1951,32 @@ def public_change_request_detail(request, token):
 
     serializer = DatacenterChangeRequestPublicSerializer(change_request)
     return Response({'status': 'success', 'request': serializer.data})
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+@authentication_classes([])
+def public_change_request_export_pdf(request, token):
+    change_request = (
+        DatacenterChangeRequest.objects.prefetch_related(
+            'items',
+            'items__source_rack',
+            'items__target_rack',
+        )
+        .filter(public_token=token)
+        .first()
+    )
+    if change_request is None:
+        return Response({'detail': '申请链接不存在。'}, status=status.HTTP_404_NOT_FOUND)
+    if change_request.token_expires_at and change_request.token_expires_at < timezone.now():
+        return Response({'detail': '申请链接已过期。'}, status=status.HTTP_410_GONE)
+
+    buffer = io.BytesIO()
+    _build_change_request_pdf(buffer, change_request)
+    buffer.seek(0)
+    response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="change_request_{change_request.request_code}.pdf"'
+    return response
 
 
 @api_view(['POST'])
@@ -1831,8 +2073,18 @@ class DatacenterChangeRequestViewSet(OptionalPaginationMixin, BaseViewSet):
     ]
 
     def perform_create(self, serializer):
-        instance = serializer.save(created_by=self.request.user, status='submitted')
-        record_audit(self.request, self.audit_module, 'create', instance, '新增机房设备变更申请')
+        instance = serializer.save(created_by=self.request.user, status='draft')
+        record_audit(self.request, self.audit_module, 'create', instance, '新增机房设备变更申请草稿并生成独立链接')
+
+    @action(detail=True, methods=['post'])
+    def submit(self, request, pk=None):
+        change_request = self.get_object()
+        if change_request.status not in {'draft', 'rejected'}:
+            return Response({'detail': '当前状态不支持提交审批。'}, status=status.HTTP_400_BAD_REQUEST)
+        change_request.status = 'submitted'
+        change_request.save(update_fields=['status', 'updated_at'])
+        record_audit(request, self.audit_module, 'submit', change_request, '机房设备变更申请已提交审批')
+        return Response({'status': 'success', 'request': self.get_serializer(change_request).data})
 
     @action(detail=True, methods=['post'])
     def approve(self, request, pk=None):
@@ -1917,10 +2169,59 @@ class DatacenterChangeRequestViewSet(OptionalPaginationMixin, BaseViewSet):
     def regenerate_link(self, request, pk=None):
         change_request = self.get_object()
         change_request.public_token = secrets.token_urlsafe(24)
-        change_request.token_expires_at = timezone.now() + timedelta(days=14)
+        expires_in_days = max(int(request.data.get('expires_in_days') or 14), 1)
+        change_request.token_expires_at = timezone.now() + timedelta(days=expires_in_days)
         change_request.save(update_fields=['public_token', 'token_expires_at', 'updated_at'])
         record_audit(request, self.audit_module, 'regenerate_link', change_request, '重新生成了公开申请链接')
         return Response({'status': 'success', 'request': self.get_serializer(change_request).data})
+
+    @action(detail=True, methods=['post'])
+    def set_link_expiry(self, request, pk=None):
+        change_request = self.get_object()
+        expires_in_days = max(int(request.data.get('expires_in_days') or 14), 1)
+        change_request.token_expires_at = timezone.now() + timedelta(days=expires_in_days)
+        change_request.save(update_fields=['token_expires_at', 'updated_at'])
+        record_audit(
+            request,
+            self.audit_module,
+            'set_link_expiry',
+            change_request,
+            f'设置公开申请链接有效期为 {expires_in_days} 天',
+        )
+        return Response({'status': 'success', 'request': self.get_serializer(change_request).data})
+
+    @action(detail=True, methods=['post'])
+    def revoke_link(self, request, pk=None):
+        change_request = self.get_object()
+        change_request.token_expires_at = timezone.now() - timedelta(seconds=1)
+        change_request.save(update_fields=['token_expires_at', 'updated_at'])
+        record_audit(request, self.audit_module, 'revoke_link', change_request, '作废了公开申请链接')
+        return Response({'status': 'success', 'request': self.get_serializer(change_request).data})
+
+    @action(detail=True, methods=['post'])
+    def restore_link(self, request, pk=None):
+        change_request = self.get_object()
+        expires_in_days = max(int(request.data.get('expires_in_days') or 14), 1)
+        change_request.token_expires_at = timezone.now() + timedelta(days=expires_in_days)
+        change_request.save(update_fields=['token_expires_at', 'updated_at'])
+        record_audit(
+            request,
+            self.audit_module,
+            'restore_link',
+            change_request,
+            f'恢复公开申请链接并设置有效期为 {expires_in_days} 天',
+        )
+        return Response({'status': 'success', 'request': self.get_serializer(change_request).data})
+
+    @action(detail=True, methods=['get'])
+    def export_pdf(self, request, pk=None):
+        change_request = self.get_object()
+        buffer = io.BytesIO()
+        _build_change_request_pdf(buffer, change_request)
+        buffer.seek(0)
+        response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="change_request_{change_request.request_code}.pdf"'
+        return response
 
     @action(detail=False, methods=['get'])
     def topology(self, request):
@@ -1935,6 +2236,24 @@ class DatacenterChangeRequestViewSet(OptionalPaginationMixin, BaseViewSet):
                         'code': rack.code,
                         'name': rack.name,
                         'height': rack.height,
+                        'devices': [
+                            {
+                                'id': device.id,
+                                'name': device.name,
+                                'position': device.position,
+                                'u_height': device.u_height,
+                                'device_type': device.device_type,
+                                'brand': device.brand,
+                                'model': '',
+                                'mgmt_ip': device.mgmt_ip,
+                                'project': device.project,
+                                'contact': device.contact,
+                                'power_usage': device.power_usage,
+                                'serial_number': device.sn,
+                                'asset_tag': device.asset_tag,
+                            }
+                            for device in devices
+                        ],
                         'occupied_ranges': [
                             {
                                 'id': device.id,

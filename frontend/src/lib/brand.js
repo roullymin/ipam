@@ -16,5 +16,6 @@ export const BRAND = {
     security: '安全审计',
     backup: '备份恢复',
     users: '平台管理',
+    changes: '设备变更',
   },
 };

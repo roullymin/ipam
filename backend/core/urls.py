@@ -34,6 +34,7 @@ urlpatterns = [
     path('api/resident-intake/', views.api_resident_intake),
     path('api/resident-intake/export-pdf/', views.api_resident_intake_export_pdf),
     path('api/public/change-requests/<str:token>/', views.public_change_request_detail),
+    path('api/public/change-requests/<str:token>/export-pdf/', views.public_change_request_export_pdf),
     path('api/public/dcim-overview/', views.public_dcim_overview),
 
     path('api/init-dc/', views.init_datacenters),

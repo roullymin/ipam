@@ -16,6 +16,7 @@ import AppSidebar from './components/AppSidebar';
 import AuthManagementModals from './components/AuthManagementModals';
 import BackupView from './components/BackupView';
 import DatacenterChangeRequestView from './components/DatacenterChangeRequestView';
+import DatacenterChangeIntakePage from './components/DatacenterChangeIntakePage';
 import DcimView from './components/DcimView';
 import DcimOverviewPage from './components/DcimOverviewPage';
 import { DatacenterModal, DeviceModal, RackModal } from './components/DcimManagementModals';
@@ -179,6 +180,9 @@ function MainApp() {
   const isResidentIntakeMode =
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('resident-intake') === '1';
+  const isChangeRequestIntakeMode =
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('change-request-intake') === '1';
   const isDcOverviewMode =
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('dc-overview') === '1';
@@ -836,6 +840,10 @@ function MainApp() {
 
   if (isDcOverviewMode) {
       return <DcimOverviewPage />;
+  }
+
+  if (isChangeRequestIntakeMode) {
+      return <DatacenterChangeIntakePage />;
   }
 
   if (!isLoggedIn && isResidentIntakeMode) {

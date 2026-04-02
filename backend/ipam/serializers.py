@@ -423,6 +423,21 @@ class DatacenterChangeRequestSerializer(serializers.ModelSerializer):
             'item_count',
             'public_link',
         ]
+        extra_kwargs = {
+            'title': {'required': False, 'allow_blank': True},
+            'applicant_name': {'required': False, 'allow_blank': True},
+            'applicant_phone': {'required': False, 'allow_blank': True},
+            'applicant_email': {'required': False, 'allow_blank': True},
+            'company': {'required': False, 'allow_blank': True},
+            'department': {'required': False, 'allow_blank': True},
+            'project_name': {'required': False, 'allow_blank': True},
+            'reason': {'required': False, 'allow_blank': True},
+            'impact_scope': {'required': False, 'allow_blank': True},
+            'department_comment': {'required': False, 'allow_blank': True},
+            'it_comment': {'required': False, 'allow_blank': True},
+            'review_comment': {'required': False, 'allow_blank': True},
+            'execution_comment': {'required': False, 'allow_blank': True},
+        }
 
     def get_item_count(self, obj):
         prefetched_items = get_prefetched_related(obj, 'items')
@@ -432,14 +447,25 @@ class DatacenterChangeRequestSerializer(serializers.ModelSerializer):
 
     def get_public_link(self, obj):
         request = self.context.get('request')
-        path = f'/api/public/change-requests/{obj.public_token}/'
+        path = f'/?change-request-intake=1&token={obj.public_token}'
         return request.build_absolute_uri(path) if request else path
+
+    def _build_default_title(self, validated_data, items_data):
+        explicit_title = (validated_data.get('title') or '').strip()
+        if explicit_title:
+            return explicit_title
+        request_type = validated_data.get('request_type') or 'change'
+        request_type_label = dict(DatacenterChangeRequest._meta.get_field('request_type').choices).get(request_type, request_type)
+        first_item = items_data[0] if items_data else {}
+        device_name = (first_item.get('device_name') or '').strip()
+        return f'{request_type_label}申请{f" - {device_name}" if device_name else ""}'
 
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])
         request = self.context.get('request')
         if request and request.user and request.user.is_authenticated:
             validated_data.setdefault('created_by', request.user)
+        validated_data['title'] = self._build_default_title(validated_data, items_data)
         change_request = DatacenterChangeRequest.objects.create(**validated_data)
         for item_data in items_data:
             DatacenterChangeItem.objects.create(request=change_request, **item_data)
@@ -449,6 +475,11 @@ class DatacenterChangeRequestSerializer(serializers.ModelSerializer):
         items_data = validated_data.pop('items', None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+        if not instance.title:
+            instance.title = self._build_default_title(
+                {'request_type': instance.request_type, 'title': instance.title},
+                items_data if items_data is not None else list(instance.items.values('device_name')[:1]),
+            )
         instance.save()
 
         if items_data is not None:
@@ -504,6 +535,17 @@ class DatacenterChangeRequestPublicSubmitSerializer(serializers.ModelSerializer)
             'planned_execute_at',
             'items',
         ]
+        extra_kwargs = {
+            'title': {'required': False, 'allow_blank': True},
+            'applicant_name': {'required': False, 'allow_blank': True},
+            'applicant_phone': {'required': False, 'allow_blank': True},
+            'applicant_email': {'required': False, 'allow_blank': True},
+            'company': {'required': False, 'allow_blank': True},
+            'department': {'required': False, 'allow_blank': True},
+            'project_name': {'required': False, 'allow_blank': True},
+            'reason': {'required': False, 'allow_blank': True},
+            'impact_scope': {'required': False, 'allow_blank': True},
+        }
 
     def update(self, instance, validated_data):
         items_data = validated_data.pop('items', None)
