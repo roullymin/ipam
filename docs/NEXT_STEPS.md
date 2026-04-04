@@ -108,6 +108,7 @@ This file is the default backlog for the local `ipam` Codex skill. When a reques
 - [x] Extract IPAM page state, filters, and scan actions from `frontend/src/App.jsx` into a dedicated hook.
 - [x] Extract DCIM page state and rack/device orchestration from `frontend/src/App.jsx` into a dedicated hook.
 - [ ] Extract shared page routing or active-tab rendering branches from `frontend/src/App.jsx`.
+- [x] Extract URL entry-mode detection for public intake and read-only screens from `frontend/src/App.jsx`.
 - [ ] Design a global search MVP covering IP, device, rack, resident, and project entities.
 - [ ] Design an alert-center MVP around backup, security, and data-quality signals.
 
@@ -115,5 +116,28 @@ This file is the default backlog for the local `ipam` Codex skill. When a reques
 - [x] 把 IPAM 页状态、筛选逻辑和扫描动作从 `frontend/src/App.jsx` 拆到独立 hook。
 - [x] 把 DCIM 页状态和机柜/设备编排逻辑从 `frontend/src/App.jsx` 拆到独立 hook。
 - [ ] 把公共页面路由或 `activeTab` 渲染分支从 `frontend/src/App.jsx` 中继续迁出。
+- [x] 把公开填报页和只读页的 URL 入口模式判断从 `frontend/src/App.jsx` 中迁出。
 - [ ] 设计覆盖 IP、设备、机柜、驻场和项目实体的全局搜索 MVP。
 - [ ] 围绕备份、安全和数据质量信号设计告警中心 MVP。
+
+## Priority 9 / 组件化开发
+
+- [x] Introduce a `frontend/src/modules/` feature boundary and move the change-request views into a dedicated module.
+- [x] Move the resident workflow views and intake page into `frontend/src/modules/resident/`.
+- [x] Move IPAM-only presentation and orchestration code into `frontend/src/modules/ipam/`.
+- [x] Move DCIM-only presentation and orchestration code into `frontend/src/modules/dcim/`.
+- [x] Move Security and Backup views into dedicated `modules/` packages.
+- [x] Move Dashboard and User Management views into dedicated `modules/` packages.
+- [x] Add a shell-level screen router so `App.jsx` no longer owns all active-tab render branches directly.
+- [x] Add a shell-level screen-props hook so `App.jsx` no longer assembles every page prop object inline.
+- [x] Add a lightweight componentization guide that defines module ownership, shared-shell boundaries, and import rules.
+
+- [x] 引入 `frontend/src/modules/` 功能边界，并把设备变更申请视图迁入独立模块。
+- [x] 把驻场运营视图和公开填报页迁入 `frontend/src/modules/resident/`。
+- [x] 把 IPAM 专属展示与编排代码迁入 `frontend/src/modules/ipam/`。
+- [x] 把 DCIM 专属展示与编排代码迁入 `frontend/src/modules/dcim/`。
+- [x] 把安全审计和备份恢复视图迁入独立 `modules/` 包。
+- [x] 把总览页和用户管理页迁入独立 `modules/` 包。
+- [x] 增加壳层级 screen router，让 `App.jsx` 不再直接持有所有 activeTab 渲染分支。
+- [x] 增加壳层级 screen-props hook，让 `App.jsx` 不再内联组装所有页面 props。
+- [x] 增加一份轻量的组件化开发说明，明确模块归属、共享壳层边界和 import 规则。

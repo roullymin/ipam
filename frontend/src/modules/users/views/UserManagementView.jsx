@@ -1,6 +1,6 @@
 import React from 'react';
 import { Lock, Plus, ShieldCheck, UserRoundCog } from 'lucide-react';
-import { StatusBadge } from './common/UI';
+import { StatusBadge } from '../../../components/common/UI';
 
 const formatTime = (value) => {
   if (!value) return '从未登录';

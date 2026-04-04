@@ -415,3 +415,12 @@ If only one area is chosen next, use this order:
 - `docs/UPDATE_WORKFLOW.md`
 - `docs/DEPLOY_ACCEPTANCE.md`
 - `docs/UI_REDESIGN.md`
+- `docs/COMPONENTIZATION_GUIDE.md`
+
+## Componentization Direction / 组件化方向
+
+The next stage should continue toward a unified platform shell with feature modules for IPAM, DCIM, resident operations, change requests, security, and backup.
+下一阶段建议继续朝“统一平台壳层 + 业务功能模块”的方向演进，把 IPAM、DCIM、驻场运营、设备变更、安全审计和备份恢复逐步收敛成清晰的前端模块。
+
+The first implementation step has already started by moving the change-request pages under `frontend/src/modules/changeRequests/`.
+第一步组件化已经开始，设备变更申请相关页面已迁入 `frontend/src/modules/changeRequests/`。

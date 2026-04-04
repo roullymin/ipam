@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowLeftRight, FileText, Loader2, Send } from 'lucide-react';
 
-import { fetchCsrfToken, safeFetch } from '../lib/api';
+import { fetchCsrfToken, safeFetch } from '../../../lib/api';
 
 const REQUEST_TYPES = {
   rack_in: '设备上架',

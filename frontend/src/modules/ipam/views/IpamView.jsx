@@ -21,8 +21,8 @@ import {
   Upload,
   Wifi,
 } from 'lucide-react';
-import IPPoolGrid from './IPPoolGrid';
-import { StatusBadge } from './common/UI';
+import IPPoolGrid from '../../../components/IPPoolGrid';
+import { StatusBadge } from '../../../components/common/UI';
 
 const safeArray = (value) => {
   if (Array.isArray(value)) return value;

@@ -16,8 +16,8 @@ import {
   Zap,
 } from 'lucide-react';
 
-import { BRAND } from '../lib/brand';
-import { BUILD_INFO, shortCommitLabel } from '../lib/buildInfo';
+import { BRAND } from '../../../lib/brand';
+import { BUILD_INFO, shortCommitLabel } from '../../../lib/buildInfo';
 
 
 const safeInt = (value, fallback = 0) => {

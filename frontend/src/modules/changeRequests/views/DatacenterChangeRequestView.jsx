@@ -14,8 +14,8 @@ import {
   XCircle,
 } from 'lucide-react';
 
-import { Modal } from './common/UI';
-import { safeFetch } from '../lib/api';
+import { Modal } from '../../../components/common/UI';
+import { safeFetch } from '../../../lib/api';
 
 const REQUEST_TYPES = [
   ['rack_in', '设备上架'],

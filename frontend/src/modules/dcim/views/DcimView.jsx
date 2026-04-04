@@ -21,7 +21,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import RackElevation from './RackElevation';
+import RackElevation from '../../../components/RackElevation';
 
 const TEXT = {
   areaTitle: '机房列表',

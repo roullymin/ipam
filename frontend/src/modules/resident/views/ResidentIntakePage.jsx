@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ClipboardCheck, Download, Plus, Printer, ShieldCheck, Trash2, Users } from 'lucide-react';
-import { fetchCsrfToken, safeFetch } from '../lib/api';
+import { fetchCsrfToken, safeFetch } from '../../../lib/api';
 
 const EMPTY_DEVICE = {
   device_name: '',

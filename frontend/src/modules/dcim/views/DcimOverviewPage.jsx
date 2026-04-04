@@ -9,8 +9,8 @@ import {
   TrendingUp,
   Zap,
 } from 'lucide-react';
-import { safeFetch } from '../lib/api';
-import RackElevation from './RackElevation';
+import { safeFetch } from '../../../lib/api';
+import RackElevation from '../../../components/RackElevation';
 
 const TEXT = {
   loading: '正在加载机房只读概览...',

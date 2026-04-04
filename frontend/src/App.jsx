@@ -12,25 +12,15 @@ import {
   TableProperties, Filter 
 } from 'lucide-react';
 import AppHeader from './components/AppHeader';
+import AppScreenRouter from './components/shell/AppScreenRouter';
 import AppSidebar from './components/AppSidebar';
 import AuthManagementModals from './components/AuthManagementModals';
-import BackupView from './components/BackupView';
-import DatacenterChangeRequestView from './components/DatacenterChangeRequestView';
-import DatacenterChangeIntakePage from './components/DatacenterChangeIntakePage';
-import DcimView from './components/DcimView';
-import DcimOverviewPage from './components/DcimOverviewPage';
 import { DatacenterModal, DeviceModal, RackModal } from './components/DcimManagementModals';
-import DashboardView from './components/DashboardView';
 import ErrorBoundary from './components/ErrorBoundary';
 import ImportWizardModal from './components/ImportWizardModal';
-import IpamView from './components/IpamView';
 import LoginScreen from './components/LoginScreen';
 import NetworkManagementModals from './components/NetworkManagementModals';
-import ResidentIntakePage from './components/ResidentIntakePage';
-import ResidentManagementView from './components/ResidentManagementView';
-import SecurityCenterView from './components/SecurityCenterView';
 import SystemStatusModal from './components/SystemStatusModal';
-import UserManagementView from './components/UserManagementView';
 import {
   ConfirmActionModal,
   DebugModal,
@@ -45,11 +35,15 @@ import { safeFetch } from './lib/api';
 import { BRAND } from './lib/brand';
 import { useAuthSession } from './hooks/useAuthSession';
 import { useAppDataLoader } from './hooks/useAppDataLoader';
-import { useDcimDerivedData, useDcimViewState } from './hooks/useDcimViewState';
 import { useImportExportHandlers } from './hooks/useImportExportHandlers';
-import { useIpamDerivedData, useIpamViewActions, useIpamViewState } from './hooks/useIpamViewState';
+import { useAppEntryMode } from './hooks/useAppEntryMode';
+import { useAppScreenProps } from './hooks/useAppScreenProps';
 import { useSystemOverview } from './hooks/useSystemOverview';
 import { useUserManagementHandlers } from './hooks/useUserManagementHandlers';
+import { DatacenterChangeIntakePage } from './modules/changeRequests';
+import { DcimOverviewPage, useDcimDerivedData, useDcimViewState } from './modules/dcim';
+import { useIpamDerivedData, useIpamViewActions, useIpamViewState } from './modules/ipam';
+import { ResidentIntakePage } from './modules/resident';
 
 // ============================================================================
 // 1. Base constants and configuration
@@ -177,15 +171,11 @@ function MainApp() {
   const currentRole = currentUserInfo?.role || (currentUser === 'admin' ? 'admin' : 'guest');
   const currentPermissions = ROLE_DEFINITIONS[currentRole]?.permissions || [];
   const currentUserDisplay = currentUserInfo?.display_name || currentUserInfo?.username || currentUser;
-  const isResidentIntakeMode =
-    typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('resident-intake') === '1';
-  const isChangeRequestIntakeMode =
-    typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('change-request-intake') === '1';
-  const isDcOverviewMode =
-    typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).get('dc-overview') === '1';
+  const {
+    isResidentIntakeMode,
+    isChangeRequestIntakeMode,
+    isDcOverviewMode,
+  } = useAppEntryMode();
 
   useEffect(() => {
     if (currentUserInfo?.must_change_password) {
@@ -476,6 +466,102 @@ function MainApp() {
     extractResponseMessage,
     getRackCalculatedPower,
     refreshData,
+  });
+
+  const screenProps = useAppScreenProps({
+    datacenters,
+    racks,
+    rackDevices,
+    ips,
+    loginLogs,
+    residentStaff,
+    systemOverview,
+    systemOverviewRefreshedAt,
+    handleJumpToDc,
+    setActiveTab,
+    sections,
+    expandedSections,
+    setExpandedSections,
+    setSectionFormData,
+    setIsSectionModalOpen,
+    setSubnetFormData,
+    setIsSubnetModalOpen,
+    handleDeleteSection,
+    subnets,
+    selectedSubnetId,
+    setSelectedSubnetId,
+    handleDeleteSubnet,
+    currentSubnet,
+    ipViewMode,
+    setIpViewMode,
+    handleScanSubnet,
+    isScanning,
+    setIpFormData,
+    setEditingIP,
+    setIsIPModalOpen,
+    searchQuery,
+    setSearchQuery,
+    tagFilter,
+    setTagFilter,
+    uniqueTags,
+    handleDownloadTemplate,
+    handleImportClick,
+    isImporting,
+    handleExport,
+    filteredIPs,
+    optionLists,
+    handleDeleteIP,
+    handlePoolIPClick,
+    activeLocation,
+    setActiveLocation,
+    setCurrentDcForm,
+    setIsDcModalOpen,
+    handleDeleteDatacenter,
+    dcimViewMode,
+    setDcimViewMode,
+    elevationLayout,
+    setElevationLayout,
+    handleExportExcel,
+    handleExportHtml,
+    handleExportImage,
+    setCurrentRackForm,
+    setIsRackModalOpen,
+    datacenterPowerStats,
+    currentRacks,
+    getRackCalculatedPower,
+    selectedRack,
+    setSelectedRack,
+    handleDeleteRack,
+    setEditingDevice,
+    handleZoomIn,
+    handleZoomOut,
+    handleZoomReset,
+    elevationScrollRef,
+    elevationContentRef,
+    handleElevationMouseDown,
+    handleElevationMouseLeave,
+    handleElevationMouseUp,
+    handleElevationMouseMove,
+    viewState,
+    refreshData,
+    auditLogs,
+    blocklist,
+    setIsBlockModalOpen,
+    handleUnblockIP,
+    backups,
+    backupSummary,
+    handleManualBackup,
+    handleDownloadBackup,
+    users,
+    roleDefinitions: ROLE_DEFINITIONS,
+    currentUsername: currentUserInfo?.username,
+    handleOpenCreateUser,
+    handleOpenEditUser,
+    setResetTarget,
+    setIsResetModalOpen,
+    handleToggleUserActive,
+    handleUnlockUser,
+    handleDeleteUser,
   });
 
   const handleSaveIP = async () => {
@@ -881,144 +967,16 @@ function MainApp() {
           />
 
         <div className="flex-1 overflow-hidden relative">
-          
-          {activeTab === 'dashboard' && (
-             <DashboardView 
-                datacenters={datacenters} 
-                racks={racks} 
-                rackDevices={rackDevices} 
-                ips={ips} 
-                logs={loginLogs} 
-                residentStaff={residentStaff}
-                overview={systemOverview}
-                lastRefreshedAt={systemOverviewRefreshedAt}
-                onJumpToDc={(dcId) => handleJumpToDc(dcId, setActiveTab)}
-             />
-          )}
-
-          {activeTab === 'list' && (
-            <IpamView
-              sections={sections}
-              expandedSections={expandedSections}
-              setExpandedSections={setExpandedSections}
-              setSectionFormData={setSectionFormData}
-              setIsSectionModalOpen={setIsSectionModalOpen}
-              setSubnetFormData={setSubnetFormData}
-              setIsSubnetModalOpen={setIsSubnetModalOpen}
-              handleDeleteSection={handleDeleteSection}
-              subnets={subnets}
-              selectedSubnetId={selectedSubnetId}
-              setSelectedSubnetId={setSelectedSubnetId}
-              handleDeleteSubnet={handleDeleteSubnet}
-              currentSubnet={currentSubnet}
-              ipViewMode={ipViewMode}
-              setIpViewMode={setIpViewMode}
-              handleScanSubnet={handleScanSubnet}
-              isScanning={isScanning}
-              setIpFormData={setIpFormData}
-              setEditingIP={setEditingIP}
-              setIsIPModalOpen={setIsIPModalOpen}
-              searchQuery={searchQuery}
-              setSearchQuery={setSearchQuery}
-              tagFilter={tagFilter}
-              setTagFilter={setTagFilter}
-              uniqueTags={uniqueTags}
-              handleDownloadTemplate={handleDownloadTemplate}
-              handleImportClick={handleImportClick}
-              isImporting={isImporting}
-              handleExport={handleExport}
-              filteredIPs={filteredIPs}
-              optionLists={optionLists}
-              handleDeleteIP={handleDeleteIP}
-              handlePoolIPClick={handlePoolIPClick}
-            />
-          )}
-
-          {activeTab === 'dcim' && (
-            <DcimView
-              datacenters={datacenters}
-              activeLocation={activeLocation}
-              setActiveLocation={setActiveLocation}
-              setCurrentDcForm={setCurrentDcForm}
-              setIsDcModalOpen={setIsDcModalOpen}
-              handleDeleteDatacenter={handleDeleteDatacenter}
-              dcimViewMode={dcimViewMode}
-              setDcimViewMode={setDcimViewMode}
-              elevationLayout={elevationLayout}
-              setElevationLayout={setElevationLayout}
-              handleDownloadTemplate={handleDownloadTemplate}
-              handleImportClick={handleImportClick}
-              isImporting={isImporting}
-              handleExportExcel={handleExportExcel}
-              handleExportHtml={handleExportHtml}
-              handleExportImage={handleExportImage}
-              setCurrentRackForm={setCurrentRackForm}
-              setIsRackModalOpen={setIsRackModalOpen}
-              datacenterPowerStats={datacenterPowerStats}
-              currentRacks={currentRacks}
-              getRackCalculatedPower={getRackCalculatedPower}
-              selectedRack={selectedRack}
-              setSelectedRack={setSelectedRack}
-              handleDeleteRack={handleDeleteRack}
-              setEditingDevice={setEditingDevice}
-              handleZoomIn={handleZoomIn}
-              handleZoomOut={handleZoomOut}
-              handleZoomReset={handleZoomReset}
-              elevationScrollRef={elevationScrollRef}
-              elevationContentRef={elevationContentRef}
-              handleElevationMouseDown={handleElevationMouseDown}
-              handleElevationMouseLeave={handleElevationMouseLeave}
-              handleElevationMouseUp={handleElevationMouseUp}
-              handleElevationMouseMove={handleElevationMouseMove}
-              viewState={viewState}
-              rackDevices={rackDevices}
-            />
-          )}
-
-          {activeTab === 'changes' && (
-            <DatacenterChangeRequestView />
-          )}
-
-          {activeTab === 'security' && (
-            <SecurityCenterView
-              loginLogs={loginLogs}
-              auditLogs={auditLogs}
-              blocklist={blocklist}
-              onOpenBlockModal={() => setIsBlockModalOpen(true)}
-              onUnblock={handleUnblockIP}
-            />
-          )}
-
-          {activeTab === 'resident' && (
-            <ResidentManagementView residentStaff={residentStaff} onRefresh={refreshData} />
-          )}
-
-          {activeTab === 'backup' && (
-            <BackupView
-              backups={backups}
-              summary={backupSummary}
-              onManualBackup={handleManualBackup}
-              onDownloadBackup={handleDownloadBackup}
-              onRefresh={refreshData}
-            />
-          )}
-
-          {activeTab === 'users' && (
-            <UserManagementView
-              users={users}
-              roleDefinitions={ROLE_DEFINITIONS}
-              currentUsername={currentUserInfo?.username}
-              onCreateUser={handleOpenCreateUser}
-              onOpenEdit={handleOpenEditUser}
-              onOpenReset={(user) => {
-                setResetTarget({ ...user, must_change_password: true });
-                setIsResetModalOpen(true);
-              }}
-              onToggleActive={handleToggleUserActive}
-              onUnlock={handleUnlockUser}
-              onDeleteUser={handleDeleteUser}
-            />
-          )}
+          <AppScreenRouter
+            activeTab={activeTab}
+            dashboardProps={screenProps.dashboardProps}
+            ipamProps={screenProps.ipamProps}
+            dcimProps={screenProps.dcimProps}
+            residentProps={screenProps.residentProps}
+            securityProps={screenProps.securityProps}
+            backupProps={screenProps.backupProps}
+            usersProps={screenProps.usersProps}
+          />
         </div>
       </main>
 

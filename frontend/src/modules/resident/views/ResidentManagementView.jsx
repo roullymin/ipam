@@ -13,9 +13,9 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { FormInput, Modal, StatusBadge } from './common/UI';
-import ImportWizardModal from './ImportWizardModal';
-import { safeFetch } from '../lib/api';
+import { FormInput, Modal, StatusBadge } from '../../../components/common/UI';
+import ImportWizardModal from '../../../components/ImportWizardModal';
+import { safeFetch } from '../../../lib/api';
 
 const EMPTY_DEVICE = {
   device_name: '',
