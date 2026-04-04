@@ -106,6 +106,8 @@ const createExecutionForm = (request) => ({
   })),
 });
 
+const cleanText = (value) => String(value ?? '').trim();
+
 const formatDateTime = (value) => {
   if (!value) return '未设置';
   const parsed = new Date(value);
@@ -265,6 +267,12 @@ export default function DatacenterChangeRequestView() {
 
   const normalizeItem = (item) => ({
     ...item,
+    device_name: cleanText(item.device_name),
+    device_model: cleanText(item.device_model),
+    serial_number: cleanText(item.serial_number),
+    assigned_management_ip: cleanText(item.assigned_management_ip),
+    assigned_service_ip: cleanText(item.assigned_service_ip),
+    notes: cleanText(item.notes),
     quantity: Number(item.quantity || 1),
     u_height: Number(item.u_height || 1),
     power_watts: Number(item.power_watts || 0),
@@ -278,14 +286,36 @@ export default function DatacenterChangeRequestView() {
     target_u_end: normalizeNumeric(item.target_u_end),
   });
 
+  const normalizeExecutionItem = (item) => ({
+    id: item.id,
+    device_name: cleanText(item.device_name),
+    assigned_management_ip: cleanText(item.assigned_management_ip),
+    assigned_service_ip: cleanText(item.assigned_service_ip),
+    source_rack: item.source_rack || null,
+    source_u_start: normalizeNumeric(item.source_u_start),
+    source_u_end: normalizeNumeric(item.source_u_end),
+    target_rack: item.target_rack || null,
+    target_u_start: normalizeNumeric(item.target_u_start),
+    target_u_end: normalizeNumeric(item.target_u_end),
+    power_watts: Number(item.power_watts || 0),
+    notes: cleanText(item.notes),
+  });
+
   const submitDraft = async () => {
     setSaving(true);
     setError('');
     try {
+      const payload = {
+        ...form,
+        title: cleanText(form.title),
+        applicant_name: cleanText(form.applicant_name),
+        applicant_phone: cleanText(form.applicant_phone),
+        items: form.items.map(normalizeItem),
+      };
       const response = await safeFetch('/api/datacenter-change-requests/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, items: form.items.map(normalizeItem) }),
+        body: JSON.stringify(payload),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(formatApiError(result, '创建草稿失败。'));
@@ -321,6 +351,33 @@ export default function DatacenterChangeRequestView() {
     setExecutionTarget(request);
     setExecutionForm(createExecutionForm(request));
     setExecutionOpen(true);
+  };
+
+  const submitExecution = async () => {
+    if (!executionTarget) return;
+    setExecuting(true);
+    setError('');
+    try {
+      const response = await safeFetch(`/api/datacenter-change-requests/${executionTarget.id}/complete/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          executor_name: cleanText(executionForm.executor_name),
+          execution_comment: cleanText(executionForm.execution_comment),
+          items: executionForm.items.map(normalizeExecutionItem),
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(formatApiError(result, '执行回填失败。'));
+      setNotice(`申请 ${result.request?.request_code || executionTarget.request_code} 已回填并标记为完成。`);
+      setExecutionOpen(false);
+      setExecutionTarget(null);
+      await loadData();
+    } catch (requestError) {
+      setError(requestError.message || '执行回填失败。');
+    } finally {
+      setExecuting(false);
+    }
   };
 
   const copyLink = async (link) => {
