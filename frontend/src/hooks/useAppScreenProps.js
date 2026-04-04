@@ -68,6 +68,7 @@ export function useAppScreenProps({
   selectedRack,
   setSelectedRack,
   handleDeleteRack,
+  setEditingDevice,
   handleZoomIn,
   handleZoomOut,
   handleZoomReset,
