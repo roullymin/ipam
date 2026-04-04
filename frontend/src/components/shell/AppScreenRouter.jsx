@@ -16,6 +16,7 @@ export default function AppScreenRouter(props) {
     ipamProps,
     dcimProps,
     residentProps,
+    changesProps,
     securityProps,
     backupProps,
     usersProps,
@@ -34,7 +35,7 @@ export default function AppScreenRouter(props) {
   }
 
   if (activeTab === 'changes') {
-    return <DatacenterChangeRequestView />;
+    return <DatacenterChangeRequestView {...changesProps} />;
   }
 
   if (activeTab === 'security') {

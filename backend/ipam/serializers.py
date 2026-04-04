@@ -18,6 +18,7 @@ from .models import (
     Subnet,
     UserProfile,
 )
+from .domains.change_requests.services import build_change_request_title
 
 
 def get_prefetched_related(instance, relation_name):
@@ -482,7 +483,11 @@ class DatacenterChangeRequestSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if request and request.user and request.user.is_authenticated:
             validated_data.setdefault('created_by', request.user)
-        validated_data['title'] = self._build_default_title(validated_data, items_data)
+        validated_data['title'] = build_change_request_title(
+            validated_data,
+            items_data,
+            DatacenterChangeRequest._meta.get_field('request_type').choices,
+        )
         change_request = DatacenterChangeRequest.objects.create(**validated_data)
         for item_data in items_data:
             DatacenterChangeItem.objects.create(request=change_request, **item_data)
@@ -493,9 +498,10 @@ class DatacenterChangeRequestSerializer(serializers.ModelSerializer):
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         if not instance.title:
-            instance.title = self._build_default_title(
+            instance.title = build_change_request_title(
                 {'request_type': instance.request_type, 'title': instance.title},
                 items_data if items_data is not None else list(instance.items.values('device_name')[:1]),
+                DatacenterChangeRequest._meta.get_field('request_type').choices,
             )
         instance.save()
 

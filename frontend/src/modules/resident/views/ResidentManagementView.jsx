@@ -136,7 +136,7 @@ function SummaryCard({ title, value, tone = 'text-slate-900' }) {
   );
 }
 
-export default function ResidentManagementView({ residentStaff, onRefresh }) {
+export default function ResidentManagementView({ residentStaff, onRefresh, initialFilters, onConsumeInitialFilters }) {
   const fileInputRef = useRef(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [formData, setFormData] = useState(EMPTY_FORM);
@@ -154,6 +154,20 @@ export default function ResidentManagementView({ residentStaff, onRefresh }) {
     approvalStatus: '',
     seatStatus: '',
   });
+
+  React.useEffect(() => {
+    if (!initialFilters) return;
+    setFilters((prev) => ({
+      ...prev,
+      name: initialFilters.name || '',
+      company: initialFilters.company || '',
+      phone: initialFilters.phone || '',
+      mac: initialFilters.mac || '',
+      approvalStatus: initialFilters.approvalStatus || '',
+      seatStatus: initialFilters.seatStatus || '',
+    }));
+    onConsumeInitialFilters?.();
+  }, [initialFilters, onConsumeInitialFilters]);
 
   const registrationLink =
     typeof window !== 'undefined'

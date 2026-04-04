@@ -1,5 +1,5 @@
 import React from 'react';
-import { Activity, KeyRound, ShieldCheck, Sparkles, Terminal } from 'lucide-react';
+import { Activity, Bell, KeyRound, Search, ShieldCheck, Sparkles, Terminal } from 'lucide-react';
 
 import BrandLockup from './BrandLockup';
 import { BRAND } from '../lib/brand';
@@ -7,8 +7,11 @@ import { BUILD_INFO, shortCommitLabel } from '../lib/buildInfo';
 
 export default function AppHeader({
   activeLabel,
+  alertCount = 0,
   currentUser,
   currentRoleLabel,
+  onOpenAlerts,
+  onOpenGlobalSearch,
   onOpenDebug,
   onOpenPasswordChange,
   onOpenSystemStatus,
@@ -35,6 +38,24 @@ export default function AppHeader({
 
       <div className="flex items-center gap-2 md:gap-3">
         <button
+          onClick={onOpenGlobalSearch}
+          type="button"
+          className="topbar-chip hidden items-center gap-2 rounded-2xl px-3 py-2 text-xs md:flex"
+          title="打开全局搜索"
+        >
+          <Search className="h-3.5 w-3.5 text-cyan-600" />
+          全局搜索
+        </button>
+        <button
+          onClick={onOpenAlerts}
+          type="button"
+          className="topbar-chip hidden items-center gap-2 rounded-2xl px-3 py-2 text-xs lg:flex"
+          title="打开告警中心"
+        >
+          <Bell className="h-3.5 w-3.5 text-amber-500" />
+          告警 {alertCount}
+        </button>
+        <button
           onClick={onOpenSystemStatus}
           type="button"
           className="topbar-chip hidden items-center gap-2 rounded-2xl px-3 py-2 text-xs md:flex"
@@ -47,7 +68,7 @@ export default function AppHeader({
           onClick={onOpenSystemStatus}
           type="button"
           className="topbar-chip hidden items-center gap-2 rounded-2xl px-3 py-2 text-xs lg:flex"
-          title="查看部署检查清单"
+          title="查看部署检查摘要"
         >
           <Activity className="h-3.5 w-3.5 text-cyan-600" />
           备份 {backupCount} / 乱码 {qualityCount}

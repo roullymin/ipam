@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2,
   Copy,
@@ -151,7 +151,7 @@ const isLinkActive = (request) => request?.token_expires_at && new Date(request.
 const findRack = (topology, datacenterId, rackId) =>
   topology.find((dc) => String(dc.id) === String(datacenterId))?.racks?.find((rack) => String(rack.id) === String(rackId));
 
-export default function DatacenterChangeRequestView() {
+export default function DatacenterChangeRequestView({ initialRequestId, onConsumeInitialRequestId }) {
   const [requests, setRequests] = useState([]);
   const [topology, setTopology] = useState([]);
   const [open, setOpen] = useState(false);
@@ -164,6 +164,8 @@ export default function DatacenterChangeRequestView() {
   const [form, setForm] = useState(createForm(''));
   const [executionTarget, setExecutionTarget] = useState(null);
   const [executionForm, setExecutionForm] = useState({ executor_name: '', execution_comment: '', items: [] });
+  const [focusedRequestId, setFocusedRequestId] = useState(null);
+  const focusedRowRef = useRef(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -190,6 +192,17 @@ export default function DatacenterChangeRequestView() {
     loadData();
   }, []);
 
+  useEffect(() => {
+    if (!initialRequestId?.id) return;
+    setFocusedRequestId(String(initialRequestId.id));
+    onConsumeInitialRequestId?.();
+  }, [initialRequestId, onConsumeInitialRequestId]);
+
+  useEffect(() => {
+    if (!focusedRequestId || !focusedRowRef.current) return;
+    focusedRowRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [focusedRequestId, requests]);
+
   const singleDatacenter = topology.length === 1 ? topology[0] : null;
 
   useEffect(() => {
@@ -213,6 +226,16 @@ export default function DatacenterChangeRequestView() {
     }),
     [requests]
   );
+
+  const displayRequests = useMemo(() => {
+    if (!focusedRequestId) return requests;
+    return [...requests].sort((left, right) => {
+      const leftFocused = String(left.id) === String(focusedRequestId);
+      const rightFocused = String(right.id) === String(focusedRequestId);
+      if (leftFocused === rightFocused) return 0;
+      return leftFocused ? -1 : 1;
+    });
+  }, [focusedRequestId, requests]);
 
   const updateField = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
   const updateItem = (index, key, value) =>
@@ -448,11 +471,16 @@ export default function DatacenterChangeRequestView() {
                 {!requests.length ? (
                   <tr><td colSpan={6} className="px-6 py-10 text-center text-slate-400">当前还没有设备变更申请。</td></tr>
                 ) : null}
-                {requests.map((request) => {
+                {displayRequests.map((request) => {
                   const item = request.items?.[0];
                   const active = isLinkActive(request);
+                  const isFocused = focusedRequestId && String(request.id) === String(focusedRequestId);
                   return (
-                    <tr key={request.id} className="align-top hover:bg-slate-50/60">
+                    <tr
+                      key={request.id}
+                      ref={isFocused ? focusedRowRef : null}
+                      className={`align-top hover:bg-slate-50/60 ${isFocused ? 'bg-sky-50/80 ring-1 ring-inset ring-sky-200' : ''}`}
+                    >
                       <td className="px-6 py-4">
                         <div className="font-semibold text-slate-900">{request.title || '未填写标题'}</div>
                         <div className="mt-1 text-xs text-slate-500">{request.request_code} / {STATUS_LABELS[request.request_type] || request.request_type}</div>

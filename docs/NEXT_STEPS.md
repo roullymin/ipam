@@ -110,15 +110,15 @@ This file is the default backlog for the local `ipam` Codex skill. When a reques
 - [ ] Extract shared page routing or active-tab rendering branches from `frontend/src/App.jsx`.
 - [x] Extract URL entry-mode detection for public intake and read-only screens from `frontend/src/App.jsx`.
 - [ ] Design a global search MVP covering IP, device, rack, resident, and project entities.
-- [ ] Design an alert-center MVP around backup, security, and data-quality signals.
+- [x] Design an alert-center MVP around backup, security, and data-quality signals.
 
 - [ ] 继续把页面专属编排逻辑从 `frontend/src/App.jsx` 中迁出。
 - [x] 把 IPAM 页状态、筛选逻辑和扫描动作从 `frontend/src/App.jsx` 拆到独立 hook。
 - [x] 把 DCIM 页状态和机柜/设备编排逻辑从 `frontend/src/App.jsx` 拆到独立 hook。
-- [ ] 把公共页面路由或 `activeTab` 渲染分支从 `frontend/src/App.jsx` 中继续迁出。
+- [x] 把公共页面路由或 `activeTab` 渲染分支从 `frontend/src/App.jsx` 中继续迁出。
 - [x] 把公开填报页和只读页的 URL 入口模式判断从 `frontend/src/App.jsx` 中迁出。
-- [ ] 设计覆盖 IP、设备、机柜、驻场和项目实体的全局搜索 MVP。
-- [ ] 围绕备份、安全和数据质量信号设计告警中心 MVP。
+- [x] 设计覆盖 IP、设备、机柜、驻场和项目实体的全局搜索 MVP。
+- [x] 围绕备份、安全和数据质量信号设计告警中心 MVP。
 
 ## Priority 9 / 组件化开发
 
@@ -131,6 +131,10 @@ This file is the default backlog for the local `ipam` Codex skill. When a reques
 - [x] Add a shell-level screen router so `App.jsx` no longer owns all active-tab render branches directly.
 - [x] Add a shell-level screen-props hook so `App.jsx` no longer assembles every page prop object inline.
 - [x] Add a lightweight componentization guide that defines module ownership, shared-shell boundaries, and import rules.
+- [x] Add precise global-search targeting for IP, DCIM device, resident, and change-request results.
+- [x] Extract change-request execution and topology assembly into backend domain services.
+- [x] Extract resident export/lookup, backup summary, security audit helpers, and data-quality summary into backend domain services.
+- [x] Extract resident import parsing/preview, backup execution/download resolution, and encoding-report limit handling into backend domain services.
 
 - [x] 引入 `frontend/src/modules/` 功能边界，并把设备变更申请视图迁入独立模块。
 - [x] 把驻场运营视图和公开填报页迁入 `frontend/src/modules/resident/`。
@@ -141,3 +145,5 @@ This file is the default backlog for the local `ipam` Codex skill. When a reques
 - [x] 增加壳层级 screen router，让 `App.jsx` 不再直接持有所有 activeTab 渲染分支。
 - [x] 增加壳层级 screen-props hook，让 `App.jsx` 不再内联组装所有页面 props。
 - [x] 增加一份轻量的组件化开发说明，明确模块归属、共享壳层边界和 import 规则。
+- [x] 把驻场导出/查重、备份摘要、安全审计辅助函数、数据质量摘要继续迁入后端领域服务。
+- [x] 把驻场导入解析/预览、备份执行/下载路径解析、编码扫描参数处理继续迁入后端领域服务。

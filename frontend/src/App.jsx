@@ -13,10 +13,12 @@ import {
 } from 'lucide-react';
 import AppHeader from './components/AppHeader';
 import AppScreenRouter from './components/shell/AppScreenRouter';
+import AlertCenterModal from './components/shell/AlertCenterModal';
 import AppSidebar from './components/AppSidebar';
 import AuthManagementModals from './components/AuthManagementModals';
 import { DatacenterModal, DeviceModal, RackModal } from './components/DcimManagementModals';
 import ErrorBoundary from './components/ErrorBoundary';
+import GlobalSearchModal from './components/shell/GlobalSearchModal';
 import ImportWizardModal from './components/ImportWizardModal';
 import LoginScreen from './components/LoginScreen';
 import NetworkManagementModals from './components/NetworkManagementModals';
@@ -126,6 +128,8 @@ const DEVICE_STATUS = {
   planned: { label: '\u89c4\u5212\u4e2d', color: 'text-blue-600 bg-blue-50 border-blue-200' },
   retired: { label: '\u5df2\u9000\u5f79', color: 'text-red-600 bg-red-50 border-red-200' },
 };
+const ALERT_CENTER_STORAGE_KEY = 'atlasops_alert_center_ignored';
+const ALERT_HISTORY_STORAGE_KEY = 'atlasops_alert_center_history';
 
 // ============================================================================
 // 2. Shared helpers
@@ -257,6 +261,27 @@ function MainApp() {
   const [isRackModalOpen, setIsRackModalOpen] = useState(false);
   const [isDcModalOpen, setIsDcModalOpen] = useState(false);
   const [isPasswordChangeModalOpen, setIsPasswordChangeModalOpen] = useState(false);
+  const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useState(false);
+  const [isAlertCenterOpen, setIsAlertCenterOpen] = useState(false);
+  const [residentSearchSeed, setResidentSearchSeed] = useState(null);
+  const [changeRequestSearchSeed, setChangeRequestSearchSeed] = useState(null);
+  const [ignoredAlertIds, setIgnoredAlertIds] = useState(() => {
+    try {
+      const saved = localStorage.getItem(ALERT_CENTER_STORAGE_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [alertHistory, setAlertHistory] = useState(() => {
+    try {
+      const saved = localStorage.getItem(ALERT_HISTORY_STORAGE_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [changeRequestSnapshot, setChangeRequestSnapshot] = useState([]);
   const [managingOptionKey, setManagingOptionKey] = useState(null);
 
   const [editingIP, setEditingIP] = useState(null);
@@ -442,6 +467,425 @@ function MainApp() {
     safeInt,
   });
 
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setChangeRequestSnapshot([]);
+      return;
+    }
+
+    let cancelled = false;
+    const loadChangeRequests = async () => {
+      try {
+        const response = await safeFetch('/api/datacenter-change-requests/');
+        if (!response.ok) return;
+        const payload = await response.json().catch(() => []);
+        if (!cancelled) {
+          setChangeRequestSnapshot(Array.isArray(payload) ? payload : payload?.results || []);
+        }
+      } catch {
+        if (!cancelled) {
+          setChangeRequestSnapshot([]);
+        }
+      }
+    };
+
+    loadChangeRequests();
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoggedIn, activeTab]);
+
+  const globalSearchItems = useMemo(() => {
+    const datacenterMap = new Map(datacenters.map((item) => [String(item.id), item]));
+    const rackMap = new Map(racks.map((item) => [String(item.id), item]));
+    const items = [];
+
+    ips.forEach((ip) => {
+      const address = ip.ip_address || ip.address;
+      if (!address) return;
+      items.push({
+        id: `ip-${ip.id || address}`,
+        entityType: 'ip',
+        title: address,
+        subtitle: [ip.device_name || ip.hostname, ip.subnet_cidr || ip.subnet_name, ip.status]
+          .filter(Boolean)
+          .join(' · '),
+        badge: ip.status || 'IP',
+        keywords: [
+          ip.device_name,
+          ip.owner,
+          ip.description,
+          ip.hostname,
+          ip.subnet_cidr,
+          ip.subnet_name,
+        ].filter(Boolean).join(' '),
+        weight: 100,
+        target: {
+          tab: 'list',
+          subnetId: ip.subnet || ip.subnet_id || null,
+          query: address,
+          openIpId: ip.id || null,
+        },
+      });
+    });
+
+    rackDevices.forEach((device) => {
+      const rack = rackMap.get(String(device.rack));
+      const datacenter = rack ? datacenterMap.get(String(rack.datacenter)) : null;
+      const title = device.name || device.hostname || device.brand || device.model;
+      if (!title) return;
+      items.push({
+        id: `device-${device.id}`,
+        entityType: 'device',
+        title,
+        subtitle: [
+          datacenter?.name,
+          rack?.name,
+          device.management_ip || device.project || device.device_type,
+        ].filter(Boolean).join(' · '),
+        badge: device.status || '设备',
+        keywords: [
+          device.asset_tag,
+          device.serial_number,
+          device.project,
+          device.contact,
+          device.management_ip,
+          device.brand,
+          device.model,
+        ].filter(Boolean).join(' '),
+        weight: 90,
+        target: {
+          tab: 'dcim',
+          datacenterId: rack?.datacenter || null,
+          rackId: rack?.id || null,
+          openDeviceId: device.id || null,
+        },
+      });
+    });
+
+    racks.forEach((rack) => {
+      const datacenter = datacenterMap.get(String(rack.datacenter));
+      items.push({
+        id: `rack-${rack.id}`,
+        entityType: 'rack',
+        title: rack.name || rack.code || `机柜 ${rack.id}`,
+        subtitle: [
+          datacenter?.name || '未分配机房',
+          `${safeInt(rack.height, 42)}U`,
+          rack.code,
+        ].filter(Boolean).join(' · '),
+        badge: '机柜',
+        keywords: [rack.name, rack.code, rack.description, datacenter?.name].filter(Boolean).join(' '),
+        weight: 80,
+        target: {
+          tab: 'dcim',
+          datacenterId: rack.datacenter || null,
+          rackId: rack.id,
+        },
+      });
+    });
+
+    residentStaff.forEach((resident) => {
+      items.push({
+        id: `resident-${resident.id}`,
+        entityType: 'resident',
+        title: resident.name || `驻场 ${resident.id}`,
+        subtitle: [
+          resident.company,
+          resident.phone || resident.email,
+          resident.project_name,
+        ].filter(Boolean).join(' · '),
+        badge: resident.approval_status || '驻场',
+        keywords: [
+          resident.company,
+          resident.department,
+          resident.project_name,
+          resident.phone,
+          resident.email,
+          ...(resident.devices || []).flatMap((device) => [
+            device.device_name,
+            device.wired_mac,
+            device.wireless_mac,
+          ]),
+        ].filter(Boolean).join(' '),
+        weight: 85,
+        target: {
+          tab: 'resident',
+          residentFilters: {
+            name: resident.name || '',
+            company: resident.company || '',
+            phone: resident.phone || '',
+            mac: '',
+          },
+        },
+      });
+    });
+
+    const projectMap = new Map();
+    rackDevices.forEach((device) => {
+      const name = String(device.project || '').trim();
+      if (!name) return;
+      const entry = projectMap.get(name) || { deviceCount: 0, residentCount: 0, datacenterId: null };
+      const rack = rackMap.get(String(device.rack));
+      entry.deviceCount += 1;
+      entry.datacenterId = entry.datacenterId || rack?.datacenter || null;
+      projectMap.set(name, entry);
+    });
+    residentStaff.forEach((resident) => {
+      const name = String(resident.project_name || '').trim();
+      if (!name) return;
+      const entry = projectMap.get(name) || { deviceCount: 0, residentCount: 0, datacenterId: null };
+      entry.residentCount += 1;
+      projectMap.set(name, entry);
+    });
+    projectMap.forEach((entry, name) => {
+      items.push({
+        id: `project-${name}`,
+        entityType: 'project',
+        title: name,
+        subtitle: `设备 ${entry.deviceCount} / 驻场 ${entry.residentCount}`,
+        badge: '项目',
+        keywords: name,
+        weight: 70,
+        target: {
+          tab: entry.deviceCount ? 'dcim' : 'resident',
+          datacenterId: entry.datacenterId,
+          residentFilters: entry.residentCount
+            ? {
+                company: name,
+              }
+            : null,
+        },
+      });
+    });
+
+    changeRequestSnapshot.forEach((request) => {
+      const firstItem = request.items?.[0];
+      const typeLabel = request.request_type_label || request.request_type || '设备变更';
+      items.push({
+        id: `change-request-${request.id}`,
+        entityType: 'change-request',
+        title: request.title || request.request_code || '设备变更申请',
+        subtitle: [
+          request.request_code,
+          request.applicant_name || request.company,
+          firstItem?.device_name || typeLabel,
+        ].filter(Boolean).join(' · '),
+        badge: request.status_label || request.status || '变更',
+        keywords: [
+          request.request_code,
+          request.title,
+          request.applicant_name,
+          request.company,
+          request.department,
+          request.project_name,
+          request.reason,
+          ...(request.items || []).flatMap((item) => [
+            item.device_name,
+            item.device_model,
+            item.serial_number,
+            item.assigned_management_ip,
+            item.assigned_service_ip,
+          ]),
+        ].filter(Boolean).join(' '),
+        weight: 95,
+        target: {
+          tab: 'changes',
+          changeRequestId: request.id,
+        },
+      });
+    });
+
+    return items;
+  }, [changeRequestSnapshot, datacenters, ips, rackDevices, racks, residentStaff]);
+
+  const alertItems = useMemo(() => {
+    const now = Date.now();
+    const pendingResidents = residentStaff.filter((item) => item.approval_status === 'pending');
+    const seatPendingResidents = residentStaff.filter((item) => item.needs_seat && !item.seat_number);
+    const expiringResidents = residentStaff.filter((item) => {
+      if (!item.end_date) return false;
+      const diff = new Date(item.end_date).getTime() - now;
+      const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
+      return days >= 0 && days <= 7;
+    });
+    const deviceWarnings = rackDevices.filter(
+      (item) => item.status === 'offline' || item.status === 'maintenance'
+    );
+    const recentFailedLogins = loginLogs.filter((log) => {
+      const status = String(log.status || '').toLowerCase();
+      if (status === 'success') return false;
+      const happenedAt = log.timestamp || log.created_at || log.time;
+      if (!happenedAt) return true;
+      const diff = now - new Date(happenedAt).getTime();
+      return Number.isNaN(diff) ? true : diff <= 24 * 60 * 60 * 1000;
+    });
+    const alerts = [];
+
+    if (pendingResidents.length) {
+      alerts.push({
+        id: 'resident-pending',
+        level: 'high',
+        title: '驻场申请待审批',
+        description: `当前有 ${pendingResidents.length} 条驻场申请等待审核或批复。`,
+        count: pendingResidents.length,
+        actionLabel: '前往驻场工作台处理',
+        target: { tab: 'resident' },
+      });
+    }
+
+    if (seatPendingResidents.length) {
+      alerts.push({
+        id: 'resident-seat',
+        level: 'medium',
+        title: '驻场座位尚未安排',
+        description: `${seatPendingResidents.length} 名驻场人员需要座位但尚未落实，建议尽快协调办公区域。`,
+        count: seatPendingResidents.length,
+        actionLabel: '查看座位安排',
+        target: { tab: 'resident' },
+      });
+    }
+
+    if (expiringResidents.length) {
+      alerts.push({
+        id: 'resident-expiring',
+        level: 'medium',
+        title: '驻场即将到期',
+        description: `${expiringResidents.length} 名驻场人员将在 7 天内到期，需要续期或离场确认。`,
+        count: expiringResidents.length,
+        actionLabel: '查看到期名单',
+        target: { tab: 'resident' },
+      });
+    }
+
+    if (deviceWarnings.length) {
+      alerts.push({
+        id: 'dcim-device-warning',
+        level: 'high',
+        title: '机房设备存在异常状态',
+        description: `${deviceWarnings.length} 台设备处于离线或维护状态，建议检查机柜、供电和资产状态。`,
+        count: deviceWarnings.length,
+        actionLabel: '前往机房设备工作台',
+        target: { tab: 'dcim' },
+      });
+    }
+
+    if ((systemOverview?.data_quality?.suspected_records || 0) > 0) {
+      alerts.push({
+        id: 'data-quality',
+        level: 'medium',
+        title: '发现疑似乱码或数据质量问题',
+        description: `当前共检测到 ${systemOverview.data_quality.suspected_records} 条疑似异常记录，建议安排清洗。`,
+        count: systemOverview.data_quality.suspected_records,
+        actionLabel: '查看系统状态',
+        target: { openSystemStatus: true },
+      });
+    }
+
+    if ((systemOverview?.backup?.backup_count || 0) === 0) {
+      alerts.push({
+        id: 'backup-empty',
+        level: 'high',
+        title: '尚未生成可用备份',
+        description: '系统当前没有备份文件，建议尽快手动执行一次备份并验证可下载性。',
+        actionLabel: '前往备份恢复',
+        target: { tab: 'backup' },
+      });
+    } else {
+      const latestBackupTime = systemOverview?.backup?.latest_backup_time;
+      if (latestBackupTime) {
+        const staleHours = (now - new Date(latestBackupTime).getTime()) / (1000 * 60 * 60);
+        if (!Number.isNaN(staleHours) && staleHours > 48) {
+          alerts.push({
+            id: 'backup-stale',
+            level: 'medium',
+            title: '备份时间偏旧',
+            description: `最近一次备份距离现在已超过 ${Math.round(staleHours)} 小时，建议确认备份任务是否正常运行。`,
+            actionLabel: '查看备份记录',
+            target: { tab: 'backup' },
+          });
+        }
+      }
+    }
+
+    if (recentFailedLogins.length) {
+      alerts.push({
+        id: 'security-login-failures',
+        level: 'medium',
+        title: '最近存在登录异常',
+        description: `最近 24 小时内检测到 ${recentFailedLogins.length} 条失败或异常登录记录。`,
+        count: recentFailedLogins.length,
+        actionLabel: '前往安全审计',
+        target: { tab: 'security' },
+      });
+    }
+
+    const changeRequestPendingApproval = changeRequestSnapshot.filter((item) => item.status === 'submitted');
+    if (changeRequestPendingApproval.length) {
+      alerts.push({
+        id: 'changes-pending-approval',
+        level: 'high',
+        title: '设备变更申请待审批',
+        description: `当前有 ${changeRequestPendingApproval.length} 条设备变更申请等待审批。`,
+        count: changeRequestPendingApproval.length,
+        actionLabel: '前往设备变更中心',
+        target: { tab: 'changes', changeRequestId: changeRequestPendingApproval[0]?.id || null },
+      });
+    }
+
+    const changeRequestPendingExecution = changeRequestSnapshot.filter(
+      (item) => item.status === 'approved' || item.status === 'scheduled'
+    );
+    if (changeRequestPendingExecution.length) {
+      alerts.push({
+        id: 'changes-pending-execution',
+        level: 'medium',
+        title: '设备变更待执行回填',
+        description: `${changeRequestPendingExecution.length} 条设备变更已审批通过，等待执行与回填。`,
+        count: changeRequestPendingExecution.length,
+        actionLabel: '前往执行回填',
+        target: { tab: 'changes', changeRequestId: changeRequestPendingExecution[0]?.id || null },
+      });
+    }
+
+    const expiredDraftLinks = changeRequestSnapshot.filter((item) => {
+      if (!item.token_expires_at) return false;
+      if (!['draft', 'submitted'].includes(String(item.status || ''))) return false;
+      return new Date(item.token_expires_at).getTime() < now;
+    });
+    if (expiredDraftLinks.length) {
+      alerts.push({
+        id: 'changes-expired-links',
+        level: 'info',
+        title: '设备变更链接已过期',
+        description: `${expiredDraftLinks.length} 条设备变更链接已经过期，可能需要重新生成后再发送。`,
+        count: expiredDraftLinks.length,
+        actionLabel: '查看设备变更链接',
+        target: { tab: 'changes', changeRequestId: expiredDraftLinks[0]?.id || null },
+      });
+    }
+
+    return alerts;
+  }, [changeRequestSnapshot, loginLogs, rackDevices, residentStaff, systemOverview]);
+
+  useEffect(() => {
+    localStorage.setItem(ALERT_CENTER_STORAGE_KEY, JSON.stringify(ignoredAlertIds));
+  }, [ignoredAlertIds]);
+
+  useEffect(() => {
+    localStorage.setItem(ALERT_HISTORY_STORAGE_KEY, JSON.stringify(alertHistory));
+  }, [alertHistory]);
+
+  const activeAlertItems = useMemo(
+    () => alertItems.filter((item) => !ignoredAlertIds.includes(item.id)),
+    [alertItems, ignoredAlertIds],
+  );
+
+  const ignoredAlertItems = useMemo(
+    () => alertItems.filter((item) => ignoredAlertIds.includes(item.id)),
+    [alertItems, ignoredAlertIds],
+  );
+
   const {
     fileInputRef,
     isImporting,
@@ -475,6 +919,10 @@ function MainApp() {
     ips,
     loginLogs,
     residentStaff,
+    residentSearchSeed,
+    consumeResidentSearchSeed: () => setResidentSearchSeed(null),
+    changeRequestSearchSeed,
+    consumeChangeRequestSearchSeed: () => setChangeRequestSearchSeed(null),
     systemOverview,
     systemOverviewRefreshedAt,
     handleJumpToDc,
@@ -563,6 +1011,105 @@ function MainApp() {
     handleUnlockUser,
     handleDeleteUser,
   });
+
+  const navigateToShellTarget = React.useCallback((target = {}) => {
+    if (target.tab) {
+      setActiveTab(target.tab);
+    }
+    if (target.subnetId) {
+      setSelectedSubnetId(target.subnetId);
+    }
+    if (typeof target.query === 'string') {
+      setSearchQuery(target.query);
+    }
+    if (target.datacenterId) {
+      setActiveLocation(target.datacenterId);
+    }
+    if (target.residentFilters) {
+      setResidentSearchSeed({
+        ...target.residentFilters,
+        _nonce: Date.now(),
+      });
+    }
+    if (target.changeRequestId) {
+      setChangeRequestSearchSeed({
+        id: target.changeRequestId,
+        _nonce: Date.now(),
+      });
+    }
+    if (target.rackId) {
+      const matchedRack = racks.find((item) => String(item.id) === String(target.rackId));
+      setSelectedRack(matchedRack || null);
+    }
+    if (target.openDeviceId) {
+      const matchedDevice = rackDevices.find((item) => String(item.id) === String(target.openDeviceId));
+      if (matchedDevice) {
+        setEditingDevice(matchedDevice);
+      }
+    }
+    if (target.openIpId) {
+      const matchedIp = ips.find((item) => String(item.id) === String(target.openIpId));
+      if (matchedIp) {
+        setEditingIP(matchedIp);
+        setIpFormData(matchedIp);
+        setIsIPModalOpen(true);
+      }
+    }
+    if (target.openSystemStatus) {
+      setIsSystemStatusOpen(true);
+    }
+  }, [ips, rackDevices, racks, setActiveLocation, setEditingDevice, setEditingIP, setIpFormData, setIsIPModalOpen, setSearchQuery, setSelectedRack, setSelectedSubnetId]);
+
+  const pushAlertHistory = React.useCallback((entry) => {
+    setAlertHistory((prev) => [
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        occurredAt: new Date().toISOString(),
+        ...entry,
+      },
+      ...prev,
+    ].slice(0, 20));
+  }, []);
+
+  const handleGlobalSearchSelect = React.useCallback((item) => {
+    navigateToShellTarget(item?.target || {});
+    pushAlertHistory({
+      type: 'search',
+      title: `打开搜索结果：${item?.title || '未命名对象'}`,
+      detail: item?.subtitle || item?.entityType || '全局搜索',
+    });
+    setIsGlobalSearchOpen(false);
+  }, [navigateToShellTarget, pushAlertHistory]);
+
+  const handleAlertSelect = React.useCallback((alert) => {
+    navigateToShellTarget(alert?.target || {});
+    pushAlertHistory({
+      type: 'alert-open',
+      title: `处理告警：${alert?.title || '未命名告警'}`,
+      detail: alert?.description || '',
+    });
+    setIsAlertCenterOpen(false);
+  }, [navigateToShellTarget, pushAlertHistory]);
+
+  const handleIgnoreAlert = React.useCallback((alert) => {
+    if (!alert?.id) return;
+    setIgnoredAlertIds((prev) => (prev.includes(alert.id) ? prev : [...prev, alert.id]));
+    pushAlertHistory({
+      type: 'alert-ignore',
+      title: `已忽略告警：${alert?.title || '未命名告警'}`,
+      detail: alert?.description || '',
+    });
+  }, [pushAlertHistory]);
+
+  const handleRestoreAlert = React.useCallback((alert) => {
+    if (!alert?.id) return;
+    setIgnoredAlertIds((prev) => prev.filter((item) => item !== alert.id));
+    pushAlertHistory({
+      type: 'alert-restore',
+      title: `已恢复告警：${alert?.title || '未命名告警'}`,
+      detail: alert?.description || '',
+    });
+  }, [pushAlertHistory]);
 
   const handleSaveIP = async () => {
     if (!ipFormData.ip_address) {
@@ -958,8 +1505,11 @@ function MainApp() {
         <main className="flex-1 flex flex-col min-w-0 bg-transparent">
           <AppHeader
             activeLabel={TAB_CONFIG[activeTab]?.label || BRAND.navigation.dashboard}
+            alertCount={activeAlertItems.length}
             currentUser={currentUserDisplay}
             currentRoleLabel={ROLE_DEFINITIONS[currentRole]?.label}
+            onOpenAlerts={() => setIsAlertCenterOpen(true)}
+            onOpenGlobalSearch={() => setIsGlobalSearchOpen(true)}
             onOpenDebug={() => setIsDebugOpen(true)}
             onOpenPasswordChange={() => setIsPasswordChangeModalOpen(true)}
             onOpenSystemStatus={() => setIsSystemStatusOpen(true)}
@@ -1075,6 +1625,22 @@ function MainApp() {
         isLoading={isSystemOverviewLoading}
         onRefresh={refreshOverview}
         lastRefreshedAt={systemOverviewRefreshedAt}
+      />
+      <GlobalSearchModal
+        isOpen={isGlobalSearchOpen}
+        onClose={() => setIsGlobalSearchOpen(false)}
+        items={globalSearchItems}
+        onSelect={handleGlobalSearchSelect}
+      />
+      <AlertCenterModal
+        isOpen={isAlertCenterOpen}
+        onClose={() => setIsAlertCenterOpen(false)}
+        alerts={activeAlertItems}
+        ignoredAlerts={ignoredAlertItems}
+        recentHistory={alertHistory}
+        onSelect={handleAlertSelect}
+        onIgnore={handleIgnoreAlert}
+        onRestore={handleRestoreAlert}
       />
       {/* Global utility overlays */}
       <NotificationCenter items={notifications} onDismiss={dismissNotification} />

@@ -58,6 +58,28 @@ from .permissions import (
     IpamWritePermission,
     ResidentAccessPermission,
 )
+from .domains.backup.selectors import build_backup_summary, collect_backup_files, get_backup_dir
+from .domains.backup.services import create_manual_backup, resolve_backup_download_path
+from .domains.change_requests.selectors import build_change_request_topology_rows
+from .domains.change_requests.services import apply_change_request_execution
+from .domains.data_quality.services import build_encoding_report_payload
+from .domains.data_quality.selectors import get_data_quality_summary
+from .domains.platform.selectors import build_system_overview_payload
+from .domains.resident.selectors import build_resident_export_rows, build_resident_lookup_maps
+from .domains.resident.services import (
+    build_resident_import_groups,
+    build_resident_import_preview,
+    get_resident_row_value,
+    parse_resident_approval_status,
+    parse_resident_type,
+    read_resident_import_dataframe,
+)
+from .domains.security.services import (
+    get_actor_name as security_get_actor_name,
+    get_client_ip as security_get_client_ip,
+    record_audit as security_record_audit,
+    record_login as security_record_login,
+)
 from .serializers import (
     AuditLogSerializer,
     BlocklistSerializer,
@@ -81,14 +103,10 @@ logger = logging.getLogger('django')
 LOGIN_LOCK_THRESHOLD = 5
 LOGIN_LOCK_MINUTES = 30
 APP_VERSION = os.environ.get('APP_VERSION', '1.0.0')
-SYSTEM_OVERVIEW_CACHE = {'expires_at': None, 'payload': None}
 
 
 def get_client_ip(request):
-    forwarded = request.META.get('HTTP_X_FORWARDED_FOR')
-    if forwarded:
-        return forwarded.split(',')[0].strip()
-    return request.META.get('REMOTE_ADDR', 'unknown')
+    return security_get_client_ip(request)
 
 
 def _repo_root():
@@ -238,25 +256,18 @@ def get_user_profile(user):
 
 
 def record_login(username, request, action, result):
-    try:
-        LoginLog.objects.create(
-            username=username or '',
-            ip_address=get_client_ip(request),
-            action=action,
-            status=result,
-        )
-    except Exception:
-        logger.exception('Failed to record login log.')
+    security_record_login(
+        model=LoginLog,
+        username=username,
+        request=request,
+        action=action,
+        result=result,
+        logger=logger,
+    )
 
 
 def get_actor_name(user):
-    if not user or not getattr(user, 'is_authenticated', False):
-        return '系统'
-    try:
-        profile = get_user_profile(user)
-        return profile.display_name or user.username
-    except Exception:
-        return user.username
+    return security_get_actor_name(user, get_user_profile)
 
 
 def resolve_target_display(target):
@@ -270,21 +281,16 @@ def resolve_target_display(target):
 
 
 def record_audit(request, module, action, target=None, detail=''):
-    try:
-        user = request.user if request and getattr(request, 'user', None) and request.user.is_authenticated else None
-        AuditLog.objects.create(
-            user=user,
-            actor_name=get_actor_name(user),
-            module=module,
-            action=action,
-            target_type=target.__class__.__name__ if target is not None else '',
-            target_id=str(getattr(target, 'pk', '')) if target is not None else '',
-            target_display=resolve_target_display(target),
-            detail=detail or '',
-            ip_address=get_client_ip(request) if request else '',
-        )
-    except Exception:
-        logger.exception('Failed to record audit log.')
+    security_record_audit(
+        model=AuditLog,
+        request=request,
+        module=module,
+        action=action,
+        get_actor_name_fn=get_actor_name,
+        target=target,
+        detail=detail,
+        logger=logger,
+    )
 
 
 def _normalize_header(value):
@@ -330,317 +336,54 @@ def _parse_date(value):
 
 
 def _parse_resident_type(value):
-    normalized = str(_normalize_cell(value)).strip().lower()
-    if normalized in {'implementation', '实施驻场', '实施', '大模型实施'}:
-        return 'implementation'
-    if normalized in {'operations', '运维值守', '运维', '值守'}:
-        return 'operations'
-    if normalized in {'vendor', '厂商支持', '厂商', '外包支持'}:
-        return 'vendor'
-    if normalized in {'visitor', '临时来访', '访客', '来访'}:
-        return 'visitor'
-    return 'implementation'
+    return parse_resident_type(value, _normalize_cell)
 
 
 def _parse_approval_status(value):
-    normalized = str(_normalize_cell(value)).strip().lower()
-    if normalized in {'approved', '已通过', '通过'}:
-        return 'approved'
-    if normalized in {'rejected', '已驳回', '驳回'}:
-        return 'rejected'
-    if normalized in {'left', '已离场', '离场'}:
-        return 'left'
-    if normalized in {'pending', '待审核', '待审批'}:
-        return 'pending'
-    return 'approved'
+    return parse_resident_approval_status(value, _normalize_cell)
 
 
 def _read_resident_import_dataframe(uploaded_file):
-    name = (uploaded_file.name or '').lower()
-    if name.endswith('.csv'):
-        dataframe = read_csv_with_fallback(uploaded_file)
-        dataframe = dataframe.dropna(how='all')
-        dataframe.columns = [_normalize_header(col) for col in dataframe.columns]
-        return dataframe, 1
-
-    raw = normalize_dataframe_text(pd.read_excel(uploaded_file, sheet_name=0, header=None))
-    raw = raw.dropna(axis=0, how='all').dropna(axis=1, how='all')
-    if raw.empty:
-        return pd.DataFrame(), 0
-
-    row0 = [_normalize_header(value) for value in raw.iloc[0].tolist()]
-    row1 = [_normalize_header(value) for value in raw.iloc[1].tolist()] if len(raw.index) > 1 else []
-    has_legacy_two_row_header = '设备信息' in row0 or any(
-        key in row1 for key in ['序列号', '品牌', '型号', '有线网卡mac地址', '无线网卡mac地址']
+    return read_resident_import_dataframe(
+        uploaded_file=uploaded_file,
+        read_csv_with_fallback=read_csv_with_fallback,
+        normalize_dataframe_text=normalize_dataframe_text,
+        normalize_header=_normalize_header,
+        pandas_module=pd,
     )
-
-    if has_legacy_two_row_header and len(raw.index) > 1:
-        headers = []
-        for index in range(len(raw.columns)):
-            secondary = row1[index] if index < len(row1) else ''
-            primary = row0[index] if index < len(row0) else ''
-            headers.append(secondary or primary)
-        dataframe = raw.iloc[2:].copy()
-        header_rows = 2
-    else:
-        headers = row0
-        dataframe = raw.iloc[1:].copy()
-        header_rows = 1
-
-    dataframe.columns = headers
-    dataframe = dataframe.loc[:, [column for column in dataframe.columns if column]]
-    dataframe = dataframe.dropna(how='all')
-    return dataframe, header_rows
 
 
 def _get_row_value(row, field_name):
-    aliases = RESIDENT_HEADER_ALIASES[field_name]
-    normalized_map = {_normalize_header(column): column for column in row.index}
-    for alias in aliases:
-        column_name = normalized_map.get(_normalize_header(alias))
-        if column_name:
-            return _normalize_cell(row[column_name])
-    return ''
-
-
-def _build_resident_export_rows(queryset):
-    rows = []
-    for index, resident in enumerate(queryset, start=1):
-        devices = list(resident.devices.all())
-        device_rows = devices or [None]
-        for device_index, device in enumerate(device_rows):
-            rows.append(
-                {
-                    '序号': index if device_index == 0 else '',
-                    '登记编号': resident.registration_code,
-                    '公司': resident.company,
-                    '姓名': resident.name,
-                    '职务': resident.title,
-                    '联系方式': resident.phone,
-                    '邮箱': resident.email,
-                    '驻场类型': resident.get_resident_type_display(),
-                    '所属项目': resident.project_name,
-                    '归属部门': resident.department,
-                    '是否需要安排座位': '是' if resident.needs_seat else '否',
-                    '目前在厅办公地点': resident.office_location,
-                    '座位号': resident.seat_number,
-                    '驻场开始日期': resident.start_date,
-                    '驻场结束日期': resident.end_date,
-                    '审批状态': resident.get_approval_status_display(),
-                    '设备名称': device.device_name if device else '',
-                    '序列号': device.serial_number if device else '',
-                    '品牌': device.brand if device else '',
-                    '型号': device.model if device else '',
-                    '有线网卡mac地址': device.wired_mac if device else '',
-                    '无线网卡mac地址': device.wireless_mac if device else '',
-                    '是否安装安全防护软件': '是' if device and device.security_software_installed else '否',
-                    '操作系统是否正版激活': '是' if device and device.os_activated else '否',
-                    '是否已对终端已知安全漏洞进行修补': '是' if device and device.vulnerabilities_patched else '否',
-                    '最近杀毒时间': device.last_antivirus_at if device else '',
-                    '是否发现病毒、木马': '是' if device and device.malware_found else '否',
-                    '病毒木马说明': device.malware_notes if device else '',
-                    '备注': resident.remarks if device_index == 0 else '',
-                }
-            )
-    return rows
-
-
-def _build_resident_lookup_maps(grouped_rows):
-    registration_codes = []
-    companies = set()
-    names = set()
-    phones = set()
-
-    for grouped in grouped_rows.values():
-        resident_data = grouped['resident']
-        registration_code = resident_data.get('registration_code')
-        if registration_code:
-            registration_codes.append(registration_code)
-        companies.add(resident_data['company'])
-        names.add(resident_data['name'])
-        phones.add(resident_data['phone'])
-
-    registration_map = {}
-    if registration_codes:
-        registration_map = {
-            resident.registration_code: resident
-            for resident in ResidentStaff.objects.filter(registration_code__in=registration_codes)
-        }
-
-    identity_map = {}
-    if companies and names and phones:
-        for resident in ResidentStaff.objects.filter(
-            company__in=companies,
-            name__in=names,
-            phone__in=phones,
-        ):
-            identity_map[(resident.company, resident.name, resident.phone)] = resident
-
-    return registration_map, identity_map
+    return get_resident_row_value(
+        row,
+        field_name,
+        header_aliases=RESIDENT_HEADER_ALIASES,
+        normalize_header=_normalize_header,
+        normalize_cell=_normalize_cell,
+    )
 
 
 def _build_resident_import_groups(dataframe, header_rows):
-    grouped_rows = {}
-    errors = []
-    failed_rows = []
-
-    for excel_row_number, (_, row) in enumerate(dataframe.iterrows(), start=header_rows + 1):
-        company = str(_get_row_value(row, 'company')).strip()
-        name = str(_get_row_value(row, 'name')).strip()
-        phone = str(_get_row_value(row, 'phone')).strip()
-        registration_code = str(_get_row_value(row, 'registration_code')).strip()
-
-        if not company and not name and not phone:
-            continue
-
-        if not company or not name:
-            reason = '缺少必填字段：公司或姓名。'
-            errors.append(f'第 {excel_row_number} 行{reason}')
-            failed_rows.append(
-                {
-                    'row_number': excel_row_number,
-                    'action': 'invalid',
-                    'title': name or '未填写姓名',
-                    'subtitle': company or '未填写公司',
-                    'sheet': '驻场导入',
-                    'reason': reason,
-                }
-            )
-            continue
-
-        resident_key = registration_code or f'{company}|{name}|{phone}'
-        record = grouped_rows.setdefault(
-            resident_key,
-            {
-                'resident': {
-                    'registration_code': registration_code,
-                    'company': company,
-                    'name': name,
-                    'title': str(_get_row_value(row, 'title')).strip(),
-                    'phone': phone,
-                    'email': str(_get_row_value(row, 'email')).strip(),
-                    'resident_type': _parse_resident_type(_get_row_value(row, 'resident_type')),
-                    'project_name': str(_get_row_value(row, 'project_name')).strip(),
-                    'department': str(_get_row_value(row, 'department')).strip(),
-                    'needs_seat': _parse_bool(_get_row_value(row, 'needs_seat')),
-                    'office_location': str(_get_row_value(row, 'office_location')).strip(),
-                    'seat_number': str(_get_row_value(row, 'seat_number')).strip(),
-                    'start_date': _parse_date(_get_row_value(row, 'start_date')),
-                    'end_date': _parse_date(_get_row_value(row, 'end_date')),
-                    'approval_status': _parse_approval_status(_get_row_value(row, 'approval_status')),
-                    'remarks': str(_get_row_value(row, 'remarks')).strip(),
-                },
-                'devices': [],
-                'row_number': excel_row_number,
-            },
-        )
-
-        device_payload = {
-            'device_name': str(_get_row_value(row, 'device_name')).strip(),
-            'serial_number': str(_get_row_value(row, 'serial_number')).strip(),
-            'brand': str(_get_row_value(row, 'brand')).strip(),
-            'model': str(_get_row_value(row, 'model')).strip(),
-            'wired_mac': str(_get_row_value(row, 'wired_mac')).strip(),
-            'wireless_mac': str(_get_row_value(row, 'wireless_mac')).strip(),
-            'security_software_installed': _parse_bool(_get_row_value(row, 'security_software_installed')),
-            'os_activated': _parse_bool(_get_row_value(row, 'os_activated')),
-            'vulnerabilities_patched': _parse_bool(_get_row_value(row, 'vulnerabilities_patched')),
-            'last_antivirus_at': _parse_date(_get_row_value(row, 'last_antivirus_at')),
-            'malware_found': _parse_bool(_get_row_value(row, 'malware_found')),
-            'malware_notes': str(_get_row_value(row, 'malware_notes')).strip(),
-            'remarks': '',
-        }
-        has_device_content = any(
-            value not in ['', None, False]
-            for key, value in device_payload.items()
-            if key not in {'security_software_installed', 'os_activated', 'vulnerabilities_patched', 'malware_found'}
-        ) or any(
-            device_payload[key]
-            for key in ['security_software_installed', 'os_activated', 'vulnerabilities_patched', 'malware_found']
-        )
-        if has_device_content:
-            record['devices'].append(device_payload)
-
-    return grouped_rows, errors, failed_rows
+    return build_resident_import_groups(
+        dataframe,
+        header_rows,
+        header_aliases=RESIDENT_HEADER_ALIASES,
+        normalize_header=_normalize_header,
+        normalize_cell=_normalize_cell,
+        parse_bool=_parse_bool,
+        parse_date=_parse_date,
+    )
 
 
 def _build_resident_import_preview(grouped_rows, errors, failed_rows, preview_limit=20):
-    preview = {
-        'summary': {
-            'resident_rows': 0,
-            'device_rows': 0,
-            'create_rows': 0,
-            'update_rows': 0,
-            'actionable_rows': 0,
-            'invalid_rows': len(errors),
-        },
-        'rows': [],
-        'failed_rows': list(failed_rows),
-        'warnings': [],
-        'errors': list(errors),
-        'can_import': not errors,
-    }
-
-    if not grouped_rows:
-        preview['errors'].append('没有解析到有效人员，请检查模板表头和必填字段。')
-        preview['failed_rows'].append(
-            {
-                'row_number': '',
-                'action': 'invalid',
-                'title': '未解析到有效人员',
-                'subtitle': '驻场导入',
-                'sheet': '驻场导入',
-                'reason': '没有解析到有效人员，请检查模板表头和必填字段。',
-            }
-        )
-        preview['can_import'] = False
-        return preview
-
-    registration_map, identity_map = _build_resident_lookup_maps(grouped_rows)
-
-    for grouped in grouped_rows.values():
-        resident_data = grouped['resident']
-        row_number = grouped['row_number']
-        device_count = len(grouped['devices'])
-        registration_code = resident_data.get('registration_code')
-
-        resident = None
-        match_reason = '按公司、姓名和联系电话匹配'
-        if registration_code:
-            resident = registration_map.get(registration_code)
-            match_reason = '按登记编号匹配'
-        if resident is None:
-            resident = identity_map.get((resident_data['company'], resident_data['name'], resident_data['phone']))
-
-        action = 'update' if resident else 'create'
-        preview['summary']['resident_rows'] += 1
-        preview['summary']['device_rows'] += device_count
-        preview['summary'][f'{action}_rows'] += 1
-        preview['summary']['actionable_rows'] += 1
-
-        if not registration_code:
-            warning = f'第 {row_number} 行未提供登记编号，预览将按公司、姓名和联系电话匹配。'
-            if warning not in preview['warnings']:
-                preview['warnings'].append(warning)
-
-        if len(preview['rows']) < preview_limit:
-            preview['rows'].append(
-                {
-                    'row_number': row_number,
-                    'title': resident_data['name'],
-                    'subtitle': f"{resident_data['company']} · {resident_data['phone'] or '未填写电话'}",
-                    'action': action,
-                    'reason': f"{match_reason}，备案设备 {device_count} 台",
-                    'sheet': ' / '.join(
-                        [
-                            resident_data['project_name'] or '未填写项目',
-                            resident_data['department'] or '未填写部门',
-                        ]
-                    ),
-                }
-            )
-
-    return preview
+    return build_resident_import_preview(
+        grouped_rows=grouped_rows,
+        errors=errors,
+        failed_rows=failed_rows,
+        build_lookup_maps=build_resident_lookup_maps,
+        resident_model=ResidentStaff,
+        preview_limit=preview_limit,
+    )
 
 
 def _get_resident_registration_url(request):
@@ -1211,155 +954,6 @@ def _build_change_request_pdf(response_buffer, change_request):
     doc.build(elements)
 
 
-def _build_change_device_defaults(change_request, item):
-    device_name = (
-        (item.device_name or '').strip()
-        or (item.rack_device.name if item.rack_device else '').strip()
-        or f'{change_request.request_code}-设备{item.pk}'
-    )
-    specs_parts = []
-    if item.device_model:
-        specs_parts.append(f'型号: {item.device_model}')
-    if item.notes:
-        specs_parts.append(f'备注: {item.notes}')
-    return {
-        'name': device_name,
-        'position': item.target_u_start or item.source_u_start or 1,
-        'u_height': max(1, int(item.u_height or 1)),
-        'device_type': 'other',
-        'mgmt_ip': (item.assigned_management_ip or '').strip() or None,
-        'project': (change_request.project_name or '').strip(),
-        'contact': (change_request.applicant_name or '').strip(),
-        'power_usage': int(item.power_watts or 0),
-        'specs': '\n'.join(specs_parts).strip(),
-        'sn': (item.serial_number or '').strip() or None,
-        'status': 'active',
-    }
-
-
-def _resolve_existing_change_device(item):
-    if item.rack_device_id:
-        return item.rack_device
-    if item.source_rack_id and item.source_u_start:
-        return RackDevice.objects.filter(rack_id=item.source_rack_id, position=item.source_u_start).first()
-    return None
-
-
-def _sync_change_request_ip(item, change_request, device_name, activate=True):
-    management_ip = (item.assigned_management_ip or '').strip()
-    if not management_ip:
-        return None
-
-    description = f'设备变更申请 {change_request.request_code} / {change_request.title or change_request.request_type}'
-    ip_record, _ = IPAddress.objects.update_or_create(
-        ip_address=management_ip,
-        defaults={
-            'status': 'online' if activate else 'offline',
-            'device_name': device_name if activate else '',
-            'device_type': 'other',
-            'owner': (change_request.applicant_name or change_request.company or '').strip(),
-            'description': description,
-        },
-    )
-    return ip_record
-
-
-def _apply_change_request_execution(change_request):
-    execution_rows = []
-
-    for item in change_request.items.select_related('rack_device', 'source_rack', 'target_rack').all():
-        request_type = change_request.request_type
-        existing_device = _resolve_existing_change_device(item)
-        device_name = ((item.device_name or '').strip() or (existing_device.name if existing_device else '').strip() or f'{change_request.request_code}-设备{item.pk}')
-        synced_ip = None
-
-        if request_type in {'rack_in', 'move_in'}:
-            if not item.target_rack_id or not item.target_u_start:
-                raise serializers.ValidationError({'items': ['上架/搬入执行时必须填写目标机柜和目标 U 位。']})
-
-            defaults = _build_change_device_defaults(change_request, item)
-            if existing_device:
-                for field, value in defaults.items():
-                    setattr(existing_device, field, value)
-                existing_device.rack_id = item.target_rack_id
-                existing_device.position = item.target_u_start
-                existing_device.save()
-                device = existing_device
-                action = 'update_device'
-            else:
-                device = RackDevice.objects.create(rack_id=item.target_rack_id, **defaults)
-                item.rack_device = device
-                item.save(update_fields=['rack_device', 'updated_at'])
-                action = 'create_device'
-            synced_ip = _sync_change_request_ip(item, change_request, device.name, activate=True)
-
-        elif request_type == 'relocate':
-            if not item.target_rack_id or not item.target_u_start:
-                raise serializers.ValidationError({'items': ['迁移执行时必须填写目标机柜和目标 U 位。']})
-
-            defaults = _build_change_device_defaults(change_request, item)
-            if existing_device:
-                for field, value in defaults.items():
-                    setattr(existing_device, field, value)
-                existing_device.rack_id = item.target_rack_id
-                existing_device.position = item.target_u_start
-                existing_device.save()
-                device = existing_device
-                action = 'relocate_device'
-            else:
-                device = RackDevice.objects.create(rack_id=item.target_rack_id, **defaults)
-                item.rack_device = device
-                item.save(update_fields=['rack_device', 'updated_at'])
-                action = 'create_and_relocate'
-            synced_ip = _sync_change_request_ip(item, change_request, device.name, activate=True)
-
-        elif request_type in {'rack_out', 'move_out', 'decommission'}:
-            device = existing_device
-            if device:
-                device.status = 'decommissioned' if request_type == 'decommission' else 'removed'
-                device.save(update_fields=['status', 'updated_at'])
-                device_name = device.name
-                action = 'deactivate_device'
-            else:
-                action = 'record_only'
-            if item.ip_action in {'release', 'change'}:
-                synced_ip = _sync_change_request_ip(item, change_request, device_name, activate=False)
-
-        elif request_type == 'power_change':
-            device = existing_device
-            action = 'record_only'
-            if device:
-                changed_fields = []
-                target_power = int(item.power_watts or 0)
-                if target_power and device.power_usage != target_power:
-                    device.power_usage = target_power
-                    changed_fields.append('power_usage')
-                management_ip = (item.assigned_management_ip or '').strip()
-                if management_ip and device.mgmt_ip != management_ip:
-                    device.mgmt_ip = management_ip
-                    changed_fields.append('mgmt_ip')
-                if changed_fields:
-                    changed_fields.append('updated_at')
-                    device.save(update_fields=changed_fields)
-                    action = 'update_device'
-                device_name = device.name
-            synced_ip = _sync_change_request_ip(item, change_request, device_name, activate=True)
-
-        else:
-            action = 'record_only'
-
-        execution_rows.append(
-            {
-                'item_id': item.id,
-                'device_name': device_name,
-                'action': action,
-                'management_ip': synced_ip.ip_address if synced_ip else (item.assigned_management_ip or ''),
-            }
-        )
-
-    return execution_rows
-
-
 @api_view(['GET'])
 @permission_classes([AllowAny])
 @authentication_classes([])
@@ -1809,7 +1403,7 @@ class ResidentStaffViewSet(OptionalPaginationMixin, BaseViewSet):
 
     @action(detail=False, methods=['get'])
     def export_excel(self, request):
-        rows = _build_resident_export_rows(self.get_queryset())
+        rows = build_resident_export_rows(self.get_queryset())
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             pd.DataFrame(rows or [{header: '' for header in RESIDENT_EXPORT_HEADERS}], columns=RESIDENT_EXPORT_HEADERS).to_excel(
@@ -1873,7 +1467,7 @@ class ResidentStaffViewSet(OptionalPaginationMixin, BaseViewSet):
 
         created_count = 0
         updated_count = 0
-        registration_map, identity_map = _build_resident_lookup_maps(grouped_rows)
+        registration_map, identity_map = build_resident_lookup_maps(grouped_rows, ResidentStaff)
 
         for grouped in grouped_rows.values():
             resident_data = grouped['resident']
@@ -2314,7 +1908,7 @@ class DatacenterChangeRequestViewSet(OptionalPaginationMixin, BaseViewSet):
                 serializer.is_valid(raise_exception=True)
                 change_request = serializer.save()
 
-            execution_rows = _apply_change_request_execution(change_request)
+            execution_rows = apply_change_request_execution(change_request)
             change_request.status = 'completed'
             change_request.executor_name = request.data.get('executor_name') or get_actor_name(request.user)
             change_request.execution_comment = request.data.get('execution_comment', change_request.execution_comment)
@@ -2396,54 +1990,9 @@ class DatacenterChangeRequestViewSet(OptionalPaginationMixin, BaseViewSet):
 
     @action(detail=False, methods=['get'])
     def topology(self, request):
-        datacenter_rows = []
-        for datacenter in Datacenter.objects.prefetch_related('racks__devices').all():
-            rack_rows = []
-            for rack in datacenter.racks.all():
-                devices = list(rack.devices.all())
-                rack_rows.append(
-                    {
-                        'id': rack.id,
-                        'code': rack.code,
-                        'name': rack.name,
-                        'height': rack.height,
-                        'devices': [
-                            {
-                                'id': device.id,
-                                'name': device.name,
-                                'position': device.position,
-                                'u_height': device.u_height,
-                                'device_type': device.device_type,
-                                'brand': device.brand,
-                                'model': '',
-                                'mgmt_ip': device.mgmt_ip,
-                                'project': device.project,
-                                'contact': device.contact,
-                                'power_usage': device.power_usage,
-                                'serial_number': device.sn,
-                                'asset_tag': device.asset_tag,
-                            }
-                            for device in devices
-                        ],
-                        'occupied_ranges': [
-                            {
-                                'id': device.id,
-                                'name': device.name,
-                                'start': device.position,
-                                'end': max(1, device.position - max(device.u_height, 1) + 1),
-                            }
-                            for device in devices
-                        ],
-                    }
-                )
-            datacenter_rows.append(
-                {
-                    'id': datacenter.id,
-                    'name': datacenter.name,
-                    'location': datacenter.location,
-                    'racks': rack_rows,
-                }
-            )
+        datacenter_rows = build_change_request_topology_rows(
+            Datacenter.objects.prefetch_related('racks__devices').all()
+        )
         return Response({'status': 'success', 'datacenters': datacenter_rows})
 
 
@@ -2490,29 +2039,10 @@ def subnet_usage_matrix(request, pk=None):
 @authentication_classes([SessionAuthentication, BasicAuthentication])
 @permission_classes([IsAdminUser])
 def list_backups(request):
-    backup_dir = _get_backup_dir()
+    backup_dir = get_backup_dir(settings.BASE_DIR)
     try:
-        if not os.path.exists(backup_dir):
-            return Response([])
-
-        files = []
-        for filename in os.listdir(backup_dir):
-            if not (filename.endswith('.gz') or filename.endswith('.sql')):
-                continue
-            full_path = os.path.join(backup_dir, filename)
-            stat = os.stat(full_path)
-            files.append(
-                {
-                    'filename': filename,
-                    'bytes': stat.st_size,
-                    'size': f'{stat.st_size / 1024 / 1024:.2f} MB',
-                    'time': datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M'),
-                    'type': '手动' if 'manual' in filename else '自动',
-                }
-            )
-
-        files.sort(key=lambda item: item['time'], reverse=True)
-        return Response(files)
+        files = collect_backup_files(backup_dir)
+        return Response([{key: value for key, value in item.items() if key != 'full_path' and key != 'created_at'} for item in files])
     except Exception:
         logger.exception('List backups failed.')
         return Response([])
@@ -2522,91 +2052,33 @@ def list_backups(request):
 @authentication_classes([SessionAuthentication, BasicAuthentication])
 @permission_classes([IsAdminUser])
 def trigger_backup(request):
-    backup_dir = _get_backup_dir()
     try:
-        os.makedirs(backup_dir, exist_ok=True)
-        filename = f"manual_{datetime.now().strftime('%Y%m%d%H%M')}.sql.gz"
-        file_path = os.path.join(backup_dir, filename)
-        db = settings.DATABASES['default']
-        command = [
-            'mysqldump',
-            '-h', str(db.get('HOST') or '127.0.0.1'),
-            '-u', str(db.get('USER') or ''),
-            f"-p{db.get('PASSWORD') or ''}",
-            str(db.get('NAME') or ''),
-        ]
-        with gzip.open(file_path, 'wb') as backup_stream:
-            result = subprocess.run(command, stdout=backup_stream, stderr=subprocess.PIPE, check=False)
-        if result.returncode != 0:
-            error_message = result.stderr.decode('utf-8', errors='ignore').strip() or 'mysqldump failed'
-            raise RuntimeError(error_message)
+        backup_info = create_manual_backup(
+            base_dir=settings.BASE_DIR,
+            database_settings=settings.DATABASES['default'],
+            get_backup_dir=get_backup_dir,
+            run=subprocess.run,
+        )
+        filename = backup_info['filename']
         record_audit(request, 'backup', 'trigger_backup', detail=f'手动创建备份文件：{filename}')
         return Response(
             {
                 'status': 'success',
                 'filename': filename,
-                'size': f'{os.path.getsize(file_path) / 1024 / 1024:.2f} MB',
+                'size': backup_info['size'],
             }
         )
     except Exception as exc:
         logger.exception('Trigger backup failed.')
         return Response({'status': 'error', 'message': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
-def _get_backup_dir():
-    return os.environ.get('BACKUP_DIR') or os.path.join(settings.BASE_DIR, 'backups')
-
-
-def _collect_backup_files():
-    backup_dir = _get_backup_dir()
-    if not os.path.exists(backup_dir):
-        return []
-
-    files = []
-    for filename in os.listdir(backup_dir):
-        if not (filename.endswith('.gz') or filename.endswith('.sql')):
-            continue
-        full_path = os.path.join(backup_dir, filename)
-        if not os.path.isfile(full_path):
-            continue
-        stat = os.stat(full_path)
-        files.append(
-            {
-                'filename': filename,
-                'full_path': full_path,
-                'bytes': stat.st_size,
-                'size': f'{stat.st_size / 1024 / 1024:.2f} MB',
-                'time': datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M'),
-                'type': '手动' if 'manual' in filename else '自动',
-                'created_at': stat.st_mtime,
-            }
-        )
-
-    files.sort(key=lambda item: item['created_at'], reverse=True)
-    return files
-
-
 @api_view(['GET'])
 @authentication_classes([SessionAuthentication, BasicAuthentication])
 @permission_classes([IsAdminUser])
 def backup_summary(request):
-    files = _collect_backup_files()
-    total_bytes = sum(item['bytes'] for item in files)
-    latest = files[0] if files else None
-    summary = {
-        'latest_backup_time': latest['time'] if latest else '',
-        'latest_backup_name': latest['filename'] if latest else '',
-        'latest_backup_type': latest['type'] if latest else '',
-        'backup_count': len(files),
-        'manual_count': len([item for item in files if item['type'] == '手动']),
-        'auto_count': len([item for item in files if item['type'] == '自动']),
-        'total_bytes': total_bytes,
-        'total_size': f'{total_bytes / 1024 / 1024:.2f} MB',
-        'storage_path': _get_backup_dir(),
-        'status': 'normal' if files else 'empty',
-        'restore_tip': '恢复前请先停止业务容器，并先校验备份文件是否完整。',
-    }
-    return Response(summary)
+    backup_dir = get_backup_dir(settings.BASE_DIR)
+    files = collect_backup_files(backup_dir)
+    return Response(build_backup_summary(files, backup_dir))
 
 
 @api_view(['GET'])
@@ -2617,8 +2089,11 @@ def download_backup(request):
     if not filename:
         return Response({'detail': '请先提供备份文件名。'}, status=status.HTTP_400_BAD_REQUEST)
 
-    safe_name = os.path.basename(filename)
-    file_path = os.path.join(_get_backup_dir(), safe_name)
+    safe_name, file_path = resolve_backup_download_path(
+        base_dir=settings.BASE_DIR,
+        filename=filename,
+        get_backup_dir=get_backup_dir,
+    )
     if not os.path.exists(file_path) or not os.path.isfile(file_path):
         return Response({'detail': '没有找到对应的备份文件。'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -3585,43 +3060,23 @@ def api_version(request):
     return Response({'status': 'success', 'backend': get_backend_version_payload()})
 
 
-def _get_data_quality_summary(max_age_seconds=300):
-    now = timezone.now()
-    expires_at = SYSTEM_OVERVIEW_CACHE.get('expires_at')
-    payload = SYSTEM_OVERVIEW_CACHE.get('payload')
-    if payload is not None and expires_at and now < expires_at:
-        return payload
-
-    report = build_encoding_report(limit_per_model=1)
-    payload = report['summary']
-    SYSTEM_OVERVIEW_CACHE['payload'] = payload
-    SYSTEM_OVERVIEW_CACHE['expires_at'] = now + timedelta(seconds=max_age_seconds)
-    return payload
-
-
 @api_view(['GET'])
 @authentication_classes([SessionAuthentication, BasicAuthentication])
 @permission_classes([IsAuthenticated])
 def system_overview(request):
-    backup_files = _collect_backup_files()
-    latest_backup = backup_files[0] if backup_files else None
-    payload = {
-        'status': 'success',
-        'backend': get_backend_version_payload(),
-        'counts': {
+    backup_files = collect_backup_files(get_backup_dir(settings.BASE_DIR))
+    payload = build_system_overview_payload(
+        backend_version=get_backend_version_payload(),
+        counts={
             'datacenters': Datacenter.objects.count(),
             'racks': Rack.objects.count(),
             'devices': RackDevice.objects.count(),
             'ips': IPAddress.objects.count(),
             'resident_staff': ResidentStaff.objects.count(),
         },
-        'backup': {
-            'status': 'normal' if backup_files else 'empty',
-            'latest_backup_time': latest_backup['time'] if latest_backup else '',
-            'backup_count': len(backup_files),
-        },
-        'data_quality': _get_data_quality_summary(),
-    }
+        backup_files=backup_files,
+        data_quality_summary=get_data_quality_summary(now=timezone.now(), build_report=build_encoding_report),
+    )
     return Response(payload)
 
 
@@ -3629,11 +3084,10 @@ def system_overview(request):
 @authentication_classes([SessionAuthentication, BasicAuthentication])
 @permission_classes([IsAdminUser])
 def encoding_report(request):
-    try:
-        limit = max(int(request.GET.get('limit') or 5), 1)
-    except (TypeError, ValueError):
-        limit = 5
-    report = build_encoding_report(limit_per_model=limit)
+    limit, report = build_encoding_report_payload(
+        raw_limit=request.GET.get('limit'),
+        build_report=build_encoding_report,
+    )
     record_audit(request, 'data_quality', 'scan_encoding', detail=f'扫描疑似乱码数据，样本上限 {limit} 条')
     return Response(report)
 
