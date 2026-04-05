@@ -40,11 +40,16 @@ export default function AppHeader({
         <button
           onClick={onOpenGlobalSearch}
           type="button"
-          className="topbar-chip hidden items-center gap-2 rounded-2xl px-3 py-2 text-xs md:flex"
-          title="打开全局搜索"
+          className="topbar-chip hidden min-w-[19rem] items-center justify-between gap-3 rounded-[22px] px-4 py-2.5 text-left md:flex"
+          title="打开全局精确搜索"
         >
-          <Search className="h-3.5 w-3.5 text-cyan-600" />
-          全局搜索
+          <span className="flex items-center gap-2 text-sm text-slate-500">
+            <Search className="h-4 w-4 text-cyan-600" />
+            搜索 IP、设备、机柜、人员、申请单
+          </span>
+          <span className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-400">
+            Ctrl + K
+          </span>
         </button>
         <button
           onClick={onOpenAlerts}

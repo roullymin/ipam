@@ -1815,6 +1815,12 @@ class DatacenterChangeRequestViewSet(OptionalPaginationMixin, BaseViewSet):
         'items__serial_number',
     ]
 
+    def destroy(self, request, *args, **kwargs):
+        change_request = self.get_object()
+        if change_request.status != 'draft':
+            return Response({'detail': '仅允许删除草稿状态的设备变更申请。'}, status=status.HTTP_400_BAD_REQUEST)
+        return super().destroy(request, *args, **kwargs)
+
     def perform_create(self, serializer):
         instance = serializer.save(created_by=self.request.user, status='draft')
         record_audit(self.request, self.audit_module, 'create', instance, '新增机房设备变更申请草稿并生成独立链接')

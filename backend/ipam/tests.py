@@ -409,6 +409,28 @@ class DatacenterChangeRequestTests(BaseApiTestCase):
         change_request.refresh_from_db()
         self.assertEqual(change_request.status, 'submitted')
 
+    def test_only_draft_change_request_can_be_deleted(self):
+        draft_request = DatacenterChangeRequest.objects.create(
+            request_type='rack_in',
+            status='draft',
+            title='Draft Request',
+            applicant_name='Tester',
+        )
+        submitted_request = DatacenterChangeRequest.objects.create(
+            request_type='rack_in',
+            status='submitted',
+            title='Submitted Request',
+            applicant_name='Tester',
+        )
+
+        draft_response = self.client.delete(f'/api/datacenter-change-requests/{draft_request.id}/')
+        self.assertEqual(draft_response.status_code, 204)
+        self.assertFalse(DatacenterChangeRequest.objects.filter(pk=draft_request.id).exists())
+
+        submitted_response = self.client.delete(f'/api/datacenter-change-requests/{submitted_request.id}/')
+        self.assertEqual(submitted_response.status_code, 400)
+        self.assertTrue(DatacenterChangeRequest.objects.filter(pk=submitted_request.id).exists())
+
     def test_can_schedule_and_complete_change_request(self):
         change_request = DatacenterChangeRequest.objects.create(
             request_type='relocate',

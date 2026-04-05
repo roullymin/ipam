@@ -876,6 +876,28 @@ function MainApp() {
     localStorage.setItem(ALERT_HISTORY_STORAGE_KEY, JSON.stringify(alertHistory));
   }, [alertHistory]);
 
+  useEffect(() => {
+    const handleGlobalSearchShortcut = (event) => {
+      const target = event.target;
+      const tagName = target?.tagName?.toLowerCase?.();
+      const isTypingContext =
+        target?.isContentEditable ||
+        tagName === 'input' ||
+        tagName === 'textarea' ||
+        tagName === 'select';
+
+      if (isTypingContext) return;
+
+      if ((event.ctrlKey || event.metaKey) && event.key?.toLowerCase() === 'k') {
+        event.preventDefault();
+        setIsGlobalSearchOpen(true);
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalSearchShortcut);
+    return () => window.removeEventListener('keydown', handleGlobalSearchShortcut);
+  }, []);
+
   const activeAlertItems = useMemo(
     () => alertItems.filter((item) => !ignoredAlertIds.includes(item.id)),
     [alertItems, ignoredAlertIds],

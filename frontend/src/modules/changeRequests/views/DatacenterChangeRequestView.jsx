@@ -370,6 +370,24 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
     }
   };
 
+  const deleteDraft = async (request) => {
+    if (!window.confirm(`确定删除草稿 ${request.request_code || request.title || ''} 吗？`)) return;
+    setError('');
+    try {
+      const response = await safeFetch(`/api/datacenter-change-requests/${request.id}/`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(formatApiError(result, '删除草稿失败。'));
+      }
+      setNotice(`草稿 ${request.request_code || request.title || ''} 已删除。`);
+      await loadData();
+    } catch (requestError) {
+      setError(requestError.message || '删除草稿失败。');
+    }
+  };
+
   const openExecutionModal = (request) => {
     setExecutionTarget(request);
     setExecutionForm(createExecutionForm(request));
@@ -507,6 +525,7 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
                       <td className="px-6 py-4">
                         <div className="flex flex-wrap justify-end gap-2">
                           {request.status === 'draft' ? <button onClick={() => triggerAction(request.id, 'submit', `申请 ${request.request_code} 已提交审批。`)} className="inline-flex items-center gap-1 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700" type="button"><Send className="h-3.5 w-3.5" />提交</button> : null}
+                          {request.status === 'draft' ? <button onClick={() => deleteDraft(request)} className="inline-flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700" type="button"><Trash2 className="h-3.5 w-3.5" />删除</button> : null}
                           {request.status === 'submitted' ? (
                             <>
                               <button onClick={() => triggerAction(request.id, 'approve', `申请 ${request.request_code} 已批准。`)} className="inline-flex items-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700" type="button"><CheckCircle2 className="h-3.5 w-3.5" />批准</button>
