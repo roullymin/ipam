@@ -71,6 +71,11 @@ body {
     linear-gradient(180deg, #f7fafd 0%, #ebf3f7 100%);
 }
 
+.login-stage-inner {
+  align-items: center;
+  min-height: min(calc(100dvh - 2.5rem), 940px);
+}
+
 .ambient-grid {
   position: absolute;
   inset: 0;
@@ -88,7 +93,8 @@ body {
     0 32px 72px rgba(8, 24, 43, 0.16),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(22px);
-  min-height: min(760px, calc(100vh - 5rem));
+  min-height: min(760px, calc(100dvh - 3rem));
+  margin-inline: auto;
 }
 
 .login-hero {
@@ -239,6 +245,10 @@ body {
 }
 
 @media (max-width: 960px) {
+  .login-stage-inner {
+    min-height: auto;
+  }
+
   .login-shell {
     grid-template-columns: 1fr;
     min-height: auto;

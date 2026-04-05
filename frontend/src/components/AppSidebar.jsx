@@ -37,7 +37,7 @@ export default function AppSidebar({
         </div>
       </div>
 
-      <nav className="flex-1 space-y-2 p-5">
+      <nav className="custom-scrollbar flex-1 space-y-2 overflow-y-auto p-5">
         {Object.entries(tabConfig).map(([key, config]) => {
           if (!currentPermissions.includes(key)) return null;
 
@@ -62,6 +62,26 @@ export default function AppSidebar({
             </button>
           );
         })}
+
+        {currentPermissions.includes('changes') && !tabConfig.changes ? (
+          <button
+            onClick={() => setActiveTab('changes')}
+            className={`group flex w-full items-center rounded-[24px] px-4 py-3.5 text-sm transition-all ${
+              activeTab === 'changes'
+                ? 'bg-gradient-to-r from-cyan-500 to-sky-500 -translate-y-0.5 font-bold text-white shadow-[0_16px_28px_rgba(14,165,233,0.28)]'
+                : 'border border-transparent text-slate-300 hover:border-white/8 hover:bg-white/6 hover:text-white'
+            }`}
+            type="button"
+          >
+            <ChevronRight className={`mr-3 h-4 w-4 rotate-[-90deg] ${activeTab === 'changes' ? 'text-white' : 'text-cyan-200/80'}`} />
+            <span className="flex-1 text-left">设备变更 / 机柜申请</span>
+            <ChevronRight
+              className={`h-4 w-4 transition-transform ${
+                activeTab === 'changes' ? 'translate-x-0 text-white/90' : 'translate-x-1 text-slate-500 group-hover:text-cyan-200'
+              }`}
+            />
+          </button>
+        ) : null}
       </nav>
 
       <div className="px-5 pb-5">

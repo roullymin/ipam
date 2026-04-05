@@ -85,7 +85,7 @@ const TAB_CONFIG = {
   dashboard: { icon: LayoutDashboard, label: BRAND.navigation.dashboard },
   list: { icon: Server, label: BRAND.navigation.list },
   dcim: { icon: Box, label: BRAND.navigation.dcim },
-  changes: { icon: ArrowLeftRight, label: BRAND.navigation.changes || '设备变更' },
+  changes: { icon: ArrowLeftRight, label: BRAND.navigation.changes || '设备变更 / 机柜申请' },
   resident: { icon: Users, label: BRAND.navigation.resident },
   security: { icon: Shield, label: BRAND.navigation.security },
   backup: { icon: Database, label: BRAND.navigation.backup },

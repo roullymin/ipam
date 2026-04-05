@@ -59,12 +59,13 @@ export default function LoginScreen({ onLogin }) {
   };
 
   return (
-    <div className="login-stage flex min-h-screen items-center justify-center px-5 py-8 md:px-8 md:py-10">
+    <div className="login-stage flex min-h-[100dvh] items-center justify-center px-4 py-5 md:px-8 md:py-8">
       <div className="ambient-orb ambient-orb-a"></div>
       <div className="ambient-orb ambient-orb-b"></div>
       <div className="ambient-grid"></div>
 
-      <div className="login-shell relative z-10 grid w-full max-w-6xl overflow-hidden rounded-[36px] border border-white/14">
+      <div className="login-stage-inner relative z-10 flex w-full justify-center">
+        <div className="login-shell relative grid w-full max-w-6xl overflow-hidden rounded-[36px] border border-white/14">
         <section className="login-hero flex flex-col justify-between px-7 py-8 md:px-10 md:py-11">
           <div>
             <BrandLockup inverse size="lg" showTagline />
@@ -172,9 +173,17 @@ export default function LoginScreen({ onLogin }) {
                   {BRAND.tagline}
                 </div>
               </div>
+              <div className="rounded-[24px] border border-slate-200/80 bg-white/82 p-4 text-xs leading-6 text-slate-500 shadow-sm">
+                <div className="font-bold text-slate-700">{BRAND.name}</div>
+                <div className="mt-1">{BRAND.shortName} / IPAM / DCIM / 安全审计 / 驻场运营</div>
+                <div className="mt-2">
+                  当前入口已聚焦统一登录、流程联动与平台化运维体验。
+                </div>
+              </div>
             </div>
           </div>
         </section>
+        </div>
       </div>
     </div>
   );
