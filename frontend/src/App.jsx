@@ -1414,7 +1414,7 @@ function MainApp() {
     }
   };
 
-  const handleManualBackup = async () => {
+  async function handleManualBackup() {
     try {
       const response = await safeFetch('/api/trigger-backup/', { method: 'POST' });
       const data = await response.json().catch(() => ({}));
@@ -1426,11 +1426,11 @@ function MainApp() {
     } catch (error) {
       alert(`手动备份失败：${error.message}`);
     }
-  };
+  }
 
-  const handleDownloadBackup = (filename) => {
+  function handleDownloadBackup(filename) {
     window.open(`/api/backup/download/?filename=${encodeURIComponent(filename)}`, '_blank');
-  };
+  }
 
   const handleBlockIP = async () => {
     if (!blockFormData.ip_address) {
@@ -1454,7 +1454,7 @@ function MainApp() {
     }
   };
 
-  const handleUnblockIP = async (id) => {
+  async function handleUnblockIP(id) {
     if (!confirm('确定移除这条黑名单记录吗？')) return;
     try {
       const response = await safeFetch(`/api/blocklist/${id}/`, { method: 'DELETE' });
@@ -1465,7 +1465,7 @@ function MainApp() {
     } catch (error) {
       alert(`移除黑名单失败：${error.message}`);
     }
-  };
+  }
 
   if (isAuthChecking) {
       return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500 text-sm">正在检查登录状态...</div>;
