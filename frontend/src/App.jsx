@@ -1257,7 +1257,7 @@ function MainApp() {
     }
   };
 
-  const handleDeleteSection = async (id) => {
+  async function handleDeleteSection(id) {
     if (!confirm('确定删除这个网络分区吗？')) return;
     try {
       const response = await safeFetch(`/api/sections/${id}/`, { method: 'DELETE' });
@@ -1268,9 +1268,9 @@ function MainApp() {
     } catch (error) {
       alert(`删除网络分区失败：${error.message}`);
     }
-  };
+  }
 
-  const handleDeleteSubnet = async (id) => {
+  async function handleDeleteSubnet(id) {
     if (!confirm('确定删除这个子网吗？')) return;
     try {
       const response = await safeFetch(`/api/subnets/${id}/`, { method: 'DELETE' });
@@ -1282,7 +1282,7 @@ function MainApp() {
     } catch (error) {
       alert(`删除子网失败：${error.message}`);
     }
-  };
+  }
 
   const handleSaveDatacenter = async (formData) => {
     const url = formData.id ? `/api/datacenters/${formData.id}/` : '/api/datacenters/';
@@ -1303,7 +1303,7 @@ function MainApp() {
     }
   };
 
-  const handleDeleteDatacenter = async (id) => {
+  async function handleDeleteDatacenter(id) {
     if (!confirm('确定删除这个机房吗？')) return;
     try {
       const response = await safeFetch(`/api/datacenters/${id}/`, { method: 'DELETE' });
@@ -1315,7 +1315,7 @@ function MainApp() {
     } catch (error) {
       alert(`删除机房失败：${error.message}`);
     }
-  };
+  }
 
   const handleSaveRack = async (formData) => {
     const url = formData.id ? `/api/racks/${formData.id}/` : '/api/racks/';
@@ -1355,8 +1355,8 @@ function MainApp() {
     }
   };
 
-  const handleDeleteRack = async (id, e) => {
-    e.stopPropagation();
+  async function handleDeleteRack(id, e) {
+    e?.stopPropagation?.();
     if (!confirm('确定删除这个机柜吗？')) return;
     try {
       const response = await safeFetch(`/api/racks/${id}/`, { method: 'DELETE' });
@@ -1368,7 +1368,7 @@ function MainApp() {
     } catch (error) {
       alert(`删除机柜失败：${error.message}`);
     }
-  };
+  }
 
   const handleSaveDevice = async (deviceData) => {
     const url = deviceData.id ? `/api/rack-devices/${deviceData.id}/` : '/api/rack-devices/';
