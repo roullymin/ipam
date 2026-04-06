@@ -102,7 +102,7 @@ logger = logging.getLogger('django')
 
 LOGIN_LOCK_THRESHOLD = 5
 LOGIN_LOCK_MINUTES = 30
-APP_VERSION = os.environ.get('APP_VERSION', '1.0.0')
+APP_VERSION = os.environ.get('APP_VERSION', 'v1')
 
 
 def get_client_ip(request):

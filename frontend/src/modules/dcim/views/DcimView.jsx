@@ -4,7 +4,6 @@ import {
   Calculator,
   Code,
   Columns,
-  Edit2,
   FileText,
   Folder,
   HardDrive,
@@ -13,15 +12,13 @@ import {
   MapPin,
   Maximize,
   Plus,
-  Server,
-  Trash2,
   Upload,
-  X,
   Zap,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
 import RackElevation from '../../../components/RackElevation';
+import { DcimRackCard, DcimRackSidebar } from '../components';
 
 const TEXT = {
   areaTitle: '机房列表',
@@ -133,8 +130,8 @@ function ActionButton({ icon: Icon, label, onClick, primary = false, busy = fals
       type="button"
       className={
         primary
-          ? 'inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-bold text-white shadow-md shadow-blue-600/20 hover:bg-blue-700'
-          : 'inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:border-slate-300 hover:bg-slate-50'
+          ? 'inline-flex items-center gap-2 rounded-2xl bg-cyan-600 px-3.5 py-2.5 text-sm font-bold text-white shadow-lg shadow-cyan-600/20 transition-all hover:-translate-y-0.5 hover:bg-cyan-700'
+          : 'inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-bold text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50'
       }
     >
       {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
@@ -152,15 +149,15 @@ function MetricTile({ icon: Icon, label, value, unit = '', tone = 'default' }) {
         : 'border-slate-200 bg-white text-slate-900';
 
   return (
-    <div className={`rounded-2xl border px-4 py-3 ${toneClass}`}>
+    <div className={`rounded-[24px] border px-4 py-4 shadow-sm ${toneClass}`}>
       <div className="flex items-center gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/85 shadow-sm">
+        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/85 shadow-sm">
           <Icon className="h-4 w-4" />
         </div>
-        <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">{label}</div>
+        <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">{label}</div>
       </div>
       <div className="mt-3 flex items-end gap-1">
-        <span className="text-[22px] font-black leading-none">{value}</span>
+        <span className="text-[24px] font-black leading-none">{value}</span>
         {unit ? <span className="pb-1 text-sm font-bold opacity-60">{unit}</span> : null}
       </div>
     </div>
@@ -172,10 +169,10 @@ function DatacenterListItem({ datacenter, rackCount, active, onSelect }) {
     <button
       onClick={() => onSelect(datacenter.id)}
       type="button"
-      className={`w-full rounded-[18px] border px-4 py-4 text-left ${
+      className={`w-full rounded-[22px] border px-4 py-4 text-left transition-all ${
         active
-          ? 'border-blue-300 bg-blue-50 shadow-sm'
-          : 'border-transparent bg-white hover:border-slate-200 hover:bg-slate-50'
+          ? 'border-cyan-300 bg-cyan-50 shadow-sm'
+          : 'border-transparent bg-white hover:-translate-y-0.5 hover:border-slate-200 hover:bg-slate-50'
       }`}
     >
       <div className="flex items-start justify-between gap-3">
@@ -188,222 +185,6 @@ function DatacenterListItem({ datacenter, rackCount, active, onSelect }) {
         </div>
       </div>
     </button>
-  );
-}
-
-function RackCard({ rack, devices, plannedPower, actualPower, onSelect, onEdit, onDelete }) {
-  const rackHeight = safeInt(rack.height, 42);
-  const occupied = devices.reduce((sum, item) => sum + Math.max(1, safeInt(item.u_height, 1)), 0);
-  const freeUnits = Math.max(0, rackHeight - occupied);
-  const utilization = rackHeight > 0 ? Math.min(100, Math.round((occupied / rackHeight) * 100)) : 0;
-  const barClass =
-    utilization >= 85 ? 'bg-red-500' : utilization >= 65 ? 'bg-amber-500' : 'bg-blue-500';
-
-  return (
-    <div
-      onClick={() => onSelect(rack)}
-      className="group cursor-pointer overflow-hidden rounded-[18px] border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-md"
-    >
-      <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-4">
-        <div className="min-w-0">
-          <div className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-500">
-            {rack.code || TEXT.rackCodeFallback}
-          </div>
-          <h3 className="mt-2 truncate text-[18px] font-black tracking-tight text-slate-900">{rack.name}</h3>
-          <div className="mt-1 text-sm text-slate-500">
-            {rackHeight}U {TEXT.standardRack}
-          </div>
-        </div>
-        <div className="flex items-center gap-2 opacity-0 transition group-hover:opacity-100">
-          <button
-            onClick={(event) => {
-              event.stopPropagation();
-              onEdit(rack);
-            }}
-            type="button"
-            title={TEXT.editRack}
-            className="rounded-xl border border-slate-200 p-2 text-slate-400 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
-          >
-            <Edit2 className="h-4 w-4" />
-          </button>
-          <button
-            onClick={(event) => onDelete(rack.id, event)}
-            type="button"
-            title={TEXT.deleteRack}
-            className="rounded-xl border border-slate-200 p-2 text-slate-400 hover:border-red-200 hover:bg-red-50 hover:text-red-600"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-      <div className="px-4 py-4">
-        <div className="mb-2 flex items-center justify-between text-sm font-semibold text-slate-500">
-          <span>{TEXT.utilization}</span>
-          <span>{utilization}%</span>
-        </div>
-        <div className="h-3 overflow-hidden rounded-full bg-slate-100">
-          <div className={`h-full rounded-full ${barClass}`} style={{ width: `${utilization}%` }} />
-        </div>
-        <div className="mt-4 grid grid-cols-4 gap-2">
-          <div className="rounded-xl bg-slate-50 px-3 py-2">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{TEXT.deviceCount}</div>
-            <div className="mt-1 text-lg font-black text-slate-900">{devices.length}</div>
-          </div>
-          <div className="rounded-xl bg-slate-50 px-3 py-2">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{TEXT.freeUnits}</div>
-            <div className="mt-1 text-lg font-black text-slate-900">{freeUnits}U</div>
-          </div>
-          <div className="rounded-xl bg-slate-50 px-3 py-2">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{TEXT.plannedPower}</div>
-            <div className="mt-1 text-lg font-black text-slate-900">{plannedPower}W</div>
-          </div>
-          <div className="rounded-xl bg-emerald-50 px-3 py-2 text-emerald-700">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-600">PDU</div>
-            <div className="mt-1 text-lg font-black">{actualPower}W</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function RackDeviceRow({ device, onEdit }) {
-  const height = Math.max(1, safeInt(device.u_height, 1));
-  const top = safeInt(device.position, 1);
-  const bottom = top - height + 1;
-  const positionLabel = height === 1 ? `${top}U` : `${Math.max(1, bottom)}-${top}`;
-
-  return (
-    <div className="rounded-[18px] border border-slate-200 bg-white p-3.5 shadow-sm">
-      <div className="flex items-start gap-3">
-        <div className="flex h-14 w-14 flex-shrink-0 flex-col items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm">
-          <div className="text-lg font-black leading-none">{height}</div>
-          <div className="mt-1 text-[11px] font-bold uppercase tracking-[0.14em]">{positionLabel}</div>
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <Server className="h-4 w-4 text-slate-400" />
-                <h4 className="truncate text-[17px] font-black tracking-tight text-slate-900">
-                  {device.name || TEXT.unnamedDevice}
-                </h4>
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-                  {device.device_type || TEXT.unclassified}
-                </span>
-                <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-mono text-blue-700">
-                  {device.mgmt_ip || TEXT.noMgmtIp}
-                </span>
-              </div>
-            </div>
-            <button
-              onClick={() => onEdit(device)}
-              type="button"
-              title={TEXT.editDevice}
-              className="rounded-xl border border-slate-200 p-2 text-slate-400 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
-            >
-              <Edit2 className="h-4 w-4" />
-            </button>
-          </div>
-          <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-slate-500 sm:grid-cols-3">
-            <div className="rounded-xl bg-slate-50 px-3 py-2">
-              <div className="font-semibold uppercase tracking-wider text-slate-400">{TEXT.ratedPower}</div>
-              <div className="mt-1 text-sm font-bold text-slate-800">{safeInt(device.power_usage, 0)}W</div>
-            </div>
-            <div className="rounded-xl bg-slate-50 px-3 py-2">
-              <div className="font-semibold uppercase tracking-wider text-slate-400">{TEXT.project}</div>
-              <div className="mt-1 truncate text-sm font-bold text-slate-800">{device.project || TEXT.noProject}</div>
-            </div>
-            <div className="rounded-xl bg-slate-50 px-3 py-2">
-              <div className="font-semibold uppercase tracking-wider text-slate-400">{TEXT.owner}</div>
-              <div className="mt-1 truncate text-sm font-bold text-slate-800">{device.contact || TEXT.noOwner}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function RackSidebar({ rack, devices, plannedPower, onClose, onAddDevice, onEditDevice }) {
-  if (!rack) return null;
-
-  const deviceList = asArray(devices);
-  const rackHeight = safeInt(rack.height, 42);
-  const occupied = deviceList.reduce((sum, item) => sum + Math.max(1, safeInt(item.u_height, 1)), 0);
-  const freeUnits = Math.max(0, rackHeight - occupied);
-  const utilization = rackHeight > 0 ? Math.min(100, Math.round((occupied / rackHeight) * 100)) : 0;
-  const actualPower = extractRackMeta(rack).actualPower;
-
-  return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-slate-950/25 backdrop-blur-sm">
-      <button className="flex-1 cursor-default" onClick={onClose} type="button" aria-label={TEXT.closeDetail} />
-      <aside className="relative flex h-full w-[min(360px,88vw)] flex-col border-l border-slate-200 bg-white shadow-2xl">
-        <div className="border-b border-slate-200 px-4 py-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <div className="inline-flex rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-                {rack.code || TEXT.currentRack}
-              </div>
-              <h2 className="mt-3 text-[22px] font-black tracking-tight text-slate-900">{rack.name}</h2>
-              <p className="mt-2 text-sm text-slate-500">
-                {rackHeight}U {TEXT.standardRack} - {deviceList.length} devices - {freeUnits}U free
-              </p>
-            </div>
-            <button
-              onClick={onClose}
-              type="button"
-              title={TEXT.closeDetail}
-              className="rounded-2xl border border-slate-200 p-3 text-slate-400 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-          <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-            <div className="rounded-xl bg-slate-50 px-3 py-2">
-              <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">{TEXT.plannedPower}</div>
-              <div className="mt-1 text-lg font-black text-slate-900">{resolvePlannedPower(plannedPower)}W</div>
-            </div>
-            <div className="rounded-xl bg-emerald-50 px-3 py-2">
-              <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-600">{TEXT.actualPower}</div>
-              <div className="mt-1 text-lg font-black text-emerald-700">{actualPower}W</div>
-            </div>
-            <div className="rounded-xl bg-blue-50 px-3 py-2">
-              <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-blue-600">{TEXT.utilization}</div>
-              <div className="mt-1 text-lg font-black text-blue-700">{utilization}%</div>
-            </div>
-            <div className="rounded-xl bg-slate-50 px-3 py-2">
-              <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">{TEXT.deviceCount}</div>
-              <div className="mt-1 text-lg font-black text-slate-900">{deviceList.length}</div>
-            </div>
-          </div>
-        </div>
-        <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-4">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-lg font-black text-slate-900">{TEXT.deviceList}</div>
-              <div className="mt-1 text-sm text-slate-500">{TEXT.deviceListHint}</div>
-            </div>
-            <ActionButton icon={Plus} label={TEXT.addDevice} onClick={onAddDevice} primary />
-          </div>
-          <div className="space-y-3">
-            {deviceList.length ? (
-              deviceList.map((device) => (
-                <RackDeviceRow key={device.id} device={device} onEdit={onEditDevice} />
-              ))
-            ) : (
-              <div className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-8 py-14 text-center">
-                <Server className="mx-auto h-10 w-10 text-slate-300" />
-                <div className="mt-4 text-xl font-black text-slate-700">{TEXT.emptyDevices}</div>
-                <p className="mt-2 text-sm text-slate-500">{TEXT.emptyDevicesHint}</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </aside>
-    </div>
   );
 }
 
@@ -528,15 +309,15 @@ export default function DcimView(props) {
   };
 
   return (
-    <div className="flex h-full min-h-0 bg-slate-50/50">
-      <aside className="flex h-full w-[220px] flex-col border-r border-slate-200 bg-white">
-        <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-4">
+    <div className="flex h-full min-h-0 gap-5 bg-slate-50/60 p-5">
+      <aside className="flex h-full w-[248px] flex-col overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-slate-50/80 px-5 py-5">
           <div>
-            <div className="flex items-center gap-2 text-sm font-semibold text-blue-600">
+            <div className="flex items-center gap-2 text-sm font-semibold text-cyan-700">
               <MapPin className="h-4 w-4" />
               {TEXT.areaTitle}
             </div>
-            <div className="mt-3 text-[14px] font-black leading-7 tracking-tight text-slate-900">
+            <div className="mt-3 text-[15px] font-black leading-7 tracking-tight text-slate-900">
               {TEXT.areaHint}
             </div>
           </div>
@@ -544,13 +325,13 @@ export default function DcimView(props) {
             onClick={handleCreateDatacenter}
             type="button"
             title={TEXT.addDatacenter}
-            className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl border border-transparent bg-slate-100 text-blue-600 shadow-sm hover:bg-blue-50"
+            className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl border border-transparent bg-white text-cyan-700 shadow-sm transition-colors hover:bg-cyan-50"
           >
             <Plus className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-3">
+        <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-4">
           <div className="space-y-3">
             {datacenterList.map((datacenter) => (
               <DatacenterListItem
@@ -569,31 +350,31 @@ export default function DcimView(props) {
         </div>
       </aside>
 
-      <section className="flex min-w-0 flex-1 flex-col">
-        <div className="border-b border-slate-200 bg-white px-4 py-3 shadow-sm">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+      <section className="flex min-w-0 flex-1 flex-col gap-5">
+        <div className="rounded-[30px] border border-slate-200 bg-white px-5 py-5 shadow-sm">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div className="min-w-0">
-              <div className="flex items-center gap-2 text-sm font-semibold text-blue-600">
+              <div className="flex items-center gap-2 text-sm font-semibold text-cyan-700">
                 <MapPin className="h-4 w-4" />
                 {TEXT.overviewEyebrow}
               </div>
-              <div className="mt-2 flex flex-wrap items-end gap-3">
-                <h1 className="text-[24px] font-black leading-none tracking-tight text-slate-950 xl:text-[26px]">
+              <div className="mt-3 flex flex-wrap items-end gap-3">
+                <h1 className="text-[26px] font-black leading-none tracking-tight text-slate-950 xl:text-[30px]">
                   {currentDatacenter?.name || TEXT.noDatacenter}
                 </h1>
                 <span className="pb-0.5 text-sm text-slate-500">{currentDatacenter?.location || ''}</span>
               </div>
             </div>
 
-            <div className="flex flex-col gap-3 xl:items-end">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="inline-flex rounded-2xl border border-slate-200 bg-slate-50 p-1 shadow-sm">
+            <div className="flex flex-col gap-4 xl:items-end">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <div className="inline-flex rounded-[22px] border border-slate-200 bg-slate-50 p-1 shadow-sm">
                   <button
                     onClick={() => setDcimViewMode('card')}
                     type="button"
-                    className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-bold ${
+                    className={`inline-flex items-center gap-2 rounded-2xl px-3.5 py-2.5 text-sm font-bold ${
                       dcimViewMode === 'card'
-                        ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                        ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/20'
                         : 'text-slate-600'
                     }`}
                   >
@@ -603,9 +384,9 @@ export default function DcimView(props) {
                   <button
                     onClick={() => setDcimViewMode('elevation')}
                     type="button"
-                    className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-bold ${
+                    className={`inline-flex items-center gap-2 rounded-2xl px-3.5 py-2.5 text-sm font-bold ${
                       dcimViewMode === 'elevation'
-                        ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                        ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/20'
                         : 'text-slate-600'
                     }`}
                   >
@@ -622,9 +403,10 @@ export default function DcimView(props) {
                 <ActionButton icon={Plus} label={TEXT.addRack} onClick={handleCreateRack} primary />
               </div>
 
-              <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+              <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
                 <MetricTile icon={HardDrive} label={TEXT.rackCount} value={metrics.rackCount} tone="blue" />
                 <MetricTile icon={Server} label={TEXT.deviceCount} value={metrics.deviceCount} />
+                <MetricTile icon={Calculator} label={TEXT.plannedPower} value={metrics.totalPlanned} unit="W" />
                 <MetricTile icon={Zap} label={TEXT.actualPower} value={metrics.totalActual} unit="W" tone="emerald" />
               </div>
             </div>
@@ -633,11 +415,11 @@ export default function DcimView(props) {
 
         <div className="min-h-0 flex-1 overflow-hidden">
           {!currentDatacenter ? (
-            <div className="p-5">
+            <div className="h-full">
               <EmptyState icon={MapPin} title={TEXT.noDatacenter} hint={TEXT.noDatacenterHint} />
             </div>
           ) : dcimViewMode === 'card' ? (
-            <div className="custom-scrollbar h-full overflow-y-auto p-5">
+            <div className="custom-scrollbar h-full overflow-y-auto rounded-[30px] border border-slate-200 bg-white p-5 shadow-sm">
               {rackList.length ? (
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
                   {rackList.map((rack) => {
@@ -646,7 +428,7 @@ export default function DcimView(props) {
                     const plannedPower = resolvePlannedPower(computed || rack.power_limit || rack.planned_power || 0);
                     const actualPower = extractRackMeta(rack).actualPower;
                     return (
-                      <RackCard
+                      <DcimRackCard
                         key={rack.id}
                         rack={rack}
                         devices={devices}
@@ -658,6 +440,7 @@ export default function DcimView(props) {
                           setIsRackModalOpen(true);
                         }}
                         onDelete={handleDeleteRack}
+                        text={TEXT}
                       />
                     );
                   })}
@@ -667,8 +450,8 @@ export default function DcimView(props) {
               )}
             </div>
           ) : (
-            <div className="flex h-full min-h-0 flex-col p-5">
-              <div className="mb-3 flex items-center justify-between rounded-[18px] border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            <div className="flex h-full min-h-0 flex-col rounded-[30px] border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="mb-3 flex items-center justify-between rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-4">
                 <div>
                   <div className="text-base font-black text-slate-900">{TEXT.rackElevation}</div>
                   <div className="mt-1 text-sm text-slate-500">{TEXT.rackElevationHint}</div>
@@ -678,7 +461,7 @@ export default function DcimView(props) {
                     type="button"
                     title={TEXT.zoomOut}
                     onClick={handleZoomOut}
-                    className="rounded-xl border border-slate-200 bg-white p-2 text-slate-500 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700"
+                    className="rounded-2xl border border-slate-200 bg-white p-2 text-slate-500 hover:border-slate-300 hover:bg-slate-100 hover:text-slate-700"
                   >
                     <ZoomOut className="h-4 w-4" />
                   </button>
@@ -686,7 +469,7 @@ export default function DcimView(props) {
                     type="button"
                     title={TEXT.zoomIn}
                     onClick={handleZoomIn}
-                    className="rounded-xl border border-slate-200 bg-white p-2 text-slate-500 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700"
+                    className="rounded-2xl border border-slate-200 bg-white p-2 text-slate-500 hover:border-slate-300 hover:bg-slate-100 hover:text-slate-700"
                   >
                     <ZoomIn className="h-4 w-4" />
                   </button>
@@ -694,7 +477,7 @@ export default function DcimView(props) {
                     type="button"
                     title={TEXT.zoomReset}
                     onClick={handleZoomReset}
-                    className="rounded-xl border border-slate-200 bg-white p-2 text-slate-500 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700"
+                    className="rounded-2xl border border-slate-200 bg-white p-2 text-slate-500 hover:border-slate-300 hover:bg-slate-100 hover:text-slate-700"
                   >
                     <Maximize className="h-4 w-4" />
                   </button>
@@ -767,13 +550,14 @@ export default function DcimView(props) {
         </div>
       </section>
 
-      <RackSidebar
+      <DcimRackSidebar
         rack={selectedRack}
         devices={selectedRackDevices}
         plannedPower={selectedRack ? getRackCalculatedPower?.(selectedRack.id) : 0}
         onClose={() => setSelectedRack(null)}
         onAddDevice={() => setEditingDevice({ rack: selectedRack?.id })}
         onEditDevice={(device) => setEditingDevice(device)}
+        text={TEXT}
       />
     </div>
   );

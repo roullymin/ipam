@@ -1,7 +1,7 @@
 export const BUILD_INFO = typeof __APP_BUILD_INFO__ !== 'undefined'
   ? __APP_BUILD_INFO__
   : {
-      version: 'dev',
+      version: 'v1',
       commit: '',
       branch: '',
       committedAt: '',

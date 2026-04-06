@@ -14,7 +14,7 @@ const safeGit = (args, fallback = '') => {
 }
 
 const buildInfo = {
-  version: packageJson.version || '1.0.0',
+  version: packageJson.displayVersion || 'v1',
   commit: safeGit('rev-parse --short HEAD', ''),
   branch: safeGit('rev-parse --abbrev-ref HEAD', ''),
   committedAt: safeGit('log -1 --format=%cI', ''),

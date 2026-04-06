@@ -14,6 +14,7 @@ import {
   XCircle,
 } from 'lucide-react';
 
+import ListToolbar from '../../../components/common/ListToolbar';
 import { Modal } from '../../../components/common/UI';
 import { safeFetch } from '../../../lib/api';
 
@@ -161,6 +162,7 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
   const [executing, setExecuting] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [filters, setFilters] = useState({ query: '', status: '' });
   const [form, setForm] = useState(createForm(''));
   const [executionTarget, setExecutionTarget] = useState(null);
   const [executionForm, setExecutionForm] = useState({ executor_name: '', execution_comment: '', items: [] });
@@ -228,14 +230,41 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
   );
 
   const displayRequests = useMemo(() => {
-    if (!focusedRequestId) return requests;
-    return [...requests].sort((left, right) => {
+    const normalizedQuery = filters.query.trim().toLowerCase();
+    const filtered = requests.filter((request) => {
+      if (filters.status && request.status !== filters.status) return false;
+      if (!normalizedQuery) return true;
+
+      const firstItem = request.items?.[0];
+      const haystack = [
+        request.request_code,
+        request.title,
+        request.applicant_name,
+        request.applicant_phone,
+        request.company,
+        STATUS_LABELS[request.status],
+        REQUEST_TYPES.find(([value]) => value === request.request_type)?.[1],
+        firstItem?.device_name,
+        firstItem?.device_model,
+        firstItem?.serial_number,
+        firstItem?.assigned_management_ip,
+        firstItem?.assigned_service_ip,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+      return haystack.includes(normalizedQuery);
+    });
+
+    if (!focusedRequestId) return filtered;
+    return [...filtered].sort((left, right) => {
       const leftFocused = String(left.id) === String(focusedRequestId);
       const rightFocused = String(right.id) === String(focusedRequestId);
       if (leftFocused === rightFocused) return 0;
       return leftFocused ? -1 : 1;
     });
-  }, [focusedRequestId, requests]);
+  }, [filters, focusedRequestId, requests]);
 
   const updateField = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
   const updateItem = (index, key, value) =>
@@ -469,6 +498,41 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
           ))}
         </div>
 
+        <ListToolbar
+          eyebrow="列表工具栏"
+          title="快速搜索与状态筛选"
+          description="按申请编号、标题、申请人、设备信息或当前状态快速定位变更单。"
+          searchValue={filters.query}
+          onSearchChange={(value) => setFilters((prev) => ({ ...prev, query: value }))}
+          searchPlaceholder="搜索申请编号、标题、申请人、设备名称、管理 IP"
+          resultSummary={`当前结果 ${displayRequests.length} / ${requests.length}`}
+          filters={
+            <select
+              value={filters.status}
+              onChange={(event) => setFilters((prev) => ({ ...prev, status: event.target.value }))}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-700"
+            >
+              <option value="">全部状态</option>
+              {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          }
+          actions={
+            filters.query || filters.status ? (
+              <button
+                onClick={() => setFilters({ query: '', status: '' })}
+                className="rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                type="button"
+              >
+                清空筛选
+              </button>
+            ) : null
+          }
+        />
+
         <section className="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 px-6 py-4">
             <h3 className="text-lg font-black text-slate-900">申请列表</h3>
@@ -486,8 +550,12 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {!requests.length ? (
-                  <tr><td colSpan={6} className="px-6 py-10 text-center text-slate-400">当前还没有设备变更申请。</td></tr>
+                {!displayRequests.length ? (
+                  <tr>
+                    <td colSpan={6} className="px-6 py-10 text-center text-slate-400">
+                      {requests.length ? '当前筛选条件下没有匹配的设备变更申请。' : '当前还没有设备变更申请。'}
+                    </td>
+                  </tr>
                 ) : null}
                 {displayRequests.map((request) => {
                   const item = request.items?.[0];

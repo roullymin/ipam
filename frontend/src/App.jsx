@@ -499,10 +499,12 @@ function MainApp() {
     const datacenterMap = new Map(datacenters.map((item) => [String(item.id), item]));
     const rackMap = new Map(racks.map((item) => [String(item.id), item]));
     const items = [];
+    const canAccessTab = (tab) => !tab || currentPermissions.includes(tab);
 
     ips.forEach((ip) => {
       const address = ip.ip_address || ip.address;
       if (!address) return;
+      if (!canAccessTab('list')) return;
       items.push({
         id: `ip-${ip.id || address}`,
         entityType: 'ip',
@@ -534,6 +536,7 @@ function MainApp() {
       const datacenter = rack ? datacenterMap.get(String(rack.datacenter)) : null;
       const title = device.name || device.hostname || device.brand || device.model;
       if (!title) return;
+      if (!canAccessTab('dcim')) return;
       items.push({
         id: `device-${device.id}`,
         entityType: 'device',
@@ -565,6 +568,7 @@ function MainApp() {
 
     racks.forEach((rack) => {
       const datacenter = datacenterMap.get(String(rack.datacenter));
+      if (!canAccessTab('dcim')) return;
       items.push({
         id: `rack-${rack.id}`,
         entityType: 'rack',
@@ -586,6 +590,7 @@ function MainApp() {
     });
 
     residentStaff.forEach((resident) => {
+      if (!canAccessTab('resident')) return;
       items.push({
         id: `resident-${resident.id}`,
         entityType: 'resident',
@@ -639,6 +644,12 @@ function MainApp() {
       projectMap.set(name, entry);
     });
     projectMap.forEach((entry, name) => {
+      const targetTab = entry.deviceCount && canAccessTab('dcim')
+        ? 'dcim'
+        : entry.residentCount && canAccessTab('resident')
+          ? 'resident'
+          : null;
+      if (!targetTab || !canAccessTab(targetTab)) return;
       items.push({
         id: `project-${name}`,
         entityType: 'project',
@@ -648,11 +659,11 @@ function MainApp() {
         keywords: name,
         weight: 70,
         target: {
-          tab: entry.deviceCount ? 'dcim' : 'resident',
+          tab: targetTab,
           datacenterId: entry.datacenterId,
           residentFilters: entry.residentCount
             ? {
-                company: name,
+                projectName: name,
               }
             : null,
         },
@@ -660,6 +671,7 @@ function MainApp() {
     });
 
     changeRequestSnapshot.forEach((request) => {
+      if (!canAccessTab('changes')) return;
       const firstItem = request.items?.[0];
       const typeLabel = request.request_type_label || request.request_type || '设备变更';
       items.push({
@@ -697,7 +709,7 @@ function MainApp() {
     });
 
     return items;
-  }, [changeRequestSnapshot, datacenters, ips, rackDevices, racks, residentStaff]);
+  }, [changeRequestSnapshot, currentPermissions, datacenters, ips, rackDevices, racks, residentStaff]);
 
   const alertItems = useMemo(() => {
     const now = Date.now();
@@ -865,8 +877,11 @@ function MainApp() {
       });
     }
 
-    return alerts;
-  }, [changeRequestSnapshot, loginLogs, rackDevices, residentStaff, systemOverview]);
+    return alerts.filter((item) => {
+      const targetTab = item?.target?.tab;
+      return !targetTab || currentPermissions.includes(targetTab);
+    });
+  }, [changeRequestSnapshot, currentPermissions, loginLogs, rackDevices, residentStaff, systemOverview]);
 
   useEffect(() => {
     localStorage.setItem(ALERT_CENTER_STORAGE_KEY, JSON.stringify(ignoredAlertIds));
@@ -935,6 +950,10 @@ function MainApp() {
   });
 
   const navigateToShellTarget = React.useCallback((target = {}) => {
+    if (target.tab && !currentPermissions.includes(target.tab)) {
+      notify(`当前角色无权访问“${TAB_CONFIG[target.tab]?.label || target.tab}”模块。`, 'error', '权限不足');
+      return;
+    }
     if (target.tab) {
       setActiveTab(target.tab);
     }
@@ -943,6 +962,9 @@ function MainApp() {
     }
     if (typeof target.query === 'string') {
       setSearchQuery(target.query);
+    }
+    if (typeof target.tagFilter === 'string') {
+      setTagFilter(target.tagFilter);
     }
     if (target.datacenterId) {
       setActiveLocation(target.datacenterId);
@@ -956,6 +978,12 @@ function MainApp() {
     if (target.changeRequestId) {
       setChangeRequestSearchSeed({
         id: target.changeRequestId,
+        _nonce: Date.now(),
+      });
+    }
+    if (target.changeRequestFilters) {
+      setChangeRequestSearchSeed({
+        ...target.changeRequestFilters,
         _nonce: Date.now(),
       });
     }
@@ -980,7 +1008,7 @@ function MainApp() {
     if (target.openSystemStatus) {
       setIsSystemStatusOpen(true);
     }
-  }, [ips, rackDevices, racks, setActiveLocation, setEditingDevice, setEditingIP, setIpFormData, setIsIPModalOpen, setSearchQuery, setSelectedRack, setSelectedSubnetId]);
+  }, [currentPermissions, ips, notify, rackDevices, racks, setActiveLocation, setEditingDevice, setEditingIP, setIpFormData, setIsIPModalOpen, setSearchQuery, setSelectedRack, setSelectedSubnetId, setTagFilter]);
 
   const pushAlertHistory = React.useCallback((entry) => {
     setAlertHistory((prev) => [
@@ -1138,7 +1166,11 @@ function MainApp() {
     systemOverview,
     systemOverviewRefreshedAt,
     handleJumpToDc,
+    navigateToShellTarget,
     setActiveTab,
+    currentRole,
+    currentUserDisplay,
+    currentPermissions,
     sections,
     expandedSections,
     setExpandedSections,
