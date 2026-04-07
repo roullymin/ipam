@@ -94,15 +94,13 @@ function EmptyUnitCell({ rack, unit, readonly, onSelect, onEdit, totalUnits }) {
 }
 
 function DeviceCell({ rack, layout, onSelect, onEdit, readonly }) {
-  const { device, top, bottom, visibleTop, visibleBottom, visibleHeight, clipped, rowStart } = layout;
-  const powerUsage = safeInt(device.power_usage, 0);
-  const rangeLabel = visibleHeight === 1 ? `${visibleTop}` : `${visibleBottom}-${visibleTop}`;
+  const { device, top, bottom, visibleHeight, clipped, rowStart } = layout;
   const cellClass = clipped ? 'bg-[#3b82f6]' : 'bg-[#4f79cc]';
   const textSizeClass =
     visibleHeight >= 8
       ? 'text-[13px] leading-5'
       : visibleHeight >= 4
-        ? 'text-[12px] leading-4'
+        ? 'text-[12px] leading-5'
         : visibleHeight >= 2
           ? 'text-[11px] leading-4'
           : 'text-[10px] leading-tight';
@@ -122,19 +120,13 @@ function DeviceCell({ rack, layout, onSelect, onEdit, readonly }) {
 
   const content = (
     <>
-      {clipped ? (
-        <span className="absolute right-1 top-1 rounded bg-white/20 px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-white">
-          {TEXT.overflow}
-        </span>
-      ) : null}
-
-      <div className="mb-1 text-[10px] font-bold tracking-[0.12em] text-white/85">{rangeLabel}</div>
-      <div className={`max-w-full font-bold ${textSizeClass} ${visibleHeight <= 2 ? 'line-clamp-2' : 'line-clamp-4'}`}>
+      <div
+        className={`max-w-full font-bold ${textSizeClass} ${
+          visibleHeight <= 2 ? 'line-clamp-2' : visibleHeight <= 4 ? 'line-clamp-3' : 'line-clamp-4'
+        }`}
+      >
         {device.name || TEXT.unnamed}
       </div>
-      {powerUsage > 0 && visibleHeight >= 3 ? (
-        <div className="mt-1 text-[10px] font-bold text-amber-200">{powerUsage}W</div>
-      ) : null}
     </>
   );
 

@@ -90,11 +90,8 @@ const buildRackElevationMarkup = (rack, unitHeight) => {
   }).join('');
 
   const deviceCells = layoutDevices
-    .map(({ key, device, top, bottom, visibleTop, visibleBottom, visibleHeight, clipped, rowStart }) => {
-      const rangeLabel = visibleHeight === 1 ? `${visibleTop}` : `${visibleBottom}-${visibleTop}`;
-      const powerUsage = safeInt(device.power_usage, 0);
+    .map(({ key, device, top, bottom, visibleHeight, clipped, rowStart }) => {
       const title = escapeHtml(device.name || '未命名设备');
-      const powerLabel = powerUsage > 0 && visibleHeight >= 3 ? `<div class="rack-device-power">${powerUsage}W</div>` : '';
 
       return `
         <div
@@ -103,10 +100,7 @@ const buildRackElevationMarkup = (rack, unitHeight) => {
           title="${escapeHtml(`${device.name || '未命名设备'} / U位 ${top === bottom ? top : `${Math.max(1, bottom)}-${top}`}`)}"
           data-device-key="${escapeHtml(key)}"
         >
-          ${clipped ? '<div class="rack-overflow-badge">越界</div>' : ''}
-          <div class="rack-range-label">${rangeLabel}</div>
           <div class="rack-device-name">${title}</div>
-          ${powerLabel}
         </div>
       `;
     })
@@ -337,7 +331,6 @@ const buildExportStyles = (columns) => `
   .rack-device-cell {
     position: relative;
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
     overflow: hidden;
@@ -350,36 +343,12 @@ const buildExportStyles = (columns) => `
   .rack-device-cell-clipped {
     background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%);
   }
-  .rack-overflow-badge {
-    position: absolute;
-    top: 4px;
-    right: 4px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.18);
-    padding: 2px 6px;
-    font-size: 9px;
-    font-weight: 800;
-  }
-  .rack-range-label {
-    font-size: 10px;
-    line-height: 1.2;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    color: rgba(255, 255, 255, 0.9);
-  }
   .rack-device-name {
-    margin-top: 4px;
     font-size: 12px;
     line-height: 1.35;
     font-weight: 800;
     word-break: break-word;
-  }
-  .rack-device-power {
-    margin-top: 4px;
-    font-size: 10px;
-    line-height: 1.2;
-    font-weight: 800;
-    color: #fde68a;
+    text-align: center;
   }
 `;
 
