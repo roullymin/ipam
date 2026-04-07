@@ -8,6 +8,7 @@ export function useImportExportHandlers({
   activeLocation,
   alert,
   currentRacks,
+  rackDevices,
   datacenterPowerStats,
   datacenters,
   extractResponseMessage,
@@ -89,6 +90,7 @@ export function useImportExportHandlers({
         datacenters,
         activeLocation,
         racks: currentRacks,
+        rackDevices,
         datacenterPowerStats,
         getRackCalculatedPower,
       });
@@ -108,6 +110,7 @@ export function useImportExportHandlers({
         datacenters,
         activeLocation,
         racks: currentRacks,
+        rackDevices,
         datacenterPowerStats,
         getRackCalculatedPower,
       });

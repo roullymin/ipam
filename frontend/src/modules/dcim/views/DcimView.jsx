@@ -275,9 +275,9 @@ export default function DcimView(props) {
     };
   }, [allDevices, currentDevices.length, datacenterPowerStats?.total_pdu, datacenterPowerStats?.total_rated, getRackCalculatedPower, rackList]);
 
-  const elevationScale = Math.max(0.44, Math.min(viewState?.scale || 0.62, 0.78));
-  const elevationCardWidth = Math.max(126, Math.round(150 * elevationScale));
-  const elevationUnitHeight = Math.max(14, Math.round(19 * elevationScale));
+  const elevationScale = Math.max(0.5, Math.min(viewState?.scale || 0.7, 0.92));
+  const elevationCardWidth = Math.max(220, Math.round(280 * elevationScale));
+  const elevationUnitHeight = Math.max(16, Math.round(22 * elevationScale));
 
   const openReadonlyOverview = () => {
     if (typeof window === 'undefined') return;
