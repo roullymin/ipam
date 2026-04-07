@@ -12,6 +12,7 @@ import {
   MapPin,
   Maximize,
   Plus,
+  Server,
   Upload,
   Zap,
   ZoomIn,
