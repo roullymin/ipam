@@ -26,6 +26,14 @@ const extractRackActualPower = (rack) => {
 
 const getRowStart = (totalUnits, unit) => totalUnits - unit + 1;
 
+const chunk = (items, size) => {
+  const result = [];
+  for (let index = 0; index < items.length; index += size) {
+    result.push(items.slice(index, index + size));
+  }
+  return result;
+};
+
 const buildDeviceLayout = (devices, totalUnits) =>
   (Array.isArray(devices) ? devices : [])
     .map((device, index) => {
@@ -54,14 +62,6 @@ const buildDeviceLayout = (devices, totalUnits) =>
     })
     .filter(Boolean)
     .sort((a, b) => b.visibleTop - a.visibleTop || a.visibleBottom - b.visibleBottom);
-
-const chunk = (items, size) => {
-  const result = [];
-  for (let index = 0; index < items.length; index += size) {
-    result.push(items.slice(index, index + size));
-  }
-  return result;
-};
 
 const buildRackElevationMarkup = (rack, unitHeight) => {
   const totalUnits = Math.max(1, safeInt(rack.height, 42));
@@ -439,6 +439,32 @@ const buildExportDocument = (snapshot, options = {}) => {
   };
 };
 
+const buildStandaloneSvg = (markup, pageWidth, totalHeight) => `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${pageWidth}" height="${totalHeight}" viewBox="0 0 ${pageWidth} ${totalHeight}">
+  <foreignObject width="100%" height="100%">
+    <div xmlns="http://www.w3.org/1999/xhtml">${markup}</div>
+  </foreignObject>
+</svg>`;
+
+const downloadBlob = (blob, filename) => {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+const loadSvgImage = (svgMarkup) =>
+  new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('浏览器不支持当前图片渲染方式。'));
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgMarkup)}`;
+  });
+
 export function buildDcimExportPayload({
   datacenters = [],
   activeLocation,
@@ -508,19 +534,10 @@ export function exportDcimHtmlReport(snapshot) {
 
 export async function exportDcimImageReport(snapshot) {
   const { markup, pageWidth, totalHeight } = buildExportDocument(snapshot, { forImage: true });
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="${pageWidth}" height="${totalHeight}">
-      <foreignObject width="100%" height="100%">
-        <div xmlns="http://www.w3.org/1999/xhtml">${markup}</div>
-      </foreignObject>
-    </svg>
-  `;
-
-  const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
+  const svgMarkup = buildStandaloneSvg(markup, pageWidth, totalHeight);
 
   try {
-    const image = await loadImage(url);
+    const image = await loadSvgImage(svgMarkup);
     const canvas = document.createElement('canvas');
     canvas.width = pageWidth;
     canvas.height = totalHeight;
@@ -536,17 +553,13 @@ export async function exportDcimImageReport(snapshot) {
     const link = document.createElement('a');
     link.href = canvas.toDataURL('image/png');
     link.download = `${snapshot.datacenterName || 'dcim'}_机柜立面.png`;
+    document.body.appendChild(link);
     link.click();
-  } finally {
-    URL.revokeObjectURL(url);
+    link.remove();
+    return { format: 'png' };
+  } catch (error) {
+    const svgBlob = new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' });
+    downloadBlob(svgBlob, `${snapshot.datacenterName || 'dcim'}_机柜立面.svg`);
+    return { format: 'svg', fallbackReason: error.message };
   }
-}
-
-function loadImage(url) {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error('导出图片渲染失败，请重试。'));
-    image.src = url;
-  });
 }

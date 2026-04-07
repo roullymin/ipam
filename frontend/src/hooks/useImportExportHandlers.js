@@ -3,7 +3,6 @@ import { useRef, useState } from 'react';
 import { safeFetch } from '../lib/api';
 import { buildDcimExportPayload, exportDcimHtmlReport, exportDcimImageReport } from '../lib/dcimExport';
 
-
 export function useImportExportHandlers({
   activeLocation,
   alert,
@@ -48,7 +47,12 @@ export function useImportExportHandlers({
       const endpoint = importContext === 'dcim' ? '/api/dcim/import-excel/' : '/api/import-excel/';
       const response = await safeFetch(endpoint, { method: 'POST', body: formData });
       if (!response.ok) {
-        throw new Error(await extractResponseMessage(response, importContext === 'dcim' ? '机房设备导入失败' : '导入失败'));
+        throw new Error(
+          await extractResponseMessage(
+            response,
+            importContext === 'dcim' ? '机房设备导入失败' : '导入失败',
+          ),
+        );
       }
 
       const data = await response.json();
@@ -57,9 +61,10 @@ export function useImportExportHandlers({
         refreshData('dcim');
       } else {
         const report = data.report;
-        const warningText = Array.isArray(data.warnings) && data.warnings.length
-          ? `\n预警：${data.warnings.slice(0, 3).join('；')}`
-          : '';
+        const warningText =
+          Array.isArray(data.warnings) && data.warnings.length
+            ? `\n预警：${data.warnings.slice(0, 3).join('；')}`
+            : '';
         const summaryText = report
           ? `\n新增 ${report.create_rows}，覆盖 ${report.update_rows}，跳过 ${report.skipped_rows}，异常 ${report.invalid_rows}`
           : '';
@@ -114,7 +119,10 @@ export function useImportExportHandlers({
         datacenterPowerStats,
         getRackCalculatedPower,
       });
-      exportDcimImageReport(snapshot);
+      const result = await exportDcimImageReport(snapshot);
+      if (result?.format === 'svg') {
+        alert('当前浏览器未能生成 PNG，已自动导出 SVG 图片文件。');
+      }
     } catch (error) {
       alert(`机房设备图片导出失败：${error.message}`);
     }
