@@ -2134,9 +2134,7 @@ def public_dcim_overview(request):
             used_units = sum(max(1, int(device.u_height or 1)) for device in devices)
             free_units = max(0, rack_height - used_units)
             utilization = min(100, round((used_units / rack_height) * 100)) if rack_height else 0
-            _, _, pdu_power = _split_rack_description(rack.description)
-            actual_power = int(pdu_power or 0)
-            planned_power = int(rack.power_limit or 0)
+            planned_power, actual_power = _resolve_rack_power_snapshot(rack, devices)
             device_payload = [
                 {
                     'id': device.id,
@@ -2234,6 +2232,14 @@ def _split_rack_description(description):
             pdu_power = 0
         raw_description = re.sub(r'__PDU_META__:({.*})$', '', raw_description, flags=re.MULTILINE).strip()
     return raw_description, pdu_count, pdu_power
+
+
+def _resolve_rack_power_snapshot(rack, devices):
+    planned_from_devices = sum(max(0, int(device.power_usage or 0)) for device in devices)
+    planned_power = planned_from_devices or max(0, int(rack.power_limit or 0))
+    _, _, pdu_power = _split_rack_description(rack.description)
+    actual_power = max(0, int(pdu_power or 0)) or planned_power
+    return planned_power, actual_power
 
 
 def _merge_rack_description(description, pdu_count, pdu_power):

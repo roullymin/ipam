@@ -268,6 +268,42 @@ class ImportExcelTests(BaseApiTestCase):
         self.assertEqual(response.data['preview']['failed_rows'], [])
 
 
+class PublicDcimOverviewTests(BaseApiTestCase):
+    def test_public_dcim_overview_uses_device_power_and_pdu_fallbacks(self):
+        datacenter = Datacenter.objects.create(name='13F 机房', location='1301')
+        rack_with_pdu = Rack.objects.create(
+            datacenter=datacenter,
+            code='R-01',
+            name='1号机柜',
+            height=42,
+            power_limit=5000,
+            description='主机柜\n__PDU_META__:{"count": 2, "power": 1800}',
+        )
+        RackDevice.objects.create(rack=rack_with_pdu, name='核心交换机', position=20, u_height=2, power_usage=300)
+        RackDevice.objects.create(rack=rack_with_pdu, name='服务器01', position=16, u_height=4, power_usage=450)
+
+        rack_without_pdu = Rack.objects.create(
+            datacenter=datacenter,
+            code='R-02',
+            name='2号机柜',
+            height=42,
+            power_limit=1200,
+        )
+        RackDevice.objects.create(rack=rack_without_pdu, name='服务器02', position=10, u_height=2, power_usage=600)
+
+        response = self.client.get('/api/public/dcim-overview/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['summary']['planned_power'], 1350)
+        self.assertEqual(response.data['summary']['actual_power'], 2400)
+
+        rack_rows = {row['code']: row for row in response.data['datacenters'][0]['racks']}
+        self.assertEqual(rack_rows['R-01']['planned_power'], 750)
+        self.assertEqual(rack_rows['R-01']['actual_power'], 1800)
+        self.assertEqual(rack_rows['R-02']['planned_power'], 600)
+        self.assertEqual(rack_rows['R-02']['actual_power'], 600)
+
+
 class DatacenterChangeRequestTests(BaseApiTestCase):
     def setUp(self):
         self.client = self.make_authenticated_client(self.dc_operator)
