@@ -131,8 +131,8 @@ function ActionButton({ icon: Icon, label, onClick, primary = false, busy = fals
       type="button"
       className={
         primary
-          ? 'inline-flex items-center gap-2 rounded-2xl bg-cyan-600 px-3.5 py-2.5 text-sm font-bold text-white shadow-lg shadow-cyan-600/20 transition-all hover:-translate-y-0.5 hover:bg-cyan-700'
-          : 'inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-bold text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50'
+          ? 'inline-flex items-center gap-2 rounded-2xl bg-[linear-gradient(135deg,#0891b2_0%,#0ea5e9_100%)] px-4 py-2.5 text-sm font-bold text-white shadow-[0_14px_30px_rgba(14,165,233,0.24)] transition-all hover:-translate-y-0.5 hover:shadow-[0_18px_36px_rgba(14,165,233,0.3)]'
+          : 'inline-flex items-center gap-2 rounded-2xl border border-slate-200/90 bg-white/92 px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition-all hover:-translate-y-0.5 hover:border-cyan-200 hover:bg-cyan-50/60 hover:text-cyan-800'
       }
     >
       {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
@@ -144,15 +144,15 @@ function ActionButton({ icon: Icon, label, onClick, primary = false, busy = fals
 function MetricTile({ icon: Icon, label, value, unit = '', tone = 'default' }) {
   const toneClass =
     tone === 'blue'
-      ? 'border-blue-200 bg-blue-50 text-blue-700'
+      ? 'border-blue-100 bg-[linear-gradient(180deg,#f7fbff_0%,#edf5ff_100%)] text-blue-700'
       : tone === 'emerald'
-        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-        : 'border-slate-200 bg-white text-slate-900';
+        ? 'border-emerald-100 bg-[linear-gradient(180deg,#f5fffb_0%,#ecfbf3_100%)] text-emerald-700'
+        : 'border-slate-200/90 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] text-slate-900';
 
   return (
-    <div className={`rounded-[24px] border px-4 py-4 shadow-sm ${toneClass}`}>
+    <div className={`rounded-[26px] border px-4 py-4 shadow-[0_16px_36px_rgba(15,23,42,0.05)] ${toneClass}`}>
       <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/85 shadow-sm">
+        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white shadow-sm">
           <Icon className="h-4 w-4" />
         </div>
         <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">{label}</div>
@@ -172,8 +172,8 @@ function DatacenterListItem({ datacenter, rackCount, active, onSelect }) {
       type="button"
       className={`w-full rounded-[22px] border px-4 py-4 text-left transition-all ${
         active
-          ? 'border-cyan-300 bg-cyan-50 shadow-sm'
-          : 'border-transparent bg-white hover:-translate-y-0.5 hover:border-slate-200 hover:bg-slate-50'
+          ? 'border-cyan-200 bg-[linear-gradient(135deg,#f1fbff_0%,#ecfdf8_100%)] shadow-[0_14px_28px_rgba(8,145,178,0.1)]'
+          : 'border-white/70 bg-white/84 hover:-translate-y-0.5 hover:border-slate-200 hover:bg-white'
       }`}
     >
       <div className="flex items-start justify-between gap-3">
@@ -181,7 +181,7 @@ function DatacenterListItem({ datacenter, rackCount, active, onSelect }) {
           <div className="truncate text-[15px] font-black tracking-tight text-slate-900">{datacenter.name}</div>
           <div className="mt-1.5 text-sm text-slate-500">{datacenter.location || TEXT.locationFallback}</div>
         </div>
-        <div className="rounded-full bg-white px-3 py-1 text-sm font-bold text-slate-500 shadow-sm">
+        <div className="rounded-full border border-slate-100 bg-white px-3 py-1 text-sm font-bold text-slate-500 shadow-sm">
           {rackCount}
         </div>
       </div>
@@ -277,7 +277,7 @@ export default function DcimView(props) {
   }, [allDevices, currentDevices.length, datacenterPowerStats?.total_pdu, datacenterPowerStats?.total_rated, getRackCalculatedPower, rackList]);
 
   const elevationScale = Math.max(0.5, Math.min(viewState?.scale || 0.7, 0.92));
-  const elevationCardWidth = Math.max(220, Math.round(280 * elevationScale));
+  const elevationCardWidth = Math.max(190, Math.round(236 * elevationScale));
   const elevationUnitHeight = Math.max(16, Math.round(22 * elevationScale));
 
   const openReadonlyOverview = () => {
@@ -310,29 +310,36 @@ export default function DcimView(props) {
   };
 
   return (
-    <div className="flex h-full min-h-0 gap-5 bg-slate-50/60 p-5">
-      <aside className="flex h-full w-[248px] flex-col overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-slate-50/80 px-5 py-5">
-          <div>
-            <div className="flex items-center gap-2 text-sm font-semibold text-cyan-700">
-              <MapPin className="h-4 w-4" />
-              {TEXT.areaTitle}
+    <div className="flex h-full min-h-0 gap-5 bg-[radial-gradient(circle_at_top_left,rgba(186,230,253,0.26),transparent_26%),linear-gradient(180deg,#f8fbfe_0%,#f1f5f9_100%)] p-5">
+      <aside className="flex h-full w-[272px] flex-col overflow-hidden rounded-[32px] border border-white/80 bg-white/82 shadow-[0_24px_52px_rgba(15,23,42,0.08)] backdrop-blur">
+        <div className="border-b border-slate-200/80 bg-[linear-gradient(135deg,#f6fcff_0%,#eefaf8_100%)] px-5 py-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-semibold text-cyan-700">
+                <MapPin className="h-4 w-4" />
+                {TEXT.areaTitle}
+              </div>
+              <div className="mt-3 text-[15px] font-black leading-7 tracking-tight text-slate-900">
+                {TEXT.areaHint}
+              </div>
             </div>
-            <div className="mt-3 text-[15px] font-black leading-7 tracking-tight text-slate-900">
-              {TEXT.areaHint}
-            </div>
+            <button
+              onClick={handleCreateDatacenter}
+              type="button"
+              title={TEXT.addDatacenter}
+              className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl border border-white/80 bg-white text-cyan-700 shadow-sm transition-colors hover:bg-cyan-50"
+            >
+              <Plus className="h-5 w-5" />
+            </button>
           </div>
-          <button
-            onClick={handleCreateDatacenter}
-            type="button"
-            title={TEXT.addDatacenter}
-            className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl border border-transparent bg-white text-cyan-700 shadow-sm transition-colors hover:bg-cyan-50"
-          >
-            <Plus className="h-5 w-5" />
-          </button>
         </div>
 
         <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-4">
+          <div className="mb-4 rounded-[24px] border border-slate-100 bg-slate-50/70 px-4 py-4">
+            <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">{TEXT.overviewEyebrow}</div>
+            <div className="mt-2 text-3xl font-black text-slate-950">{rackList.length}</div>
+            <div className="mt-1 text-sm text-slate-500">{TEXT.rackCount}</div>
+          </div>
           <div className="space-y-3">
             {datacenterList.map((datacenter) => (
               <DatacenterListItem
@@ -352,49 +359,53 @@ export default function DcimView(props) {
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col gap-5">
-        <div className="rounded-[30px] border border-slate-200 bg-white px-5 py-5 shadow-sm">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-            <div className="min-w-0">
+        <div className="overflow-hidden rounded-[32px] border border-slate-200/80 bg-white/86 shadow-[0_24px_52px_rgba(15,23,42,0.08)] backdrop-blur">
+          <div className="grid gap-5 p-5 2xl:grid-cols-[minmax(0,1.08fr)_minmax(460px,0.92fr)]">
+            <div className="rounded-[28px] border border-slate-100 bg-[linear-gradient(135deg,#f8fdff_0%,#eef9ff_44%,#eefaf5_100%)] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.95)]">
               <div className="flex items-center gap-2 text-sm font-semibold text-cyan-700">
                 <MapPin className="h-4 w-4" />
                 {TEXT.overviewEyebrow}
               </div>
-              <div className="mt-3 flex flex-wrap items-end gap-3">
-                <h1 className="text-[26px] font-black leading-none tracking-tight text-slate-950 xl:text-[30px]">
+              <div className="mt-4 flex flex-wrap items-end gap-3">
+                <h1 className="text-[30px] font-black leading-none tracking-tight text-slate-950 xl:text-[34px]">
                   {currentDatacenter?.name || TEXT.noDatacenter}
                 </h1>
-                <span className="pb-0.5 text-sm text-slate-500">{currentDatacenter?.location || ''}</span>
+                <span className="pb-1 text-sm font-medium text-slate-500">{currentDatacenter?.location || ''}</span>
+              </div>
+              <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-600">
+                统一查看当前机房的机柜容量、设备规模、电力状态和排位分布，支持卡片视图与立面视图快速切换。
+              </p>
+
+              <div className="mt-5 inline-flex rounded-[22px] border border-white/90 bg-white/84 p-1.5 shadow-sm">
+                <button
+                  onClick={() => setDcimViewMode('card')}
+                  type="button"
+                  className={`inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-bold ${
+                    dcimViewMode === 'card'
+                      ? 'bg-[linear-gradient(135deg,#0891b2_0%,#0ea5e9_100%)] text-white shadow-md shadow-cyan-600/20'
+                      : 'text-slate-600'
+                  }`}
+                >
+                  <Columns className="h-4 w-4" />
+                  {TEXT.cardView}
+                </button>
+                <button
+                  onClick={() => setDcimViewMode('elevation')}
+                  type="button"
+                  className={`inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-bold ${
+                    dcimViewMode === 'elevation'
+                      ? 'bg-[linear-gradient(135deg,#0891b2_0%,#0ea5e9_100%)] text-white shadow-md shadow-cyan-600/20'
+                      : 'text-slate-600'
+                  }`}
+                >
+                  <AlignJustify className="h-4 w-4" />
+                  {TEXT.elevationView}
+                </button>
               </div>
             </div>
 
-            <div className="flex flex-col gap-4 xl:items-end">
-              <div className="flex flex-wrap items-center gap-2.5">
-                <div className="inline-flex rounded-[22px] border border-slate-200 bg-slate-50 p-1 shadow-sm">
-                  <button
-                    onClick={() => setDcimViewMode('card')}
-                    type="button"
-                    className={`inline-flex items-center gap-2 rounded-2xl px-3.5 py-2.5 text-sm font-bold ${
-                      dcimViewMode === 'card'
-                        ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/20'
-                        : 'text-slate-600'
-                    }`}
-                  >
-                    <Columns className="h-4 w-4" />
-                    {TEXT.cardView}
-                  </button>
-                  <button
-                    onClick={() => setDcimViewMode('elevation')}
-                    type="button"
-                    className={`inline-flex items-center gap-2 rounded-2xl px-3.5 py-2.5 text-sm font-bold ${
-                      dcimViewMode === 'elevation'
-                        ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/20'
-                        : 'text-slate-600'
-                    }`}
-                  >
-                    <AlignJustify className="h-4 w-4" />
-                    {TEXT.elevationView}
-                  </button>
-                </div>
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-wrap items-center gap-2.5 rounded-[28px] border border-slate-100 bg-slate-50/80 p-4">
                 <ActionButton icon={Folder} label={TEXT.downloadTemplate} onClick={handleDownloadTemplate} />
                 <ActionButton icon={Upload} label={TEXT.importAssets} onClick={handleImportClick} busy={isImporting} />
                 <ActionButton icon={FileText} label={TEXT.exportExcel} onClick={handleExportExcel} />
@@ -420,7 +431,21 @@ export default function DcimView(props) {
               <EmptyState icon={MapPin} title={TEXT.noDatacenter} hint={TEXT.noDatacenterHint} />
             </div>
           ) : dcimViewMode === 'card' ? (
-            <div className="custom-scrollbar h-full overflow-y-auto rounded-[30px] border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="custom-scrollbar h-full overflow-y-auto rounded-[32px] border border-slate-200/80 bg-white/86 p-5 shadow-[0_24px_52px_rgba(15,23,42,0.08)] backdrop-blur">
+              {rackList.length ? (
+                <div className="mb-5 rounded-[26px] border border-slate-100 bg-[linear-gradient(135deg,#fbfdff_0%,#f3f8fd_100%)] px-5 py-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Rack Canvas</div>
+                      <div className="mt-2 text-2xl font-black text-slate-950">机柜卡片视图</div>
+                      <div className="mt-1 text-sm text-slate-500">适合快速比较容量、负载和 PDU 状态。</div>
+                    </div>
+                    <div className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm">
+                      当前机柜 {rackList.length} 台
+                    </div>
+                  </div>
+                </div>
+              ) : null}
               {rackList.length ? (
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
                   {rackList.map((rack) => {
@@ -451,8 +476,8 @@ export default function DcimView(props) {
               )}
             </div>
           ) : (
-            <div className="flex h-full min-h-0 flex-col rounded-[30px] border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="mb-3 flex items-center justify-between rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-4">
+            <div className="flex h-full min-h-0 flex-col rounded-[32px] border border-slate-200/80 bg-white/86 p-5 shadow-[0_24px_52px_rgba(15,23,42,0.08)] backdrop-blur">
+              <div className="mb-4 flex items-center justify-between rounded-[26px] border border-slate-100 bg-[linear-gradient(135deg,#fbfdff_0%,#f4f8fe_52%,#eef7ff_100%)] px-5 py-4">
                 <div>
                   <div className="text-base font-black text-slate-900">{TEXT.rackElevation}</div>
                   <div className="mt-1 text-sm text-slate-500">{TEXT.rackElevationHint}</div>
@@ -487,7 +512,7 @@ export default function DcimView(props) {
 
               <div
                 ref={elevationScrollRef}
-                className="custom-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden rounded-[24px] border border-slate-200 bg-slate-950 p-3 shadow-inner"
+                className="custom-scrollbar min-h-0 flex-1 overflow-auto rounded-[28px] border border-slate-800/60 bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.1),transparent_22%),linear-gradient(180deg,#0b1325_0%,#0f172a_100%)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
               >
                 {rackList.length ? (
                   <div
@@ -499,7 +524,8 @@ export default function DcimView(props) {
                     onMouseLeave={handleElevationMouseLeave}
                     style={{
                       cursor: 'grab',
-                      gridTemplateColumns: `repeat(auto-fit, minmax(${elevationCardWidth}px, 1fr))`,
+                      gridTemplateColumns: `repeat(${rackList.length}, ${elevationCardWidth}px)`,
+                      width: 'max-content',
                     }}
                   >
                     {rackList.map((rack) => {
@@ -509,19 +535,19 @@ export default function DcimView(props) {
                           key={rack.id}
                           onClick={() => setSelectedRack(rack)}
                           type="button"
-                          className="rounded-[20px] border border-white/10 bg-white/5 p-3 text-left hover:border-blue-300/50 hover:bg-white/10"
+                          className="rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.82)_0%,rgba(15,23,42,0.68)_100%)] p-3.5 text-left shadow-[0_14px_28px_rgba(2,6,23,0.28)] transition hover:-translate-y-0.5 hover:border-cyan-300/40 hover:bg-[linear-gradient(180deg,rgba(15,23,42,0.92)_0%,rgba(15,23,42,0.8)_100%)]"
                         >
                           <div className="flex items-start justify-between gap-3 pb-3">
                             <div>
-                              <div className="inline-flex rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-slate-300">
+                              <div className="inline-flex rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-bold text-slate-300">
                                 {rack.code || TEXT.rackCodeFallback}
                               </div>
-                              <div className="mt-3 text-[17px] font-black text-white">{rack.name}</div>
+                              <div className="mt-3 text-[18px] font-black text-white">{rack.name}</div>
                               <div className="mt-1 text-sm text-slate-300">
                                 {safeInt(rack.height, 42)}U · {devices.length} 台设备
                               </div>
                             </div>
-                            <div className="rounded-full bg-white/10 px-3 py-1 text-sm font-bold text-slate-200">
+                            <div className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-sm font-bold text-slate-200">
                               {TEXT.detail}
                             </div>
                           </div>

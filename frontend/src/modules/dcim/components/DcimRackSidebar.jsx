@@ -48,7 +48,7 @@ function SidebarActionButton({ icon: Icon, label, onClick }) {
     <button
       onClick={onClick}
       type="button"
-      className="inline-flex items-center gap-2 rounded-2xl bg-cyan-600 px-3.5 py-2.5 text-sm font-bold text-white shadow-lg shadow-cyan-600/20 transition-all hover:-translate-y-0.5 hover:bg-cyan-700"
+      className="inline-flex items-center gap-2 rounded-2xl bg-[linear-gradient(135deg,#0891b2_0%,#0ea5e9_100%)] px-3.5 py-2.5 text-sm font-bold text-white shadow-[0_14px_30px_rgba(14,165,233,0.24)] transition-all hover:-translate-y-0.5"
     >
       <Icon className="h-4 w-4" />
       {label}
@@ -77,11 +77,11 @@ export default function DcimRackSidebar({
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-slate-950/25 backdrop-blur-sm">
       <button className="flex-1 cursor-default" onClick={onClose} type="button" aria-label={text.closeDetail} />
-      <aside className="relative flex h-full w-[min(380px,88vw)] flex-col border-l border-slate-200 bg-white shadow-2xl">
-        <div className="border-b border-slate-200 px-4 py-4">
+      <aside className="relative flex h-full w-[min(400px,90vw)] flex-col border-l border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f7fbff_100%)] shadow-2xl">
+        <div className="border-b border-slate-200 px-5 py-5">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <div className="inline-flex rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
+              <div className="inline-flex rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
                 {rack.code || text.currentRack}
               </div>
               <h2 className="mt-3 text-[22px] font-black tracking-tight text-slate-900">{rack.name}</h2>
@@ -93,31 +93,31 @@ export default function DcimRackSidebar({
               onClick={onClose}
               type="button"
               title={text.closeDetail}
-              className="rounded-2xl border border-slate-200 p-3 text-slate-400 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700"
+              className="rounded-2xl border border-slate-200 bg-white p-3 text-slate-400 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700"
             >
               <X className="h-5 w-5" />
             </button>
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-            <div className="rounded-xl bg-slate-50 px-3 py-2">
+          <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
+            <div className="rounded-[20px] border border-sky-100 bg-white px-3.5 py-3 shadow-sm">
               <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">{text.plannedPower}</div>
               <div className="mt-1 text-lg font-black text-slate-900">{resolvePlannedPower(plannedPower)}W</div>
             </div>
-            <div className="rounded-xl bg-emerald-50 px-3 py-2">
+            <div className="rounded-[20px] border border-emerald-100 bg-emerald-50/80 px-3.5 py-3">
               <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-600">{text.actualPower}</div>
               <div className="mt-1 text-lg font-black text-emerald-700">{actualPower}W</div>
             </div>
-            <div className="rounded-xl bg-blue-50 px-3 py-2">
+            <div className="rounded-[20px] border border-blue-100 bg-blue-50/80 px-3.5 py-3">
               <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-blue-600">{text.utilization}</div>
               <div className="mt-1 text-lg font-black text-blue-700">{utilization}%</div>
             </div>
-            <div className="rounded-xl bg-slate-50 px-3 py-2">
+            <div className="rounded-[20px] border border-slate-100 bg-white px-3.5 py-3 shadow-sm">
               <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">{text.deviceCount}</div>
               <div className="mt-1 text-lg font-black text-slate-900">{deviceList.length}</div>
             </div>
           </div>
         </div>
-        <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-5 py-5">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="text-lg font-black text-slate-900">{text.deviceList}</div>
