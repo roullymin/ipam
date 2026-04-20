@@ -6,6 +6,7 @@ import { ResidentToggleField } from './ResidentFormFields';
 export default function ResidentDeviceRegistrationSection({
   devices,
   updateDevice,
+  updateDeviceMac,
   addDevice,
   removeDevice,
   remarks,
@@ -61,12 +62,14 @@ export default function ResidentDeviceRegistrationSection({
               <FormInput
                 label="有线 MAC"
                 value={device.wired_mac}
-                onChange={(event) => updateDevice(index, { wired_mac: event.target.value })}
+                onChange={(event) => updateDeviceMac(index, 'wired_mac', event.target.value)}
+                placeholder="782b-4645-c9a0"
               />
               <FormInput
                 label="无线 MAC"
                 value={device.wireless_mac}
-                onChange={(event) => updateDevice(index, { wireless_mac: event.target.value })}
+                onChange={(event) => updateDeviceMac(index, 'wireless_mac', event.target.value)}
+                placeholder="782b-4645-c9a0"
               />
               <FormInput
                 label="最近杀毒日期"

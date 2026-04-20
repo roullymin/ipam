@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ClipboardCheck, Download, Plus, Printer, ShieldCheck, Trash2, Users } from 'lucide-react';
 import { fetchCsrfToken, safeFetch } from '../../../lib/api';
+import { formatResidentMac } from '../utils/mac';
 
 const EMPTY_DEVICE = {
   device_name: '',
@@ -106,6 +107,10 @@ export default function ResidentIntakePage() {
           : member,
       ),
     );
+  };
+
+  const updateDeviceMac = (memberIndex, deviceIndex, field, value) => {
+    updateDevice(memberIndex, deviceIndex, { [field]: formatResidentMac(value) });
   };
 
   const addMember = () => {
@@ -484,16 +489,14 @@ export default function ResidentIntakePage() {
                           <Field
                             label="有线 MAC"
                             value={device.wired_mac}
-                            onChange={(value) =>
-                              updateDevice(memberIndex, deviceIndex, { wired_mac: value })
-                            }
+                            onChange={(value) => updateDeviceMac(memberIndex, deviceIndex, 'wired_mac', value)}
+                            placeholder="782b-4645-c9a0"
                           />
                           <Field
                             label="无线 MAC"
                             value={device.wireless_mac}
-                            onChange={(value) =>
-                              updateDevice(memberIndex, deviceIndex, { wireless_mac: value })
-                            }
+                            onChange={(value) => updateDeviceMac(memberIndex, deviceIndex, 'wireless_mac', value)}
+                            placeholder="782b-4645-c9a0"
                           />
                           <Field
                             label="最近杀毒日期"
@@ -565,7 +568,7 @@ export default function ResidentIntakePage() {
   );
 }
 
-function Field({ label, value, onChange, required = false, type = 'text' }) {
+function Field({ label, value, onChange, required = false, type = 'text', placeholder = '' }) {
   return (
     <div>
       <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">
@@ -576,6 +579,7 @@ function Field({ label, value, onChange, required = false, type = 'text' }) {
         type={type}
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
         className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
       />
     </div>

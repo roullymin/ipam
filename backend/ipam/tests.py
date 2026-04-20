@@ -21,6 +21,8 @@ from .models import (
     NetworkSection,
     Rack,
     RackDevice,
+    ResidentDevice,
+    ResidentStaff,
     Subnet,
     UserProfile,
 )
@@ -1021,6 +1023,73 @@ class ResidentImportTests(BaseApiTestCase):
         self.assertEqual(resident_response.status_code, 200)
         self.assertEqual(resident_response.data[0]['company'], '示例科技')
         self.assertEqual(resident_response.data[0]['device_count'], 1)
+
+
+class ResidentIntakeTests(BaseApiTestCase):
+    def test_public_resident_intake_updates_existing_record_and_formats_mac(self):
+        resident = ResidentStaff.objects.create(
+            company='Example Co',
+            name='Alice',
+            phone='13800000000',
+            email='alice@example.com',
+            resident_type='implementation',
+            project_name='Old Project',
+            approval_status='approved',
+            intake_source='manual',
+        )
+        ResidentDevice.objects.create(
+            resident=resident,
+            device_name='Old Laptop',
+            wireless_mac='AA:BB:CC:DD:EE:FF',
+        )
+
+        response = self.client.post(
+            '/api/resident-intake/',
+            {
+                'company_profile': {
+                    'company': 'Example Co',
+                    'project_name': 'New Project',
+                    'department': 'Ops',
+                    'resident_type': 'implementation',
+                    'start_date': '2026-04-20',
+                    'end_date': '2026-05-01',
+                },
+                'staff_members': [
+                    {
+                        'name': 'Alice',
+                        'phone': '13800000000',
+                        'email': 'alice@example.com',
+                        'title': 'Engineer',
+                        'devices': [
+                            {
+                                'device_name': 'New Laptop',
+                                'wired_mac': '782B4645C9A0',
+                                'wireless_mac': '20-1E-88-5D-E9-95',
+                            }
+                        ],
+                    }
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['created'], 0)
+        self.assertEqual(response.data['updated'], 1)
+        self.assertEqual(ResidentStaff.objects.count(), 1)
+
+        resident.refresh_from_db()
+        self.assertEqual(resident.registration_code, response.data['registration_codes'][0])
+        self.assertEqual(resident.project_name, 'New Project')
+        self.assertEqual(resident.department, 'Ops')
+        self.assertEqual(resident.approval_status, 'pending')
+        self.assertEqual(resident.devices.count(), 1)
+
+        device = resident.devices.get()
+        self.assertEqual(device.device_name, 'New Laptop')
+        self.assertEqual(device.wired_mac, '782b-4645-c9a0')
+        self.assertEqual(device.wireless_mac, '201e-885d-e995')
+        self.assertEqual(response.data['residents'][0]['devices'][0]['wired_mac'], '782b-4645-c9a0')
 
 
 class EncodingAuditCommandTests(BaseApiTestCase):

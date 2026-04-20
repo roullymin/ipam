@@ -2,6 +2,7 @@
 import { Modal } from '../../../components/common/UI';
 import ImportWizardModal from '../../../components/ImportWizardModal';
 import { safeFetch } from '../../../lib/api';
+import { formatResidentMac, normalizeMacSearch } from '../utils/mac';
 import {
   ResidentDeviceRegistrationSection,
   ResidentFiltersToolbar,
@@ -186,7 +187,7 @@ export default function ResidentManagementView({ residentStaff, onRefresh, initi
     const normalizedCompany = filters.company.trim().toLowerCase();
     const normalizedProjectName = filters.projectName.trim().toLowerCase();
     const normalizedPhone = filters.phone.trim().toLowerCase();
-    const normalizedMac = filters.mac.trim().toLowerCase();
+    const normalizedMac = normalizeMacSearch(filters.mac);
     const normalizedApprovalStatus = filters.approvalStatus.trim().toLowerCase();
     const normalizedSeatStatus = filters.seatStatus.trim().toLowerCase();
 
@@ -199,9 +200,8 @@ export default function ResidentManagementView({ residentStaff, onRefresh, initi
       const residentApprovalStatus = String(resident.approval_status || '').toLowerCase();
       const deviceMacText = devices
         .flatMap((device) => [device.wired_mac, device.wireless_mac])
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
+        .map((value) => normalizeMacSearch(value))
+        .join('');
       const seatStatus = resident.needs_seat
         ? resident.seat_number
           ? 'assigned'
@@ -277,6 +277,10 @@ export default function ResidentManagementView({ residentStaff, onRefresh, initi
         currentIndex === index ? { ...device, ...patch } : device,
       ),
     }));
+  };
+
+  const updateDeviceMac = (index, field, value) => {
+    updateDevice(index, { [field]: formatResidentMac(value) });
   };
 
   const addDevice = () => {
@@ -504,6 +508,7 @@ export default function ResidentManagementView({ residentStaff, onRefresh, initi
             <ResidentDeviceRegistrationSection
               devices={formData.devices}
               updateDevice={updateDevice}
+              updateDeviceMac={updateDeviceMac}
               addDevice={addDevice}
               removeDevice={removeDevice}
               remarks={formData.remarks}

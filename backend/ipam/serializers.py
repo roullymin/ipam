@@ -1,3 +1,5 @@
+import re
+
 from django.contrib.auth.models import User
 from django.utils import timezone
 from rest_framework import serializers
@@ -19,6 +21,28 @@ from .models import (
     UserProfile,
 )
 from .domains.change_requests.services import build_change_request_title
+
+
+MAC_SANITIZE_PATTERN = re.compile(r'[^0-9a-fA-F]+')
+
+
+def normalize_mac_address(value):
+    text = str(value or '').strip()
+    if not text:
+        return ''
+
+    normalized = MAC_SANITIZE_PATTERN.sub('', text).lower()[:12]
+    if not normalized:
+        return ''
+
+    return '-'.join(normalized[index:index + 4] for index in range(0, len(normalized), 4))
+
+
+def normalize_resident_device_payload(device_payload):
+    payload = dict(device_payload or {})
+    payload['wired_mac'] = normalize_mac_address(payload.get('wired_mac'))
+    payload['wireless_mac'] = normalize_mac_address(payload.get('wireless_mac'))
+    return payload
 
 
 def get_prefetched_related(instance, relation_name):
@@ -229,6 +253,18 @@ class AuditLogSerializer(serializers.ModelSerializer):
 
 
 class ResidentDeviceSerializer(serializers.ModelSerializer):
+    def validate_wired_mac(self, value):
+        return normalize_mac_address(value)
+
+    def validate_wireless_mac(self, value):
+        return normalize_mac_address(value)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['wired_mac'] = normalize_mac_address(data.get('wired_mac'))
+        data['wireless_mac'] = normalize_mac_address(data.get('wireless_mac'))
+        return data
+
     class Meta:
         model = ResidentDevice
         fields = [
@@ -312,7 +348,10 @@ class ResidentStaffSerializer(serializers.ModelSerializer):
             validated_data.setdefault('created_by', request.user)
         resident = ResidentStaff.objects.create(**validated_data)
         for device_data in devices_data:
-            ResidentDevice.objects.create(resident=resident, **device_data)
+            ResidentDevice.objects.create(
+                resident=resident,
+                **normalize_resident_device_payload(device_data),
+            )
         return resident
 
     def update(self, instance, validated_data):
@@ -324,7 +363,10 @@ class ResidentStaffSerializer(serializers.ModelSerializer):
         if devices_data is not None:
             instance.devices.all().delete()
             for device_data in devices_data:
-                ResidentDevice.objects.create(resident=instance, **device_data)
+                ResidentDevice.objects.create(
+                    resident=instance,
+                    **normalize_resident_device_payload(device_data),
+                )
 
         return instance
 

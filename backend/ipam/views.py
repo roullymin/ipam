@@ -95,6 +95,7 @@ from .serializers import (
     ResidentStaffSerializer,
     SubnetSerializer,
     UserSerializer,
+    normalize_resident_device_payload,
 )
 from .text_encoding import build_encoding_report, normalize_dataframe_text, normalize_text_value, read_csv_with_fallback
 
@@ -407,6 +408,34 @@ def _format_resident_display_date(value):
     if isinstance(value, datetime):
         value = value.date()
     return value.strftime('%Y-%m-%d')
+
+
+def _resolve_existing_resident_for_intake(company, name, phone='', email=''):
+    company = str(company or '').strip()
+    name = str(name or '').strip()
+    phone = str(phone or '').strip()
+    email = str(email or '').strip()
+
+    if not company or not name:
+        return None
+
+    if phone:
+        resident = ResidentStaff.objects.filter(company=company, name=name, phone=phone).first()
+        if resident is not None:
+            return resident
+
+    if email:
+        resident = ResidentStaff.objects.filter(company=company, name=name, email=email).first()
+        if resident is not None:
+            return resident
+
+    same_name_residents = list(
+        ResidentStaff.objects.filter(company=company, name=name).order_by('-updated_at', '-created_at')[:2]
+    )
+    if len(same_name_residents) == 1:
+        return same_name_residents[0]
+
+    return None
 
 
 def _build_resident_pdf(response_buffer, resident, request):
@@ -1507,7 +1536,13 @@ class ResidentStaffViewSet(OptionalPaginationMixin, BaseViewSet):
             if devices:
                 resident.devices.all().delete()
                 ResidentDevice.objects.bulk_create(
-                    [ResidentDevice(resident=resident, **device_payload) for device_payload in devices]
+                    [
+                        ResidentDevice(
+                            resident=resident,
+                            **normalize_resident_device_payload(device_payload),
+                        )
+                        for device_payload in devices
+                    ]
                 )
 
         return Response(
@@ -1566,6 +1601,12 @@ def api_resident_intake(request):
         serializers_to_save = []
         errors = {}
         for index, member in enumerate(staff_members, start=1):
+            existing_resident = _resolve_existing_resident_for_intake(
+                company=common_payload['company'],
+                name=member.get('name'),
+                phone=member.get('phone'),
+                email=member.get('email'),
+            )
             merged_payload = {
                 **common_payload,
                 'name': (member.get('name') or '').strip(),
@@ -1580,44 +1621,65 @@ def api_resident_intake(request):
                 'approval_status': 'pending',
                 'intake_source': 'qr',
             }
-            serializer = ResidentStaffSerializer(data=merged_payload)
+            serializer = ResidentStaffSerializer(existing_resident, data=merged_payload)
             if serializer.is_valid():
-                serializers_to_save.append(serializer)
+                serializers_to_save.append((serializer, existing_resident is None))
             else:
                 errors[f'staff_members[{index - 1}]'] = serializer.errors
 
         if errors:
             return Response({'status': 'error', 'errors': errors}, status=status.HTTP_400_BAD_REQUEST)
 
-        created_residents = []
+        saved_residents = []
+        created_count = 0
+        updated_count = 0
         with transaction.atomic():
-            for serializer in serializers_to_save:
-                created_residents.append(serializer.save())
+            for serializer, is_create in serializers_to_save:
+                saved_residents.append(serializer.save())
+                if is_create:
+                    created_count += 1
+                else:
+                    updated_count += 1
+
+        response_status = status.HTTP_201_CREATED if created_count and not updated_count else status.HTTP_200_OK
 
         return Response(
             {
                 'status': 'success',
-                'registration_codes': [resident.registration_code for resident in created_residents],
-                'residents': ResidentStaffSerializer(created_residents, many=True).data,
+                'message': f'提交完成：新增 {created_count} 人，更新 {updated_count} 人。',
+                'created': created_count,
+                'updated': updated_count,
+                'registration_codes': [resident.registration_code for resident in saved_residents],
+                'residents': ResidentStaffSerializer(saved_residents, many=True).data,
             },
-            status=status.HTTP_201_CREATED,
+            status=response_status,
         )
 
     payload = payload.copy()
     payload['approval_status'] = 'pending'
     payload['intake_source'] = 'qr'
-    serializer = ResidentStaffSerializer(data=payload)
+    existing_resident = _resolve_existing_resident_for_intake(
+        company=payload.get('company'),
+        name=payload.get('name'),
+        phone=payload.get('phone'),
+        email=payload.get('email'),
+    )
+    serializer = ResidentStaffSerializer(existing_resident, data=payload)
     if serializer.is_valid():
         resident = serializer.save()
+        response_status = status.HTTP_201_CREATED if existing_resident is None else status.HTTP_200_OK
         return Response(
             {
                 'status': 'success',
+                'message': '提交完成：新增 1 人，更新 0 人。' if existing_resident is None else '提交完成：新增 0 人，更新 1 人。',
+                'created': 1 if existing_resident is None else 0,
+                'updated': 0 if existing_resident is None else 1,
                 'registration_code': resident.registration_code,
                 'registration_codes': [resident.registration_code],
                 'resident': ResidentStaffSerializer(resident).data,
                 'residents': [ResidentStaffSerializer(resident).data],
             },
-            status=status.HTTP_201_CREATED,
+            status=response_status,
         )
     return Response({'status': 'error', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
