@@ -16,6 +16,7 @@ from .models import (
     Rack,
     RackDevice,
     ResidentDevice,
+    ResidentIntakeLink,
     ResidentStaff,
     Subnet,
     UserProfile,
@@ -453,6 +454,7 @@ class DatacenterChangeRequestSerializer(serializers.ModelSerializer):
             'department',
             'project_name',
             'reason',
+            'request_content',
             'impact_scope',
             'requires_power_down',
             'department_comment',
@@ -492,6 +494,7 @@ class DatacenterChangeRequestSerializer(serializers.ModelSerializer):
             'department': {'required': False, 'allow_blank': True},
             'project_name': {'required': False, 'allow_blank': True},
             'reason': {'required': False, 'allow_blank': True},
+            'request_content': {'required': False, 'allow_blank': True},
             'impact_scope': {'required': False, 'allow_blank': True},
             'department_comment': {'required': False, 'allow_blank': True},
             'it_comment': {'required': False, 'allow_blank': True},
@@ -573,6 +576,7 @@ class DatacenterChangeRequestPublicSerializer(serializers.ModelSerializer):
             'department',
             'project_name',
             'reason',
+            'request_content',
             'impact_scope',
             'requires_power_down',
             'planned_execute_at',
@@ -595,6 +599,7 @@ class DatacenterChangeRequestPublicSubmitSerializer(serializers.ModelSerializer)
             'department',
             'project_name',
             'reason',
+            'request_content',
             'impact_scope',
             'requires_power_down',
             'planned_execute_at',
@@ -609,6 +614,7 @@ class DatacenterChangeRequestPublicSubmitSerializer(serializers.ModelSerializer)
             'department': {'required': False, 'allow_blank': True},
             'project_name': {'required': False, 'allow_blank': True},
             'reason': {'required': False, 'allow_blank': True},
+            'request_content': {'required': False, 'allow_blank': True},
             'impact_scope': {'required': False, 'allow_blank': True},
         }
 
@@ -626,3 +632,16 @@ class DatacenterChangeRequestPublicSubmitSerializer(serializers.ModelSerializer)
                 DatacenterChangeItem.objects.create(request=instance, **item_data)
 
         return instance
+
+
+class ResidentIntakeLinkSerializer(serializers.ModelSerializer):
+    intake_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ResidentIntakeLink
+        fields = ['token', 'expires_at', 'created_at', 'intake_url']
+
+    def get_intake_url(self, obj):
+        request = self.context.get('request')
+        path = f'/?resident-intake=1&token={obj.token}'
+        return request.build_absolute_uri(path) if request else path

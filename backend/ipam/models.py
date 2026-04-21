@@ -236,6 +236,34 @@ RESIDENT_INTAKE_SOURCE_CHOICES = [
 ]
 
 
+class ResidentIntakeLink(models.Model):
+    token = models.CharField('Resident intake token', max_length=64, unique=True, editable=False)
+    expires_at = models.DateTimeField('Resident intake expires at')
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_resident_intake_links',
+        verbose_name='Created by',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        if not self.token:
+            self.token = secrets.token_urlsafe(24)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.token
+
+    class Meta:
+        verbose_name = 'Resident intake link'
+        verbose_name_plural = 'Resident intake links'
+        db_table = 'ops_resident_intake_link'
+        ordering = ['-created_at']
+
+
 class ResidentStaff(models.Model):
     registration_code = models.CharField('登记编号', max_length=32, unique=True, editable=False)
     company = models.CharField('所属公司', max_length=120)
@@ -339,6 +367,7 @@ CHANGE_REQUEST_TYPE_CHOICES = [
     ('relocate', '位置迁移'),
     ('decommission', '设备退役'),
     ('power_change', '电力变更'),
+    ('assistance', '协助事项申请'),
 ]
 
 
@@ -386,6 +415,7 @@ class DatacenterChangeRequest(models.Model):
     department = models.CharField('所属部门', max_length=120, blank=True)
     project_name = models.CharField('所属项目', max_length=120, blank=True)
     reason = models.TextField('申请原因', blank=True)
+    request_content = models.TextField('申请内容', blank=True)
     impact_scope = models.TextField('影响范围', blank=True)
     requires_power_down = models.BooleanField('是否涉及下电', default=False)
     department_comment = models.TextField('部门意见', blank=True)

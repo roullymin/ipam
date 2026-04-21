@@ -26,7 +26,10 @@ const REQUEST_TYPES = [
   ['relocate', '位置迁移'],
   ['decommission', '设备退役'],
   ['power_change', '电力变更'],
+  ['assistance', '协助事项申请'],
 ];
+
+const REQUEST_TYPE_LABELS = Object.fromEntries(REQUEST_TYPES);
 
 const NETWORK_ROLES = [
   ['none', '无需网络'],
@@ -85,6 +88,15 @@ const createForm = (datacenterId = '') => ({
   title: '',
   applicant_name: '',
   applicant_phone: '',
+  applicant_email: '',
+  company: '',
+  department: '',
+  project_name: '',
+  reason: '',
+  request_content: '',
+  impact_scope: '',
+  requires_power_down: false,
+  planned_execute_at: '',
   items: [createItem(datacenterId)],
 });
 
@@ -108,6 +120,7 @@ const createExecutionForm = (request) => ({
 });
 
 const cleanText = (value) => String(value ?? '').trim();
+const isAssistanceRequest = (requestType) => requestType === 'assistance';
 
 const formatDateTime = (value) => {
   if (!value) return '未设置';
@@ -184,7 +197,7 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
       setRequests(Array.isArray(listData) ? listData : listData?.results || []);
       setTopology(topologyData.datacenters || []);
     } catch (requestError) {
-      setError(requestError.message || '加载设备变更申请失败。');
+      setError(requestError.message || '加载申请列表失败。');
     } finally {
       setLoading(false);
     }
@@ -242,8 +255,12 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
         request.applicant_name,
         request.applicant_phone,
         request.company,
+        request.department,
+        request.project_name,
+        request.reason,
+        request.request_content,
         STATUS_LABELS[request.status],
-        REQUEST_TYPES.find(([value]) => value === request.request_type)?.[1],
+        REQUEST_TYPE_LABELS[request.request_type],
         firstItem?.device_name,
         firstItem?.device_model,
         firstItem?.serial_number,
@@ -362,7 +379,16 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
         title: cleanText(form.title),
         applicant_name: cleanText(form.applicant_name),
         applicant_phone: cleanText(form.applicant_phone),
-        items: form.items.map(normalizeItem),
+        applicant_email: cleanText(form.applicant_email),
+        company: cleanText(form.company),
+        department: cleanText(form.department),
+        project_name: cleanText(form.project_name),
+        reason: cleanText(form.reason),
+        request_content: cleanText(form.request_content),
+        impact_scope: cleanText(form.impact_scope),
+        requires_power_down: !!form.requires_power_down,
+        planned_execute_at: form.planned_execute_at || null,
+        items: isAssistanceRequest(form.request_type) ? [] : form.items.map(normalizeItem),
       };
       const response = await safeFetch('/api/datacenter-change-requests/', {
         method: 'POST',
@@ -438,13 +464,13 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
         }),
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(formatApiError(result, '执行回填失败。'));
-      setNotice(`申请 ${result.request?.request_code || executionTarget.request_code} 已回填并标记为完成。`);
+      if (!response.ok) throw new Error(formatApiError(result, executionAssistance ? '处理回填失败。' : '执行回填失败。'));
+      setNotice(`申请 ${result.request?.request_code || executionTarget.request_code} 已${executionAssistance ? '处理回填' : '执行回填'}并标记为完成。`);
       setExecutionOpen(false);
       setExecutionTarget(null);
       await loadData();
     } catch (requestError) {
-      setError(requestError.message || '执行回填失败。');
+      setError(requestError.message || (executionAssistance ? '处理回填失败。' : '执行回填失败。'));
     } finally {
       setExecuting(false);
     }
@@ -465,9 +491,11 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
     { label: '待审批', value: summary.submitted },
     { label: '已完成', value: summary.completed },
   ];
+  const assistanceDraft = isAssistanceRequest(form.request_type);
+  const executionAssistance = isAssistanceRequest(executionTarget?.request_type);
 
   if (loading && !requests.length) {
-    return <div className="p-8 text-sm text-slate-500">正在加载设备变更申请...</div>;
+    return <div className="p-8 text-sm text-slate-500">正在加载申请中心...</div>;
   }
 
   return (
@@ -476,9 +504,9 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
         <section className="rounded-[28px] border border-slate-200 bg-white px-6 py-6 shadow-sm">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
-              <div className="text-sm font-semibold text-sky-600">机房设备变更申请中心</div>
-              <h2 className="mt-3 text-[30px] font-black tracking-tight text-slate-900">支持独立链接、预填位置与执行回填</h2>
-              <p className="mt-3 max-w-4xl text-sm leading-6 text-slate-500">管理员先预填机柜、U 位、IP 需求和已有设备，再生成一单一链接发给对方补充信息。审批后可直接回填执行结果，并联动设备与管理 IP。</p>
+              <div className="text-sm font-semibold text-sky-600">统一申请中心</div>
+              <h2 className="mt-3 text-[30px] font-black tracking-tight text-slate-900">把设备变更和协助事项都放进同一个申请入口</h2>
+              <p className="mt-3 max-w-4xl text-sm leading-6 text-slate-500">管理员先预填基础信息，再生成带时效的独立链接发给对方补充内容。设备类申请继续支持位置、U 位和 IP 预填，协助事项则直接走协助缘由与内容审批。</p>
             </div>
             <div className="flex flex-wrap gap-3">
               <button onClick={loadData} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50" type="button"><RefreshCw className="h-4 w-4" />刷新</button>
@@ -501,10 +529,10 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
         <ListToolbar
           eyebrow="列表工具栏"
           title="快速搜索与状态筛选"
-          description="按申请编号、标题、申请人、设备信息或当前状态快速定位变更单。"
+          description="按申请编号、标题、申请人、申请内容、设备信息或当前状态快速定位。"
           searchValue={filters.query}
           onSearchChange={(value) => setFilters((prev) => ({ ...prev, query: value }))}
-          searchPlaceholder="搜索申请编号、标题、申请人、设备名称、管理 IP"
+          searchPlaceholder="搜索申请编号、标题、申请人、项目、设备名称、管理 IP"
           resultSummary={`当前结果 ${displayRequests.length} / ${requests.length}`}
           filters={
             <select
@@ -543,7 +571,7 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
                 <tr>
                   <th className="px-6 py-4">申请信息</th>
                   <th className="px-6 py-4">申请人</th>
-                  <th className="px-6 py-4">设备</th>
+                  <th className="px-6 py-4">申请摘要</th>
                   <th className="px-6 py-4">状态</th>
                   <th className="px-6 py-4">链接</th>
                   <th className="px-6 py-4">控制</th>
@@ -553,12 +581,13 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
                 {!displayRequests.length ? (
                   <tr>
                     <td colSpan={6} className="px-6 py-10 text-center text-slate-400">
-                      {requests.length ? '当前筛选条件下没有匹配的设备变更申请。' : '当前还没有设备变更申请。'}
+                      {requests.length ? '当前筛选条件下没有匹配的申请。' : '当前还没有申请。'}
                     </td>
                   </tr>
                 ) : null}
                 {displayRequests.map((request) => {
                   const item = request.items?.[0];
+                  const assistanceType = isAssistanceRequest(request.request_type);
                   const active = isLinkActive(request);
                   const isFocused = focusedRequestId && String(request.id) === String(focusedRequestId);
                   return (
@@ -569,15 +598,15 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
                     >
                       <td className="px-6 py-4">
                         <div className="font-semibold text-slate-900">{request.title || '未填写标题'}</div>
-                        <div className="mt-1 text-xs text-slate-500">{request.request_code} / {STATUS_LABELS[request.request_type] || request.request_type}</div>
+                        <div className="mt-1 text-xs text-slate-500">{request.request_code} / {REQUEST_TYPE_LABELS[request.request_type] || request.request_type}</div>
                       </td>
                       <td className="px-6 py-4">
                         <div className="font-semibold text-slate-800">{request.applicant_name || '待对方补充'}</div>
                         <div className="mt-1 text-xs text-slate-500">{request.applicant_phone || request.company || '待补充联系信息'}</div>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="font-semibold text-slate-800">{item?.device_name || '未填写设备'}</div>
-                        <div className="mt-1 text-xs text-slate-500">{item?.assigned_management_ip || item?.device_model || '等待补充'}</div>
+                        <div className="font-semibold text-slate-800">{assistanceType ? request.project_name || '未填写项目' : item?.device_name || '未填写设备'}</div>
+                        <div className="mt-1 text-xs text-slate-500">{assistanceType ? request.request_content || request.reason || '等待补充协助内容' : item?.assigned_management_ip || item?.device_model || '等待补充'}</div>
                       </td>
                       <td className="px-6 py-4">
                         <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${active ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>{STATUS_LABELS[request.status] || request.status}</span>
@@ -600,7 +629,7 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
                               <button onClick={() => triggerAction(request.id, 'reject', `申请 ${request.request_code} 已驳回。`)} className="inline-flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700" type="button"><XCircle className="h-3.5 w-3.5" />驳回</button>
                             </>
                           ) : null}
-                          {['approved', 'scheduled'].includes(request.status) ? <button onClick={() => openExecutionModal(request)} className="inline-flex items-center gap-1 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700" type="button"><Wrench className="h-3.5 w-3.5" />执行回填</button> : null}
+                          {['approved', 'scheduled'].includes(request.status) ? <button onClick={() => openExecutionModal(request)} className="inline-flex items-center gap-1 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700" type="button"><Wrench className="h-3.5 w-3.5" />{assistanceType ? '处理回填' : '执行回填'}</button> : null}
                           <button onClick={() => triggerAction(request.id, 'set_link_expiry', '链接有效期已设置为 7 天。', { expires_in_days: 7 })} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button">7天</button>
                           <button onClick={() => triggerAction(request.id, 'set_link_expiry', '链接有效期已设置为 30 天。', { expires_in_days: 30 })} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button">30天</button>
                           {active ? <button onClick={() => triggerAction(request.id, 'revoke_link', '公开申请链接已作废。')} className="inline-flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700" type="button"><Link2Off className="h-3.5 w-3.5" />作废</button> : <button onClick={() => triggerAction(request.id, 'restore_link', '公开申请链接已恢复。', { expires_in_days: 14 })} className="inline-flex items-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700" type="button"><RotateCcw className="h-3.5 w-3.5" />恢复</button>}
@@ -615,17 +644,33 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
         </section>
       </div>
 
-      <Modal isOpen={open} onClose={() => setOpen(false)} title="新建设备变更草稿并生成独立链接" size="xl">
+      <Modal isOpen={open} onClose={() => setOpen(false)} title="新建申请草稿并生成独立链接" size="xl">
         <div className="space-y-5">
-          <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">管理员先预填位置和网络信息，再把独立链接发给对方补充信息。单机房场景下默认隐藏机房选择。</div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+            {assistanceDraft
+              ? '协助事项申请会生成一条临时链接，申请人只需要补充协助缘由、内容和联系人信息即可。'
+              : '设备类申请会先由管理员预填位置和网络信息，再把独立链接发给对方补充资料。单机房场景下默认隐藏机房选择。'}
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             <label className="text-sm text-slate-700">申请类型<select value={form.request_type} onChange={(e) => updateField('request_type', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5">{REQUEST_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
             <label className="text-sm text-slate-700">申请标题<input value={form.title} onChange={(e) => updateField('title', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
             <label className="text-sm text-slate-700">申请人<input value={form.applicant_name} onChange={(e) => updateField('applicant_name', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
             <label className="text-sm text-slate-700">联系电话<input value={form.applicant_phone} onChange={(e) => updateField('applicant_phone', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            <label className="text-sm text-slate-700">联系邮箱<input value={form.applicant_email} onChange={(e) => updateField('applicant_email', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            <label className="text-sm text-slate-700">所属单位<input value={form.company} onChange={(e) => updateField('company', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            <label className="text-sm text-slate-700">所属部门<input value={form.department} onChange={(e) => updateField('department', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            <label className="text-sm text-slate-700">项目名称<input value={form.project_name} onChange={(e) => updateField('project_name', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            <label className="text-sm text-slate-700">计划处理时间<input type="datetime-local" value={form.planned_execute_at} onChange={(e) => updateField('planned_execute_at', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
           </div>
 
-          {form.items.map((item, index) => {
+          {assistanceDraft ? (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <label className="text-sm text-slate-700">协助申请缘由<textarea value={form.reason} onChange={(e) => updateField('reason', e.target.value)} className="mt-1 h-28 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+              <label className="text-sm text-slate-700">协助申请内容<textarea value={form.request_content} onChange={(e) => updateField('request_content', e.target.value)} className="mt-1 h-28 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            </div>
+          ) : null}
+
+          {!assistanceDraft ? form.items.map((item, index) => {
             const sourceDatacenterId = item.source_datacenter || (singleDatacenter ? String(singleDatacenter.id) : '');
             const targetDatacenterId = item.target_datacenter || (singleDatacenter ? String(singleDatacenter.id) : '');
             const sourceDatacenter = topology.find((dc) => String(dc.id) === String(sourceDatacenterId));
@@ -662,9 +707,23 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
                 {showTarget ? <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600">目标机柜占用：{targetRack ? `${targetRack.name || targetRack.code} / ${targetRack.height}U / 已占用 ${targetRack.occupied_ranges?.length || 0} 段` : '请选择机柜'}</div> : null}
               </div>
             );
-          })}
+          }) : null}
+          {!assistanceDraft ? (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <label className="text-sm text-slate-700">申请原因<textarea value={form.reason} onChange={(e) => updateField('reason', e.target.value)} className="mt-1 h-24 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+              <label className="text-sm text-slate-700">影响范围<textarea value={form.impact_scope} onChange={(e) => updateField('impact_scope', e.target.value)} className="mt-1 h-24 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            </div>
+          ) : null}
+          {!assistanceDraft ? (
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" checked={!!form.requires_power_down} onChange={(e) => updateField('requires_power_down', e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-200" />
+              本次申请涉及下电窗口
+            </label>
+          ) : null}
           <div className="flex items-center justify-between">
-            <button onClick={addItem} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50" type="button">增加设备</button>
+            <div>
+              {!assistanceDraft ? <button onClick={addItem} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50" type="button">增加设备</button> : null}
+            </div>
             <div className="flex gap-3">
               <button onClick={() => setOpen(false)} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50" type="button">取消</button>
               <button onClick={submitDraft} disabled={saving} className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:bg-slate-300" type="button">{saving ? '生成中...' : '生成独立链接'}</button>
@@ -673,14 +732,23 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
         </div>
       </Modal>
 
-      <Modal isOpen={executionOpen} onClose={() => setExecutionOpen(false)} title="执行回填与完成确认" size="xl">
+      <Modal isOpen={executionOpen} onClose={() => setExecutionOpen(false)} title={executionAssistance ? '处理回填与完成确认' : '执行回填与完成确认'} size="xl">
         <div className="space-y-5">
-          <div className="rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-700">审批通过后，在这里回填实际执行结果。设备位置、管理 IP 和备注会同步更新到设备台账与 IP 地址记录。</div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <label className="text-sm text-slate-700">执行人<input value={executionForm.executor_name} onChange={(e) => updateExecutionField('executor_name', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
-            <label className="text-sm text-slate-700">执行备注<textarea value={executionForm.execution_comment} onChange={(e) => updateExecutionField('execution_comment', e.target.value)} className="mt-1 h-24 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+          <div className="rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+            {executionAssistance
+              ? '审批通过后，在这里回填实际处理人和处理备注，确认协助事项已经处理完成。'
+              : '审批通过后，在这里回填实际执行结果。设备位置、管理 IP 和备注会同步更新到设备台账与 IP 地址记录。'}
           </div>
-          {executionForm.items.map((item, index) => {
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <label className="text-sm text-slate-700">{executionAssistance ? '处理人' : '执行人'}<input value={executionForm.executor_name} onChange={(e) => updateExecutionField('executor_name', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            <label className="text-sm text-slate-700">{executionAssistance ? '处理备注' : '执行备注'}<textarea value={executionForm.execution_comment} onChange={(e) => updateExecutionField('execution_comment', e.target.value)} className="mt-1 h-24 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+          </div>
+          {executionAssistance ? (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              该申请类型不涉及设备明细，本次回填只会记录处理人、处理时间和处理备注。
+            </div>
+          ) : null}
+          {!executionAssistance ? executionForm.items.map((item, index) => {
             const requestType = executionTarget?.request_type;
             const showSource = OUTBOUND_TYPES.has(requestType);
             const showTarget = TARGET_TYPES.has(requestType);
@@ -700,10 +768,10 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
                 <label className="text-sm text-slate-700">执行备注<textarea value={item.notes} onChange={(e) => updateExecutionItem(index, 'notes', e.target.value)} className="mt-1 h-20 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
               </div>
             );
-          })}
+          }) : null}
           <div className="flex justify-end gap-3">
             <button onClick={() => setExecutionOpen(false)} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50" type="button">取消</button>
-            <button onClick={submitExecution} disabled={executing} className="rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-amber-700 disabled:bg-slate-300" type="button">{executing ? '提交中...' : '确认执行完成'}</button>
+            <button onClick={submitExecution} disabled={executing} className="rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-amber-700 disabled:bg-slate-300" type="button">{executing ? '提交中...' : executionAssistance ? '确认处理完成' : '确认执行完成'}</button>
           </div>
         </div>
       </Modal>

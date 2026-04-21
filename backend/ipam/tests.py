@@ -1,3 +1,4 @@
+from datetime import timedelta
 import json
 import os
 import shutil
@@ -12,6 +13,7 @@ import pandas as pd
 from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from .models import (
@@ -22,6 +24,7 @@ from .models import (
     Rack,
     RackDevice,
     ResidentDevice,
+    ResidentIntakeLink,
     ResidentStaff,
     Subnet,
     UserProfile,
@@ -406,6 +409,35 @@ class DatacenterChangeRequestTests(BaseApiTestCase):
         self.assertEqual(item.target_rack_id, self.rack.id)
         self.assertEqual(item.network_role, 'command')
         self.assertEqual(item.ip_action, 'allocate')
+
+    def test_can_create_assistance_request_without_items(self):
+        response = self.client.post(
+            '/api/datacenter-change-requests/',
+            {
+                'request_type': 'assistance',
+                'title': '协助接入新项目',
+                'applicant_name': '王五',
+                'applicant_phone': '13700000000',
+                'applicant_email': 'wangwu@example.com',
+                'company': '数字广东',
+                'department': '科技与信息化处',
+                'project_name': '一体化平台',
+                'reason': '项目上线前需要协调处理',
+                'request_content': '协助开通账号、座位和网络访问权限。',
+                'planned_execute_at': '2026-04-22T09:30:00',
+                'items': [],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['request_type'], 'assistance')
+        self.assertEqual(response.data['item_count'], 0)
+        self.assertEqual(response.data['request_content'], '协助开通账号、座位和网络访问权限。')
+
+        change_request = DatacenterChangeRequest.objects.get(pk=response.data['id'])
+        self.assertEqual(change_request.items.count(), 0)
+        self.assertEqual(change_request.request_content, '协助开通账号、座位和网络访问权限。')
 
     def test_can_approve_change_request(self):
         change_request = DatacenterChangeRequest.objects.create(
@@ -1026,6 +1058,9 @@ class ResidentImportTests(BaseApiTestCase):
 
 
 class ResidentIntakeTests(BaseApiTestCase):
+    def setUp(self):
+        self.client = self.make_authenticated_client(self.dc_operator)
+
     def test_public_resident_intake_updates_existing_record_and_formats_mac(self):
         resident = ResidentStaff.objects.create(
             company='Example Co',
@@ -1042,10 +1077,19 @@ class ResidentIntakeTests(BaseApiTestCase):
             device_name='Old Laptop',
             wireless_mac='AA:BB:CC:DD:EE:FF',
         )
+        intake_link = ResidentIntakeLink.objects.create(
+            expires_at=timezone.now() + timedelta(hours=4),
+            created_by=self.dc_operator,
+        )
+
+        verify_response = self.client.get(f'/api/resident-intake/?token={intake_link.token}')
+        self.assertEqual(verify_response.status_code, 200)
+        self.assertEqual(verify_response.data['link']['token'], intake_link.token)
 
         response = self.client.post(
             '/api/resident-intake/',
             {
+                'token': intake_link.token,
                 'company_profile': {
                     'company': 'Example Co',
                     'project_name': 'New Project',
@@ -1090,6 +1134,37 @@ class ResidentIntakeTests(BaseApiTestCase):
         self.assertEqual(device.wired_mac, '782b-4645-c9a0')
         self.assertEqual(device.wireless_mac, '201e-885d-e995')
         self.assertEqual(response.data['residents'][0]['devices'][0]['wired_mac'], '782b-4645-c9a0')
+
+    def test_public_resident_intake_rejects_expired_link(self):
+        intake_link = ResidentIntakeLink.objects.create(
+            expires_at=timezone.now() - timedelta(minutes=1),
+            created_by=self.dc_operator,
+        )
+
+        get_response = self.client.get(f'/api/resident-intake/?token={intake_link.token}')
+        self.assertEqual(get_response.status_code, 410)
+
+        post_response = self.client.post(
+            '/api/resident-intake/',
+            {
+                'token': intake_link.token,
+                'company_profile': {
+                    'company': 'Example Co',
+                    'resident_type': 'implementation',
+                },
+                'staff_members': [
+                    {
+                        'name': 'Alice',
+                        'phone': '13800000000',
+                        'devices': [],
+                    }
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(post_response.status_code, 410)
+        self.assertIn('过期', str(post_response.data.get('detail', '')))
 
 
 class EncodingAuditCommandTests(BaseApiTestCase):

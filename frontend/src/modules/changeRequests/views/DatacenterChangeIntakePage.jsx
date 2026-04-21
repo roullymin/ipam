@@ -11,6 +11,7 @@ const REQUEST_TYPES = {
   relocate: '位置迁移',
   decommission: '设备退役',
   power_change: '电力变更',
+  assistance: '协助事项申请',
 };
 
 const NETWORK_ROLE_LABELS = {
@@ -22,6 +23,8 @@ const NETWORK_ROLE_LABELS = {
   service: '政务外网',
   dual: '双网',
 };
+
+const isAssistanceRequest = (requestType) => requestType === 'assistance';
 
 const formatDateTime = (value) => {
   if (!value) return '未填写';
@@ -52,6 +55,7 @@ export default function DatacenterChangeIntakePage() {
       setLoading(false);
       return;
     }
+
     setLoading(true);
     setError('');
     try {
@@ -69,6 +73,7 @@ export default function DatacenterChangeIntakePage() {
         department: payload.request.department || '',
         project_name: payload.request.project_name || '',
         reason: payload.request.reason || '',
+        request_content: payload.request.request_content || '',
         impact_scope: payload.request.impact_scope || '',
         requires_power_down: !!payload.request.requires_power_down,
         planned_execute_at: payload.request.planned_execute_at ? String(payload.request.planned_execute_at).slice(0, 16) : '',
@@ -99,18 +104,26 @@ export default function DatacenterChangeIntakePage() {
     }
   };
 
-  useEffect(() => { loadRequest(); }, [token]);
+  useEffect(() => {
+    loadRequest();
+  }, [token]);
 
   const summary = useMemo(() => {
     if (!requestData) return null;
+    const assistance = isAssistanceRequest(requestData.request_type);
     return {
+      assistance,
       requestType: REQUEST_TYPES[requestData.request_type] || requestData.request_type,
       itemCount: requestData.items?.length || 0,
     };
   }, [requestData]);
 
   const setField = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
-  const setItemField = (index, key, value) => setForm((prev) => ({ ...prev, items: prev.items.map((item, itemIndex) => itemIndex === index ? { ...item, [key]: value } : item) }));
+  const setItemField = (index, key, value) =>
+    setForm((prev) => ({
+      ...prev,
+      items: prev.items.map((item, itemIndex) => (itemIndex === index ? { ...item, [key]: value } : item)),
+    }));
 
   const submit = async () => {
     setSubmitting(true);
@@ -138,7 +151,7 @@ export default function DatacenterChangeIntakePage() {
       <div className="flex min-h-screen items-center justify-center bg-slate-50">
         <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 text-slate-600 shadow-sm">
           <Loader2 className="h-5 w-5 animate-spin" />
-          正在加载设备变更申请...
+          正在加载申请信息...
         </div>
       </div>
     );
@@ -155,6 +168,10 @@ export default function DatacenterChangeIntakePage() {
     );
   }
 
+  const assistance = summary?.assistance;
+  const pageTitle = assistance ? '协助事项申请' : '机房设备变更申请';
+  const pageSheetTitle = assistance ? '协助事项申请单' : '机房设备变更申请单';
+
   return (
     <div className="change-request-print-shell min-h-screen bg-slate-50 px-4 py-8">
       <div className="mx-auto max-w-5xl space-y-6">
@@ -163,8 +180,10 @@ export default function DatacenterChangeIntakePage() {
             <div className="flex items-start gap-3">
               <ArrowLeftRight className="mt-1 h-8 w-8 text-blue-600" />
               <div>
-                <div className="text-3xl font-black tracking-tight text-slate-900">机房设备变更申请</div>
-                <div className="mt-2 text-sm leading-6 text-slate-500">这是管理员预先生成的独立链接。你只需要补充申请人、原因和设备备注等信息，不需要再手动选择机柜、U 位或 IP。</div>
+                <div className="text-3xl font-black tracking-tight text-slate-900">{pageTitle}</div>
+                <div className="mt-2 text-sm leading-6 text-slate-500">
+                  这是管理员预先生成的独立申请链接。你只需要补充联系人、申请缘由和具体内容，链接过期后将自动失效。
+                </div>
               </div>
             </div>
             <div className="flex gap-3">
@@ -184,7 +203,7 @@ export default function DatacenterChangeIntakePage() {
           <div className="flex flex-wrap items-center gap-3">
             <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">{requestData.request_code}</span>
             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{summary?.requestType}</span>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">设备 {summary?.itemCount || 0} 台</span>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{assistance ? '协助类申请' : `设备 ${summary?.itemCount || 0} 台`}</span>
             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">链接有效期：{formatDateTime(requestData.token_expires_at)}</span>
           </div>
           {error ? <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
@@ -192,7 +211,7 @@ export default function DatacenterChangeIntakePage() {
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-          <div className="mb-6 text-2xl font-black text-slate-900">机房设备变更申请单</div>
+          <div className="mb-6 text-2xl font-black text-slate-900">{pageSheetTitle}</div>
 
           <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className="text-sm text-slate-700">申请标题<input value={form.title} onChange={(e) => setField('title', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
@@ -201,45 +220,54 @@ export default function DatacenterChangeIntakePage() {
             <label className="text-sm text-slate-700">联系邮箱<input value={form.applicant_email} onChange={(e) => setField('applicant_email', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
             <label className="text-sm text-slate-700">所属单位<input value={form.company} onChange={(e) => setField('company', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
             <label className="text-sm text-slate-700">所属部门<input value={form.department} onChange={(e) => setField('department', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
-            <label className="text-sm text-slate-700">所属项目<input value={form.project_name} onChange={(e) => setField('project_name', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
-            <label className="text-sm text-slate-700">计划执行时间<input type="datetime-local" value={form.planned_execute_at} onChange={(e) => setField('planned_execute_at', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            <label className="text-sm text-slate-700">项目名称<input value={form.project_name} onChange={(e) => setField('project_name', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            <label className="text-sm text-slate-700">{assistance ? '期望处理时间' : '计划执行时间'}<input type="datetime-local" value={form.planned_execute_at} onChange={(e) => setField('planned_execute_at', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
           </section>
 
-          <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
-            <label className="text-sm text-slate-700">申请原因<textarea value={form.reason} onChange={(e) => setField('reason', e.target.value)} className="mt-1 h-24 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
-            <label className="text-sm text-slate-700">影响范围<textarea value={form.impact_scope} onChange={(e) => setField('impact_scope', e.target.value)} className="mt-1 h-24 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
-          </div>
-
-          <label className="mt-5 flex items-center gap-2 text-sm text-slate-700">
-            <input type="checkbox" checked={!!form.requires_power_down} onChange={(e) => setField('requires_power_down', e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-200" />
-            本次申请涉及下电窗口
-          </label>
-
-          <section className="mt-8 space-y-4">
-            <div className="text-lg font-black text-slate-900">设备明细</div>
-            {form.items.map((item, index) => (
-              <div key={`public-item-${index}`} className="rounded-3xl border border-slate-200 bg-slate-50/70 p-5">
-                <div className="mb-4 text-sm font-bold text-slate-900">设备 {index + 1}</div>
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  <label className="text-sm text-slate-700">设备名称<input value={item.device_name} onChange={(e) => setItemField(index, 'device_name', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
-                  <label className="text-sm text-slate-700">设备型号<input value={item.device_model} onChange={(e) => setItemField(index, 'device_model', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
-                  <label className="text-sm text-slate-700">序列号<input value={item.serial_number} onChange={(e) => setItemField(index, 'serial_number', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
-                  <ReadonlyField label="数量" value={`${item.quantity} 台`} />
-                  <ReadonlyField label="占用 U 数" value={`${item.u_height}U`} />
-                  <ReadonlyField label="功率需求" value={`${item.power_watts}W`} />
-                  <ReadonlyField label="网络需求" value={NETWORK_ROLE_LABELS[item.network_role] || item.network_role} />
-                  <ReadonlyField label="IP 数量" value={item.ip_quantity} />
-                  <ReadonlyField label="预分配管理 IP" value={item.assigned_management_ip} />
-                  <ReadonlyField label="预分配业务 IP" value={item.assigned_service_ip} />
-                  <ReadonlyField label="源机柜 / U 位" value={item.source_rack_code ? `${item.source_rack_code} / ${item.source_u_start || '-'}-${item.source_u_end || '-'}` : ''} />
-                  <ReadonlyField label="目标机柜 / U 位" value={item.target_rack_code ? `${item.target_rack_code} / ${item.target_u_start || '-'}-${item.target_u_end || '-'}` : ''} />
-                </div>
-                <div className="mt-4">
-                  <label className="text-sm text-slate-700">补充备注<textarea value={item.notes} onChange={(e) => setItemField(index, 'notes', e.target.value)} className="mt-1 h-20 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
-                </div>
+          {assistance ? (
+            <section className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <label className="text-sm text-slate-700">协助申请缘由<textarea value={form.reason} onChange={(e) => setField('reason', e.target.value)} className="mt-1 h-28 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+              <label className="text-sm text-slate-700">协助申请内容<textarea value={form.request_content} onChange={(e) => setField('request_content', e.target.value)} className="mt-1 h-28 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            </section>
+          ) : (
+            <>
+              <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
+                <label className="text-sm text-slate-700">申请原因<textarea value={form.reason} onChange={(e) => setField('reason', e.target.value)} className="mt-1 h-24 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+                <label className="text-sm text-slate-700">影响范围<textarea value={form.impact_scope} onChange={(e) => setField('impact_scope', e.target.value)} className="mt-1 h-24 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
               </div>
-            ))}
-          </section>
+
+              <label className="mt-5 flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" checked={!!form.requires_power_down} onChange={(e) => setField('requires_power_down', e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-200" />
+                本次申请涉及下电窗口
+              </label>
+
+              <section className="mt-8 space-y-4">
+                <div className="text-lg font-black text-slate-900">设备明细</div>
+                {form.items.map((item, index) => (
+                  <div key={`public-item-${index}`} className="rounded-3xl border border-slate-200 bg-slate-50/70 p-5">
+                    <div className="mb-4 text-sm font-bold text-slate-900">设备 {index + 1}</div>
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      <label className="text-sm text-slate-700">设备名称<input value={item.device_name} onChange={(e) => setItemField(index, 'device_name', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+                      <label className="text-sm text-slate-700">设备型号<input value={item.device_model} onChange={(e) => setItemField(index, 'device_model', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+                      <label className="text-sm text-slate-700">序列号<input value={item.serial_number} onChange={(e) => setItemField(index, 'serial_number', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+                      <ReadonlyField label="数量" value={`${item.quantity} 台`} />
+                      <ReadonlyField label="占用 U 数" value={`${item.u_height}U`} />
+                      <ReadonlyField label="功率需求" value={`${item.power_watts}W`} />
+                      <ReadonlyField label="网络需求" value={NETWORK_ROLE_LABELS[item.network_role] || item.network_role} />
+                      <ReadonlyField label="IP 数量" value={item.ip_quantity} />
+                      <ReadonlyField label="预分配管理 IP" value={item.assigned_management_ip} />
+                      <ReadonlyField label="预分配业务 IP" value={item.assigned_service_ip} />
+                      <ReadonlyField label="源机柜 / U 位" value={item.source_rack_code ? `${item.source_rack_code} / ${item.source_u_start || '-'}-${item.source_u_end || '-'}` : ''} />
+                      <ReadonlyField label="目标机柜 / U 位" value={item.target_rack_code ? `${item.target_rack_code} / ${item.target_u_start || '-'}-${item.target_u_end || '-'}` : ''} />
+                    </div>
+                    <div className="mt-4">
+                      <label className="text-sm text-slate-700">补充备注<textarea value={item.notes} onChange={(e) => setItemField(index, 'notes', e.target.value)} className="mt-1 h-20 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+                    </div>
+                  </div>
+                ))}
+              </section>
+            </>
+          )}
 
           <div className="mt-8 flex justify-end gap-3 print:hidden">
             <button onClick={() => window.open(`/api/public/change-requests/${token}/export-pdf/`, '_blank', 'noopener,noreferrer')} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50" type="button">

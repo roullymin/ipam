@@ -45,6 +45,7 @@ from .models import (
     Rack,
     RackDevice,
     ResidentDevice,
+    ResidentIntakeLink,
     ResidentStaff,
     Subnet,
     UserProfile,
@@ -92,6 +93,7 @@ from .serializers import (
     NetworkSectionSerializer,
     RackDeviceSerializer,
     RackSerializer,
+    ResidentIntakeLinkSerializer,
     ResidentStaffSerializer,
     SubnetSerializer,
     UserSerializer,
@@ -391,9 +393,29 @@ def _get_resident_registration_url(request):
     return request.build_absolute_uri('/?resident-intake=1')
 
 
-def _build_resident_qr_png(request):
+def _get_resident_intake_url(request, token=''):
+    suffix = '/?resident-intake=1'
+    if token:
+        suffix = f'{suffix}&token={token}'
+    return request.build_absolute_uri(suffix)
+
+
+def _resolve_resident_intake_link(token):
+    normalized = str(token or '').strip()
+    if not normalized:
+        return None, Response({'detail': '缺少驻场登记链接令牌。'}, status=status.HTTP_400_BAD_REQUEST)
+
+    intake_link = ResidentIntakeLink.objects.filter(token=normalized).first()
+    if intake_link is None:
+        return None, Response({'detail': '驻场登记链接不存在。'}, status=status.HTTP_404_NOT_FOUND)
+    if intake_link.expires_at <= timezone.now():
+        return None, Response({'detail': '驻场登记链接已过期。'}, status=status.HTTP_410_GONE)
+    return intake_link, None
+
+
+def _build_resident_qr_png(request, token=''):
     qr = qrcode.QRCode(version=1, box_size=10, border=2)
-    qr.add_data(_get_resident_registration_url(request))
+    qr.add_data(_get_resident_intake_url(request, token))
     qr.make(fit=True)
     image = qr.make_image(fill_color='black', back_color='white')
     buffer = io.BytesIO()
@@ -594,7 +616,7 @@ def _build_resident_pdf(response_buffer, resident, request):
     )
     elements.append(sign_table)
     elements.append(Spacer(1, 6 * mm))
-    elements.append(Paragraph(f'公开登记链接：{_get_resident_registration_url(request)}', body_style))
+    elements.append(Paragraph('公开登记入口：本次资料通过时效链接提交，链接过期后自动失效。', body_style))
 
     doc.build(elements)
 
@@ -712,7 +734,7 @@ def _append_resident_pdf_section(elements, resident, request, base_font, title_s
     )
     elements.append(sign_table)
     elements.append(Spacer(1, 6 * mm))
-    elements.append(Paragraph(f'公开登记链接：{_get_resident_registration_url(request)}', body_style))
+    elements.append(Paragraph('公开登记入口：本次资料通过时效链接提交，链接过期后自动失效。', body_style))
 
 
 def _build_resident_batch_pdf(response_buffer, residents, request):
@@ -836,8 +858,10 @@ def _build_change_request_pdf(response_buffer, change_request):
         change_request.status,
     )
 
+    title_text = '协助事项申请单' if change_request.request_type == 'assistance' else '机房设备变更申请单'
+
     elements = [
-        Paragraph('机房设备变更申请单', title_style),
+        Paragraph(title_text, title_style),
         Paragraph(
             f'申请编号：{change_request.request_code}　　导出时间：{timezone.localtime().strftime("%Y-%m-%d %H:%M")}',
             body_style,
@@ -852,8 +876,10 @@ def _build_change_request_pdf(response_buffer, change_request):
         ['联系邮箱', change_request.applicant_email or '未填写', '所属单位', change_request.company or '未填写'],
         ['所属部门', change_request.department or '未填写', '所属项目', change_request.project_name or '未填写'],
         ['计划执行时间', _format_change_datetime(change_request.planned_execute_at), '链接状态', _format_change_link_status(change_request)],
-        ['是否需要下电', '是' if change_request.requires_power_down else '否', '创建人', get_actor_name(change_request.created_by)],
+        ['处理执行时间', _format_change_datetime(change_request.executed_at), '创建人', get_actor_name(change_request.created_by)],
     ]
+    if change_request.request_type != 'assistance':
+        info_rows.insert(6, ['是否需要下电', '是' if change_request.requires_power_down else '否', '执行状态', status_label])
 
     elements.append(Paragraph('一、申请信息', heading_style))
     info_table = Table(info_rows, colWidths=[24 * mm, 58 * mm, 24 * mm, 56 * mm])
@@ -878,88 +904,94 @@ def _build_change_request_pdf(response_buffer, change_request):
     elements.append(info_table)
     elements.append(Spacer(1, 5 * mm))
 
-    elements.append(Paragraph('二、变更说明', heading_style))
+    detail_heading = '二、协助内容' if change_request.request_type == 'assistance' else '二、变更说明'
+    elements.append(Paragraph(detail_heading, heading_style))
     elements.append(Paragraph(f'申请原因：{change_request.reason or "未填写"}', body_style))
     elements.append(Spacer(1, 2 * mm))
-    elements.append(Paragraph(f'影响范围：{change_request.impact_scope or "未填写"}', body_style))
+    if change_request.request_type == 'assistance':
+        elements.append(Paragraph(f'协助内容：{change_request.request_content or "未填写"}', body_style))
+    else:
+        elements.append(Paragraph(f'影响范围：{change_request.impact_scope or "未填写"}', body_style))
     elements.append(Spacer(1, 5 * mm))
 
-    elements.append(Paragraph('三、设备明细', heading_style))
-    item_rows = [[
-        '设备名称',
-        '型号/序列号',
-        '数量/U',
-        '网络',
-        'IP/动作',
-        '位置',
-        '备注',
-    ]]
-    for item in change_request.items.all():
-        network_label = dict(DatacenterChangeItem._meta.get_field('network_role').choices).get(
-            item.network_role,
-            item.network_role,
-        )
-        ip_action_label = dict(DatacenterChangeItem._meta.get_field('ip_action').choices).get(
-            item.ip_action,
-            item.ip_action,
-        )
-        ip_lines = []
-        if item.assigned_management_ip:
-            ip_lines.append(f'管理：{item.assigned_management_ip}')
-        if item.assigned_service_ip:
-            ip_lines.append(f'业务：{item.assigned_service_ip}')
-        ip_lines.append(f'动作：{ip_action_label}')
-        location_lines = []
-        if item.source_rack_id:
-            location_lines.append(f'源：{item.source_rack.code} / {item.source_u_start or "-"}-{item.source_u_end or "-"}')
-        if item.target_rack_id:
-            location_lines.append(f'目标：{item.target_rack.code} / {item.target_u_start or "-"}-{item.target_u_end or "-"}')
-        item_rows.append(
-            [
-                item.device_name or '未填写',
-                ' / '.join(filter(None, [item.device_model, item.serial_number])) or '未填写',
-                f'{item.quantity} 台 / {item.u_height}U',
-                network_label,
-                '\n'.join(ip_lines),
-                '\n'.join(location_lines) or '未填写',
-                item.notes or '未填写',
-            ]
-        )
+    if change_request.request_type != 'assistance':
+        elements.append(Paragraph('三、设备明细', heading_style))
+        item_rows = [[
+            '设备名称',
+            '型号/序列号',
+            '数量/U',
+            '网络',
+            'IP/动作',
+            '位置',
+            '备注',
+        ]]
+        for item in change_request.items.all():
+            network_label = dict(DatacenterChangeItem._meta.get_field('network_role').choices).get(
+                item.network_role,
+                item.network_role,
+            )
+            ip_action_label = dict(DatacenterChangeItem._meta.get_field('ip_action').choices).get(
+                item.ip_action,
+                item.ip_action,
+            )
+            ip_lines = []
+            if item.assigned_management_ip:
+                ip_lines.append(f'管理：{item.assigned_management_ip}')
+            if item.assigned_service_ip:
+                ip_lines.append(f'业务：{item.assigned_service_ip}')
+            ip_lines.append(f'动作：{ip_action_label}')
+            location_lines = []
+            if item.source_rack_id:
+                location_lines.append(f'源：{item.source_rack.code} / {item.source_u_start or "-"}-{item.source_u_end or "-"}')
+            if item.target_rack_id:
+                location_lines.append(f'目标：{item.target_rack.code} / {item.target_u_start or "-"}-{item.target_u_end or "-"}')
+            item_rows.append(
+                [
+                    item.device_name or '未填写',
+                    ' / '.join(filter(None, [item.device_model, item.serial_number])) or '未填写',
+                    f'{item.quantity} 台 / {item.u_height}U',
+                    network_label,
+                    '\n'.join(ip_lines),
+                    '\n'.join(location_lines) or '未填写',
+                    item.notes or '未填写',
+                ]
+            )
 
-    item_table = Table(
-        item_rows,
-        colWidths=[28 * mm, 34 * mm, 18 * mm, 18 * mm, 30 * mm, 34 * mm, 20 * mm],
-        repeatRows=1,
-    )
-    item_table.setStyle(
-        TableStyle(
-            [
-                ('FONTNAME', (0, 0), (-1, -1), base_font),
-                ('FONTSIZE', (0, 0), (-1, 0), 9),
-                ('FONTSIZE', (0, 1), (-1, -1), 8.5),
-                ('LEADING', (0, 0), (-1, -1), 12),
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#dbeafe')),
-                ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#334155')),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
-                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ('LEFTPADDING', (0, 0), (-1, -1), 5),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 5),
-                ('TOPPADDING', (0, 0), (-1, -1), 5),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-            ]
+        item_table = Table(
+            item_rows,
+            colWidths=[28 * mm, 34 * mm, 18 * mm, 18 * mm, 30 * mm, 34 * mm, 20 * mm],
+            repeatRows=1,
         )
-    )
-    elements.append(item_table)
-    elements.append(Spacer(1, 5 * mm))
+        item_table.setStyle(
+            TableStyle(
+                [
+                    ('FONTNAME', (0, 0), (-1, -1), base_font),
+                    ('FONTSIZE', (0, 0), (-1, 0), 9),
+                    ('FONTSIZE', (0, 1), (-1, -1), 8.5),
+                    ('LEADING', (0, 0), (-1, -1), 12),
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#dbeafe')),
+                    ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#334155')),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 5),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+                    ('TOPPADDING', (0, 0), (-1, -1), 5),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ]
+            )
+        )
+        elements.append(item_table)
+        elements.append(Spacer(1, 5 * mm))
 
-    elements.append(Paragraph('四、审批与执行', heading_style))
+    action_heading = '三、审批与处理' if change_request.request_type == 'assistance' else '四、审批与执行'
+    elements.append(Paragraph(action_heading, heading_style))
     action_rows = [
         ['部门意见', change_request.department_comment or '未填写'],
         ['信息化意见', change_request.it_comment or '未填写'],
         ['审批意见', change_request.review_comment or '未填写'],
         ['审批人 / 时间', f'{change_request.reviewer_name or "未填写"} / {_format_change_datetime(change_request.reviewed_at)}'],
-        ['执行人 / 时间', f'{change_request.executor_name or "未填写"} / {_format_change_datetime(change_request.executed_at)}'],
-        ['执行备注', change_request.execution_comment or '未填写'],
+        ['处理人 / 时间' if change_request.request_type == 'assistance' else '执行人 / 时间', f'{change_request.executor_name or "未填写"} / {_format_change_datetime(change_request.executed_at)}'],
+        ['处理备注' if change_request.request_type == 'assistance' else '执行备注', change_request.execution_comment or '未填写'],
     ]
     action_table = Table(action_rows, colWidths=[28 * mm, 136 * mm])
     action_table.setStyle(
@@ -1365,10 +1397,36 @@ class ResidentStaffViewSet(OptionalPaginationMixin, BaseViewSet):
 
     @action(detail=False, methods=['get'])
     def registration_qr(self, request):
-        image_buffer = _build_resident_qr_png(request)
+        token = request.query_params.get('token', '')
+        if token:
+            intake_link, error_response = _resolve_resident_intake_link(token)
+            if error_response is not None:
+                return error_response
+            token = intake_link.token
+        image_buffer = _build_resident_qr_png(request, token=token)
         response = HttpResponse(image_buffer.getvalue(), content_type='image/png')
         response['Content-Disposition'] = 'attachment; filename="resident_intake_qr.png"'
         return response
+
+    @action(detail=False, methods=['post'])
+    def create_intake_link(self, request):
+        expires_in_hours = max(int(request.data.get('expires_in_hours') or 24), 1)
+        intake_link = ResidentIntakeLink.objects.create(
+            created_by=request.user if request.user.is_authenticated else None,
+            expires_at=timezone.now() + timedelta(hours=expires_in_hours),
+        )
+        record_audit(
+            request,
+            self.audit_module,
+            'create_intake_link',
+            detail=f'生成驻场公开登记链接，有效期 {expires_in_hours} 小时',
+        )
+        return Response(
+            {
+                'status': 'success',
+                'link': ResidentIntakeLinkSerializer(intake_link, context={'request': request}).data,
+            }
+        )
 
     @action(detail=False, methods=['get'])
     def download_template(self, request):
@@ -1556,10 +1614,23 @@ class ResidentStaffViewSet(OptionalPaginationMixin, BaseViewSet):
         )
 
 
-@api_view(['POST'])
+@api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 @authentication_classes([])
 def api_resident_intake(request):
+    token = request.query_params.get('token') or request.data.get('token')
+    intake_link, error_response = _resolve_resident_intake_link(token)
+    if error_response is not None:
+        return error_response
+
+    if request.method == 'GET':
+        return Response(
+            {
+                'status': 'success',
+                'link': ResidentIntakeLinkSerializer(intake_link, context={'request': request}).data,
+            }
+        )
+
     payload = request.data
     staff_members = payload.get('staff_members')
     company_profile = payload.get('company_profile') or {}
@@ -1646,6 +1717,7 @@ def api_resident_intake(request):
         return Response(
             {
                 'status': 'success',
+                'link': ResidentIntakeLinkSerializer(intake_link, context={'request': request}).data,
                 'message': f'提交完成：新增 {created_count} 人，更新 {updated_count} 人。',
                 'created': created_count,
                 'updated': updated_count,
@@ -1671,6 +1743,7 @@ def api_resident_intake(request):
         return Response(
             {
                 'status': 'success',
+                'link': ResidentIntakeLinkSerializer(intake_link, context={'request': request}).data,
                 'message': '提交完成：新增 1 人，更新 0 人。' if existing_resident is None else '提交完成：新增 0 人，更新 1 人。',
                 'created': 1 if existing_resident is None else 0,
                 'updated': 0 if existing_resident is None else 1,

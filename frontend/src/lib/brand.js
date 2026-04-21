@@ -12,7 +12,7 @@ export const BRAND = {
     dashboard: '总览态势',
     list: '网络地址',
     dcim: '机房设备',
-    changes: '设备变更 / 机柜申请',
+    changes: '申请中心',
     resident: '驻场运营',
     security: '安全审计',
     backup: '备份恢复',

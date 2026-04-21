@@ -85,7 +85,7 @@ const TAB_CONFIG = {
   dashboard: { icon: LayoutDashboard, label: BRAND.navigation.dashboard },
   list: { icon: Server, label: BRAND.navigation.list },
   dcim: { icon: Box, label: BRAND.navigation.dcim },
-  changes: { icon: ArrowLeftRight, label: BRAND.navigation.changes || '设备变更 / 机柜申请' },
+  changes: { icon: ArrowLeftRight, label: BRAND.navigation.changes || '申请中心' },
   resident: { icon: Users, label: BRAND.navigation.resident },
   security: { icon: Shield, label: BRAND.navigation.security },
   backup: { icon: Database, label: BRAND.navigation.backup },
@@ -673,17 +673,17 @@ function MainApp() {
     changeRequestSnapshot.forEach((request) => {
       if (!canAccessTab('changes')) return;
       const firstItem = request.items?.[0];
-      const typeLabel = request.request_type_label || request.request_type || '设备变更';
+      const typeLabel = request.request_type_label || request.request_type || '申请';
       items.push({
         id: `change-request-${request.id}`,
         entityType: 'change-request',
-        title: request.title || request.request_code || '设备变更申请',
+        title: request.title || request.request_code || '申请单',
         subtitle: [
           request.request_code,
           request.applicant_name || request.company,
           firstItem?.device_name || typeLabel,
         ].filter(Boolean).join(' · '),
-        badge: request.status_label || request.status || '变更',
+        badge: request.status_label || request.status || '申请',
         keywords: [
           request.request_code,
           request.title,
@@ -837,10 +837,10 @@ function MainApp() {
       alerts.push({
         id: 'changes-pending-approval',
         level: 'high',
-        title: '设备变更申请待审批',
-        description: `当前有 ${changeRequestPendingApproval.length} 条设备变更申请等待审批。`,
+        title: '申请单待审批',
+        description: `当前有 ${changeRequestPendingApproval.length} 条申请等待审批。`,
         count: changeRequestPendingApproval.length,
-        actionLabel: '前往设备变更中心',
+        actionLabel: '前往申请中心',
         target: { tab: 'changes', changeRequestId: changeRequestPendingApproval[0]?.id || null },
       });
     }
@@ -852,10 +852,10 @@ function MainApp() {
       alerts.push({
         id: 'changes-pending-execution',
         level: 'medium',
-        title: '设备变更待执行回填',
-        description: `${changeRequestPendingExecution.length} 条设备变更已审批通过，等待执行与回填。`,
+        title: '申请单待处理回填',
+        description: `${changeRequestPendingExecution.length} 条申请已审批通过，等待处理与回填。`,
         count: changeRequestPendingExecution.length,
-        actionLabel: '前往执行回填',
+        actionLabel: '前往申请中心',
         target: { tab: 'changes', changeRequestId: changeRequestPendingExecution[0]?.id || null },
       });
     }
@@ -869,10 +869,10 @@ function MainApp() {
       alerts.push({
         id: 'changes-expired-links',
         level: 'info',
-        title: '设备变更链接已过期',
-        description: `${expiredDraftLinks.length} 条设备变更链接已经过期，可能需要重新生成后再发送。`,
+        title: '申请链接已过期',
+        description: `${expiredDraftLinks.length} 条申请链接已经过期，可能需要重新生成后再发送。`,
         count: expiredDraftLinks.length,
-        actionLabel: '查看设备变更链接',
+        actionLabel: '查看申请链接',
         target: { tab: 'changes', changeRequestId: expiredDraftLinks[0]?.id || null },
       });
     }
@@ -1534,7 +1534,7 @@ function MainApp() {
       return <DatacenterChangeIntakePage />;
   }
 
-  if (!isLoggedIn && isResidentIntakeMode) {
+  if (isResidentIntakeMode) {
       return <ResidentIntakePage />;
   }
 

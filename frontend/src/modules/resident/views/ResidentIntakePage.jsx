@@ -68,8 +68,15 @@ const createObjectUrlAndOpen = (blob, { download = false, filename = 'resident_b
 };
 
 export default function ResidentIntakePage() {
+  const token =
+    typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('token') || ''
+      : '';
   const [companyProfile, setCompanyProfile] = useState(EMPTY_COMPANY_PROFILE);
   const [staffMembers, setStaffMembers] = useState([{ ...EMPTY_MEMBER }]);
+  const [linkData, setLinkData] = useState(null);
+  const [loadingLink, setLoadingLink] = useState(true);
+  const [linkError, setLinkError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submittedCodes, setSubmittedCodes] = useState([]);
   const [exportingPdf, setExportingPdf] = useState(false);
@@ -77,6 +84,33 @@ export default function ResidentIntakePage() {
   useEffect(() => {
     fetchCsrfToken();
   }, []);
+
+  useEffect(() => {
+    const loadLink = async () => {
+      if (!token) {
+        setLinkError('缺少驻场登记链接令牌。');
+        setLoadingLink(false);
+        return;
+      }
+
+      setLoadingLink(true);
+      setLinkError('');
+      try {
+        const response = await safeFetch(`/api/resident-intake/?token=${encodeURIComponent(token)}`);
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload.detail || payload.message || '加载驻场登记链接失败。');
+        }
+        setLinkData(payload.link || null);
+      } catch (error) {
+        setLinkError(error.message || '加载驻场登记链接失败。');
+      } finally {
+        setLoadingLink(false);
+      }
+    };
+
+    loadLink();
+  }, [token]);
 
   const submittedSummary = useMemo(
     () => ({
@@ -186,6 +220,7 @@ export default function ResidentIntakePage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          token,
           company_profile: companyProfile,
           staff_members: normalizedMembers,
         }),
@@ -283,6 +318,25 @@ export default function ResidentIntakePage() {
     );
   }
 
+  if (loadingLink) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6 text-sm text-slate-500">
+        正在校验驻场登记链接...
+      </div>
+    );
+  }
+
+  if (linkError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
+        <div className="w-full max-w-2xl rounded-3xl border border-rose-200 bg-white p-8 shadow-xl">
+          <div className="text-2xl font-black text-slate-900">驻场登记链接不可用</div>
+          <div className="mt-3 text-sm leading-6 text-slate-500">{linkError}</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-8">
       <div className="mx-auto max-w-6xl space-y-6">
@@ -292,8 +346,11 @@ export default function ResidentIntakePage() {
             <div>
               <h1 className="text-3xl font-black tracking-tight text-slate-900">驻场人员登记</h1>
               <p className="mt-2 text-sm leading-6 text-slate-500">
-                链接地址固定不变。支持同公司多名人员一次登记，提交后即可下载或打印本次申请单。
+                这是管理员生成的临时驻场登记链接。支持同公司多名人员一次登记，提交后即可下载或打印本次申请单。
               </p>
+              <div className="mt-3 inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
+                链接有效期：{linkData?.expires_at ? new Date(linkData.expires_at).toLocaleString('zh-CN', { hour12: false }) : '未设置'}
+              </div>
             </div>
           </div>
         </div>
