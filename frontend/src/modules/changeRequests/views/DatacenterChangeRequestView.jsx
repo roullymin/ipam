@@ -156,6 +156,8 @@ const createEmptyAssistanceFields = () => ({
   related_links: '',
 });
 
+const REQUEST_FLOW_STEPS = ['填写资料', '生成表单号', '领导签批', '施工处理', '打印留档'];
+
 const formatDateTime = (value) => {
   if (!value) return '未设置';
   const parsed = new Date(value);
@@ -750,7 +752,6 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
   const assistanceDraft = isAssistanceRequest(form.request_type);
   const showItemEditor = shouldUseItems(form);
   const executionAssistance = isAssistanceRequest(executionTarget?.request_type);
-  const publicEntryLink = typeof window === 'undefined' ? '/?change-request-intake=1' : new URL('/?change-request-intake=1', window.location.origin).toString();
 
   if (loading && !requests.length) {
     return <div className="p-8 text-sm text-slate-500">正在加载申请中心...</div>;
@@ -775,16 +776,24 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
           {notice ? <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</div> : null}
         </section>
 
-        <section className="rounded-[24px] border border-slate-200 bg-white px-6 py-5 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="space-y-1">
-              <div className="text-sm font-bold text-slate-900">公开申请入口</div>
-              <div className="text-sm text-slate-500">这是固定公开表单地址，可直接复制发给申请方，无需先创建草稿或设置链接时效。</div>
-              <div className="break-all font-mono text-xs text-slate-400">{publicEntryLink}</div>
+        <section className="rounded-[24px] border border-sky-200 bg-gradient-to-r from-sky-50 via-white to-cyan-50 px-6 py-5 shadow-sm">
+          <div className="grid gap-5 lg:grid-cols-[1.35fr_1fr]">
+            <div className="space-y-2">
+              <div className="text-sm font-bold text-sky-700">独立链接说明</div>
+              <div className="text-base font-black text-slate-900">每一条申请都会生成自己的独立时效链接，后台复制出去的链接不会共用。</div>
+              <div className="text-sm leading-6 text-slate-600">A 和 B 默认看不到彼此的申请内容，只有拿到同一条精确链接的人才能打开对应页面，所以请把链接定向发给对应申请人，不要转发错人。</div>
+              <div className="rounded-2xl border border-sky-200 bg-white/80 px-4 py-3 text-sm text-slate-700">提交后系统会自动生成表单号，当前链接后续也可以继续查看并打印，申请单中已预留领导签名位置。</div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <button onClick={() => copyLink(publicEntryLink)} className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-bold text-blue-700 hover:bg-blue-100" type="button"><Copy className="h-4 w-4" />复制公开链接</button>
-              <button onClick={() => window.open(publicEntryLink, '_blank', 'noopener,noreferrer')} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50" type="button"><ExternalLink className="h-4 w-4" />打开公开入口</button>
+            <div className="rounded-3xl border border-slate-200 bg-white/90 p-4">
+              <div className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">流程预览</div>
+              <div className="mt-4 grid grid-cols-1 gap-3">
+                {REQUEST_FLOW_STEPS.map((step, index) => (
+                  <div key={step} className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-100 text-xs font-black text-sky-700">{index + 1}</div>
+                    <div className="text-sm font-semibold text-slate-700">{step}</div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </section>
@@ -896,8 +905,8 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex flex-wrap gap-2">
-                          <button onClick={() => copyLink(publicEntryLink)} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button"><Copy className="h-3.5 w-3.5" />复制</button>
-                          <button onClick={() => window.open(publicEntryLink, '_blank', 'noopener,noreferrer')} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button"><ExternalLink className="h-3.5 w-3.5" />打开</button>
+                          <button onClick={() => copyLink(request.public_link)} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button"><Copy className="h-3.5 w-3.5" />复制</button>
+                          <button onClick={() => window.open(request.public_link, '_blank', 'noopener,noreferrer')} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button"><ExternalLink className="h-3.5 w-3.5" />打开</button>
                           <button onClick={() => window.open(`/api/datacenter-change-requests/${request.id}/export_pdf/`, '_blank', 'noopener,noreferrer')} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button"><FileText className="h-3.5 w-3.5" />PDF</button>
                         </div>
                       </td>
@@ -930,6 +939,9 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
               ? '协助事项申请会生成一条临时链接，申请人只需要补充协助缘由、内容和联系人信息即可。'
               : '设备类申请会先由管理员预填位置和网络信息，再把独立链接发给对方补充资料。单机房场景下默认隐藏机房选择。'}
           </div>
+          <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
+            提交后系统会自动生成表单号，当前链接后续也可以继续查看并打印，申请单中已预留领导签名位置。每次复制出去的都是当前申请自己的独立链接。
+          </div>
           {draftError ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{draftError}</div> : null}
           {showItemEditor && !topology.length ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">当前未加载到可用的机房拓扑数据，涉及设备上架、下架或迁移的协助申请暂时无法联动机房、机柜和现有设备。请先检查机房数据，或点击页面右上角“刷新”后重试。</div> : null}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -946,9 +958,9 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
 
           {assistanceDraft ? (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <label className="text-sm text-slate-700">协助分类<select value={form.assistance_type} onChange={(e) => updateField('assistance_type', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5">{ASSISTANCE_TYPE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                表单号会在提交或生成独立链接后自动生成，申请方填写完成后也可以随时打印，打印单会保留领导签字栏。
+              <label className="text-sm text-slate-700 md:col-span-2">协助分类<select value={form.assistance_type} onChange={(e) => updateField('assistance_type', e.target.value)} className="mt-1 w-full rounded-2xl border-2 border-sky-200 bg-sky-50 px-4 py-3 text-base font-semibold text-slate-800">{ASSISTANCE_TYPE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              <div className="rounded-2xl border border-sky-200 bg-gradient-to-r from-sky-50 to-cyan-50 px-4 py-4 text-sm leading-6 text-slate-700 md:col-span-2">
+                提交后系统会自动生成表单号，当前链接后续也可以继续查看并打印，申请单中已预留领导签名位置。
               </div>
               <label className="text-sm text-slate-700">协助申请缘由<textarea value={form.reason} onChange={(e) => updateField('reason', e.target.value)} className="mt-1 h-28 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
               <label className="text-sm text-slate-700">协助申请内容<textarea value={form.request_content} onChange={(e) => updateField('request_content', e.target.value)} className="mt-1 h-28 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>

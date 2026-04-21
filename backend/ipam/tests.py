@@ -374,7 +374,7 @@ class DatacenterChangeRequestTests(BaseApiTestCase):
         self.assertEqual(response.data['status'], 'draft')
         self.assertEqual(response.data['item_count'], 1)
         self.assertTrue(response.data['public_token'])
-        self.assertTrue(response.data['public_link'].endswith('/?change-request-intake=1'))
+        self.assertIn('?change-request-intake=1&token=', response.data['public_link'])
 
         change_request = DatacenterChangeRequest.objects.get(pk=response.data['id'])
         self.assertEqual(change_request.items.count(), 1)
@@ -742,43 +742,23 @@ class DatacenterChangeRequestTests(BaseApiTestCase):
         response = self.client.get('/api/public/change-requests/')
 
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.data['entry']['is_permanent'])
-        self.assertIn('/?change-request-intake=1', response.data['entry']['public_link'])
-        self.assertEqual(response.data['request']['request_type'], 'assistance')
-        self.assertEqual(response.data['request']['assistance_type'], 'other_support')
+        self.assertFalse(response.data['entry']['is_permanent'])
+        self.assertTrue(response.data['entry']['requires_token'])
+        self.assertEqual(response.data['entry']['public_link'], '')
+        self.assertIsNone(response.data['request'])
 
-    def test_public_change_request_entry_can_create_new_request_without_token(self):
+    def test_public_change_request_entry_rejects_submission_without_token(self):
         response = self.client.post(
             '/api/public/change-requests/',
             {
-                'request_type': 'rack_in',
+                'request_type': 'assistance',
                 'title': 'Public Entry Request',
-                'applicant_name': 'Alice',
-                'applicant_phone': '13500000000',
-                'company': 'Example Co',
-                'reason': 'New rack-in request',
-                'items': [
-                    {
-                        'device_name': 'Core Switch',
-                        'device_model': 'S12700',
-                        'quantity': 1,
-                        'u_height': 2,
-                        'power_watts': 300,
-                        'network_role': 'command',
-                        'ip_quantity': 1,
-                        'ip_action': 'allocate',
-                    }
-                ],
             },
             format='json',
         )
 
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data['request']['status'], 'submitted')
-        self.assertTrue(response.data['request']['public_export_url'])
-        change_request = DatacenterChangeRequest.objects.get(applicant_name='Alice')
-        self.assertEqual(change_request.status, 'submitted')
-        self.assertEqual(change_request.items.count(), 1)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('独立链接', response.data['detail'])
 
     def test_public_change_request_can_submit_updates(self):
         change_request = DatacenterChangeRequest.objects.create(

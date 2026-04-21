@@ -110,6 +110,8 @@ const getAssistancePageTitle = (assistanceType) => {
   }
 };
 
+const REQUEST_FLOW_STEPS = ['填写资料', '生成表单号', '领导签批', '施工处理', '打印留档'];
+
 const createEmptyItem = () => ({
   device_name: '',
   device_model: '',
@@ -246,6 +248,8 @@ const ReadonlyField = ({ label, value }) => (
 export default function DatacenterChangeIntakePage() {
   const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   const token = params?.get('token') || '';
+  const hasToken = !!token;
+  const introStorageKey = hasToken ? `changeRequestIntroSeen:${token}` : '';
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -254,21 +258,31 @@ export default function DatacenterChangeIntakePage() {
   const [requestData, setRequestData] = useState(null);
   const [form, setForm] = useState(createEmptyForm());
   const [submittedRequest, setSubmittedRequest] = useState(null);
+  const [showFlowIntro, setShowFlowIntro] = useState(false);
 
-  const isPermanentEntry = !token || !!entryData?.is_permanent;
+  const isPermanentEntry = !hasToken || !!entryData?.is_permanent;
 
   useEffect(() => {
     const loadRequest = async () => {
+      if (!hasToken) {
+        setEntryData({ public_link: '', is_permanent: false, requires_token: true });
+        setRequestData(null);
+        setForm(createEmptyForm());
+        setError('');
+        setNotice('');
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       setError('');
       setNotice('');
       try {
         await fetchCsrfToken();
-        const endpoint = token ? `/api/public/change-requests/${token}/` : '/api/public/change-requests/';
+        const endpoint = `/api/public/change-requests/${token}/`;
         const response = await safeFetch(endpoint);
         if (!response.ok) throw new Error(await extractResponseMessage(response, '加载申请信息失败。'));
         const payload = await response.json().catch(() => ({}));
-        setEntryData(payload.entry || { public_link: typeof window !== 'undefined' ? new URL('/?change-request-intake=1', window.location.origin).toString() : '/?change-request-intake=1', is_permanent: !token });
+        setEntryData(payload.entry || { public_link: '', is_permanent: false, requires_token: true });
         setRequestData(payload.request || null);
         setForm(buildFormFromRequest(payload.request || createEmptyForm()));
       } catch (requestError) {
@@ -279,12 +293,31 @@ export default function DatacenterChangeIntakePage() {
     };
 
     loadRequest();
-  }, [token]);
+  }, [hasToken, token]);
+
+  useEffect(() => {
+    if (!hasToken) {
+      setShowFlowIntro(false);
+      return;
+    }
+    if (typeof window === 'undefined') {
+      setShowFlowIntro(true);
+      return;
+    }
+    setShowFlowIntro(window.localStorage.getItem(introStorageKey) !== '1');
+  }, [hasToken, introStorageKey]);
 
   const assistance = useMemo(() => isAssistanceRequest(form.request_type), [form.request_type]);
   const summaryLabel = REQUEST_TYPES[form.request_type] || form.request_type;
   const assistanceSubtypeLabel = ASSISTANCE_TYPE_LABELS[form.assistance_type] || form.assistance_type;
   const showItemEditor = shouldUseItems(form);
+
+  const handleContinueFromIntro = () => {
+    if (typeof window !== 'undefined' && introStorageKey) {
+      window.localStorage.setItem(introStorageKey, '1');
+    }
+    setShowFlowIntro(false);
+  };
 
   const setField = (key, value) => {
     setForm((prev) => {
@@ -454,6 +487,54 @@ export default function DatacenterChangeIntakePage() {
     );
   }
 
+  if (!hasToken) {
+    return (
+      <div className="change-request-print-shell min-h-screen bg-slate-50 px-4 py-8">
+        <div className="mx-auto max-w-5xl space-y-6">
+          <div className="rounded-3xl border border-sky-200 bg-gradient-to-r from-sky-50 via-white to-cyan-50 p-8 shadow-sm">
+            <div className="flex items-start gap-3">
+              <ArrowLeftRight className="mt-1 h-8 w-8 text-sky-600" />
+              <div>
+                <div className="text-3xl font-black tracking-tight text-slate-900">协助申请独立链接说明</div>
+                <div className="mt-3 text-sm leading-6 text-slate-600">当前页面只作为说明入口使用。实际填写、查看进度和打印申请单，都需要通过管理员单独发送的时效链接进入。</div>
+              </div>
+            </div>
+            <div className="mt-5 rounded-2xl border border-sky-200 bg-white/90 px-4 py-4 text-sm leading-6 text-slate-700">
+              每一条申请都会生成自己的独立链接。A 默认看不到 B 的申请内容，B 也默认看不到 A 的申请内容；但谁拿到同一条完整链接，谁就能打开对应页面，所以请不要把链接转发给无关人员。
+            </div>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-[1.1fr_1fr]">
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="text-lg font-black text-slate-900">办理流程</div>
+              <div className="mt-5 grid gap-3">
+                {REQUEST_FLOW_STEPS.map((step, index) => (
+                  <div key={step} className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-100 text-xs font-black text-sky-700">{index + 1}</div>
+                    <div className="text-sm font-semibold text-slate-700">{step}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="text-lg font-black text-slate-900">你会看到什么</div>
+              <div className="mt-4 space-y-3 text-sm leading-6 text-slate-600">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">先看到申请说明和流程提醒，再进入对应的协助表单。</div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">填写完成后系统会生成表单号，当前链接后续也可以继续查看并打印。</div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">打印页已经预留领导签名位置，申请人在任何时间都可以下载留档。</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-amber-200 bg-amber-50 px-6 py-5 text-sm leading-6 text-amber-800 shadow-sm">
+            请联系管理员获取你的专属申请链接后再填写。
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (submittedRequest && isPermanentEntry) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
@@ -504,6 +585,61 @@ export default function DatacenterChangeIntakePage() {
     ? '这是协助申请公开入口，申请方填写后即可生成表单号，并可随时打印带签字栏的申请单。'
     : '这是管理员发送的协助申请链接，申请方可在此继续完善资料、查看表单号并随时打印。';
 
+  if (hasToken && showFlowIntro) {
+    return (
+      <div className="change-request-print-shell min-h-screen bg-slate-50 px-4 py-8">
+        <div className="mx-auto max-w-5xl space-y-6">
+          <div className="rounded-3xl border border-sky-200 bg-gradient-to-r from-sky-50 via-white to-cyan-50 p-8 shadow-sm">
+            <div className="flex items-start gap-3">
+              <ArrowLeftRight className="mt-1 h-8 w-8 text-sky-600" />
+              <div>
+                <div className="text-3xl font-black tracking-tight text-slate-900">{pageTitle}</div>
+                <div className="mt-3 text-sm leading-6 text-slate-600">这是一条专属于当前申请的独立时效链接。首次打开时，系统会先带你看完整的办理流程和注意事项，确认后再进入表单填写。</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="text-lg font-black text-slate-900">功能介绍</div>
+              <div className="mt-4 space-y-3 text-sm leading-6 text-slate-600">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">提交后系统会自动生成表单号，当前链接后续也可以继续查看并打印。</div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">申请单中已预留领导签名位置，任何时间都可以下载打印留档。</div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">A 和 B 默认不会互相看到对方申请，但拿到同一条完整链接的人都能打开该页面，所以请不要把链接转发给无关人员。</div>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="text-sm font-bold uppercase tracking-[0.2em] text-slate-400">办理流程</div>
+              <div className="mt-4 grid gap-3">
+                {REQUEST_FLOW_STEPS.map((step, index) => (
+                  <div key={step} className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-100 text-xs font-black text-sky-700">{index + 1}</div>
+                    <div className="text-sm font-semibold text-slate-700">{step}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="text-sm leading-6 text-slate-600">确认流程后再进入表单。进入后你仍然可以随时返回当前链接继续查看、补充和打印申请单。</div>
+              <button
+                onClick={handleContinueFromIntro}
+                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700"
+                type="button"
+              >
+                <Send className="h-4 w-4" />
+                下一步，填写申请
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="change-request-print-shell min-h-screen bg-slate-50 px-4 py-8">
       <div className="mx-auto max-w-5xl space-y-6">
@@ -531,6 +667,29 @@ export default function DatacenterChangeIntakePage() {
           </div>
         </div>
 
+        <div className="grid gap-6 lg:grid-cols-[1.25fr_1fr]">
+          <div className="rounded-3xl border border-sky-200 bg-gradient-to-r from-sky-50 via-white to-cyan-50 p-6 shadow-sm">
+            <div className="text-sm font-bold text-sky-700">独立链接提醒</div>
+            <div className="mt-3 text-base font-black text-slate-900">这是一条专属于当前申请的独立时效链接。</div>
+            <div className="mt-3 text-sm leading-6 text-slate-600">当前链接提交后仍可继续查看和打印，对应的表单号和处理进度也会保留在这条链接下。默认情况下，A 和 B 不会互相看到对方的申请；但谁拿到同一条完整链接，谁就能打开这条申请，所以请勿转发给无关人员。</div>
+            <div className="mt-4 rounded-2xl border border-sky-200 bg-white/90 px-4 py-4 text-sm leading-6 text-slate-700">
+              提交后系统会自动生成表单号，当前链接后续也可以继续查看并打印，申请单中已预留领导签名位置。
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="text-sm font-bold uppercase tracking-[0.2em] text-slate-400">办理流程</div>
+            <div className="mt-4 grid gap-3">
+              {REQUEST_FLOW_STEPS.map((step, index) => (
+                <div key={step} className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-100 text-xs font-black text-sky-700">{index + 1}</div>
+                  <div className="text-sm font-semibold text-slate-700">{step}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-center gap-3">
             {requestData?.request_code ? (
@@ -538,17 +697,10 @@ export default function DatacenterChangeIntakePage() {
             ) : null}
             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{summaryLabel}</span>
             {assistance ? <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{assistanceSubtypeLabel}</span> : null}
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
-              {isPermanentEntry ? '固定公开入口' : `临时入口有效期：${formatDateTime(requestData?.token_expires_at)}`}
-            </span>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{`独立链接有效期：${formatDateTime(requestData?.token_expires_at)}`}</span>
           </div>
           {error ? <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
           {notice ? <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</div> : null}
-          {isPermanentEntry ? (
-            <div className="mt-4 rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-700">
-              请选择协助子类后填写资料。系统会生成表单号，填写完成后即可随时下载打印，表单内已预留领导签字位置。
-            </div>
-          ) : null}
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
@@ -592,9 +744,9 @@ export default function DatacenterChangeIntakePage() {
 
           {assistance ? (
             <section className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
-              <label className="text-sm text-slate-700">
+              <label className="text-sm text-slate-700 md:col-span-2">
                 协助分类
-                <select value={form.assistance_type} onChange={(event) => setField('assistance_type', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5">
+                <select value={form.assistance_type} onChange={(event) => setField('assistance_type', event.target.value)} className="mt-1 w-full rounded-2xl border-2 border-sky-200 bg-sky-50 px-4 py-3 text-base font-semibold text-slate-800">
                   {ASSISTANCE_TYPE_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
@@ -602,7 +754,7 @@ export default function DatacenterChangeIntakePage() {
                   ))}
                 </select>
               </label>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              <div className="rounded-2xl border border-sky-200 bg-gradient-to-r from-sky-50 to-cyan-50 px-4 py-4 text-sm leading-6 text-slate-700 md:col-span-2">
                 提交后系统会自动生成表单号，当前链接后续也可以继续查看并打印，申请单中已预留领导签名位置。
               </div>
               <label className="text-sm text-slate-700">

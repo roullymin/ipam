@@ -589,7 +589,7 @@ class DatacenterChangeRequestSerializer(serializers.ModelSerializer):
 
     def get_public_link(self, obj):
         request = self.context.get('request')
-        path = '/?change-request-intake=1'
+        path = f'/?change-request-intake=1&token={obj.public_token}'
         return request.build_absolute_uri(path) if request else path
 
     def _build_default_title(self, validated_data, items_data):

@@ -1997,30 +1997,17 @@ def api_resident_intake_export_pdf(request):
 @authentication_classes([])
 def public_change_request_entry(request):
     if request.method == 'POST':
-        serializer = DatacenterChangeRequestPublicSubmitSerializer(data=request.data, context={'request': request})
-        serializer.is_valid(raise_exception=True)
-        change_request = serializer.save()
-        return Response(
-            {
-                'status': 'success',
-                'message': '申请信息已提交。',
-                'entry': {
-                    'public_link': _get_public_change_request_entry_url(request),
-                    'is_permanent': True,
-                },
-                'request': DatacenterChangeRequestPublicSerializer(change_request, context={'request': request}).data,
-            },
-            status=status.HTTP_201_CREATED,
-        )
+        return Response({'detail': '请使用管理员发送的独立链接填写申请。'}, status=status.HTTP_400_BAD_REQUEST)
 
     return Response(
         {
             'status': 'success',
             'entry': {
-                'public_link': _get_public_change_request_entry_url(request),
-                'is_permanent': True,
+                'public_link': '',
+                'is_permanent': False,
+                'requires_token': True,
             },
-            'request': _build_public_change_request_template(),
+            'request': None,
         }
     )
 
