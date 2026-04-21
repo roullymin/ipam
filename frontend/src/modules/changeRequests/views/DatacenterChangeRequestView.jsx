@@ -183,6 +183,56 @@ const isLinkActive = (request) => request?.token_expires_at && new Date(request.
 const findRack = (topology, datacenterId, rackId) =>
   topology.find((dc) => String(dc.id) === String(datacenterId))?.racks?.find((rack) => String(rack.id) === String(rackId));
 
+const unwrapListPayload = (payload) => (Array.isArray(payload) ? payload : payload?.results || []);
+
+const buildFallbackTopology = (datacentersPayload, racksPayload, devicesPayload) => {
+  const datacenters = unwrapListPayload(datacentersPayload);
+  const racks = unwrapListPayload(racksPayload);
+  const devices = unwrapListPayload(devicesPayload);
+
+  return datacenters.map((datacenter) => {
+    const datacenterRacks = racks
+      .filter((rack) => String(rack.datacenter) === String(datacenter.id))
+      .map((rack) => {
+        const rackDevices = devices.filter((device) => String(device.rack) === String(rack.id));
+        return {
+          id: rack.id,
+          code: rack.code,
+          name: rack.name,
+          height: rack.height,
+          devices: rackDevices.map((device) => ({
+            id: device.id,
+            name: device.name,
+            position: device.position,
+            u_height: device.u_height,
+            device_type: device.device_type,
+            brand: device.brand,
+            model: device.model || '',
+            mgmt_ip: device.mgmt_ip,
+            project: device.project,
+            contact: device.contact,
+            power_usage: device.power_usage,
+            serial_number: device.sn || device.serial_number || '',
+            asset_tag: device.asset_tag || '',
+          })),
+          occupied_ranges: rackDevices.map((device) => ({
+            id: device.id,
+            name: device.name,
+            start: device.position,
+            end: Math.max(1, Number(device.position || 1) - Math.max(Number(device.u_height || 1), 1) + 1),
+          })),
+        };
+      });
+
+    return {
+      id: datacenter.id,
+      name: datacenter.name,
+      location: datacenter.location,
+      racks: datacenterRacks,
+    };
+  });
+};
+
 export default function DatacenterChangeRequestView({ initialRequestId, onConsumeInitialRequestId }) {
   const [requests, setRequests] = useState([]);
   const [topology, setTopology] = useState([]);
@@ -192,6 +242,7 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
   const [saving, setSaving] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [error, setError] = useState('');
+  const [draftError, setDraftError] = useState('');
   const [notice, setNotice] = useState('');
   const [filters, setFilters] = useState({ query: '', status: '' });
   const [form, setForm] = useState(createForm(''));
@@ -209,11 +260,34 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
         safeFetch('/api/datacenter-change-requests/topology/'),
       ]);
       if (!listRes.ok) throw new Error(await extractResponseMessage(listRes, '加载申请列表失败。'));
-      if (!topologyRes.ok) throw new Error(await extractResponseMessage(topologyRes, '加载机房拓扑失败。'));
       const listData = await listRes.json().catch(() => []);
-      const topologyData = await topologyRes.json().catch(() => ({}));
+      let topologyRows = [];
+
+      if (topologyRes.ok) {
+        const topologyData = await topologyRes.json().catch(() => ({}));
+        topologyRows = topologyData.datacenters || [];
+      }
+
+      if (!topologyRows.length) {
+        const [datacentersRes, racksRes, devicesRes] = await Promise.all([
+          safeFetch('/api/datacenters/'),
+          safeFetch('/api/racks/'),
+          safeFetch('/api/rack-devices/'),
+        ]);
+        if (datacentersRes.ok && racksRes.ok && devicesRes.ok) {
+          const [datacentersData, racksData, devicesData] = await Promise.all([
+            datacentersRes.json().catch(() => []),
+            racksRes.json().catch(() => []),
+            devicesRes.json().catch(() => []),
+          ]);
+          topologyRows = buildFallbackTopology(datacentersData, racksData, devicesData);
+        } else if (!topologyRes.ok) {
+          throw new Error(await extractResponseMessage(topologyRes, '加载机房拓扑失败。'));
+        }
+      }
+
       setRequests(Array.isArray(listData) ? listData : listData?.results || []);
-      setTopology(topologyData.datacenters || []);
+      setTopology(topologyRows);
     } catch (requestError) {
       setError(requestError.message || '加载申请列表失败。');
     } finally {
@@ -301,12 +375,17 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
     });
   }, [filters, focusedRequestId, requests]);
 
-  const updateField = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
-  const updateItem = (index, key, value) =>
+  const updateField = (key, value) => {
+    setDraftError('');
+    setForm((prev) => ({ ...prev, [key]: value }));
+  };
+  const updateItem = (index, key, value) => {
+    setDraftError('');
     setForm((prev) => ({
       ...prev,
       items: prev.items.map((item, itemIndex) => (itemIndex === index ? { ...item, [key]: value } : item)),
     }));
+  };
   const addItem = () =>
     setForm((prev) => ({
       ...prev,
@@ -388,9 +467,51 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
     notes: cleanText(item.notes),
   });
 
+  const validateDraft = () => {
+    if (!cleanText(form.applicant_name)) {
+      return assistanceDraft ? '请先填写需求联系人。' : '请先填写申请人。';
+    }
+    if (!cleanText(form.applicant_phone)) {
+      return assistanceDraft ? '请先填写联系方式。' : '请先填写联系电话。';
+    }
+    if (assistanceDraft) {
+      if (!cleanText(form.company)) return '请先填写申请单位。';
+      if (!cleanText(form.department)) return '请先填写需求处室。';
+      if (!cleanText(form.reason)) return '请先填写协助申请缘由。';
+      if (!cleanText(form.request_content)) return '请先填写协助申请内容。';
+      return '';
+    }
+
+    if (!topology.length) {
+      return '当前没有可用的机房拓扑数据，请先确认机房、机柜和设备数据是否已同步。';
+    }
+    if (!form.items.length) {
+      return '请至少填写一台设备。';
+    }
+
+    for (let index = 0; index < form.items.length; index += 1) {
+      const item = form.items[index];
+      const showSource = OUTBOUND_TYPES.has(form.request_type);
+      const showTarget = TARGET_TYPES.has(form.request_type);
+      if (showSource && !(item.source_datacenter || singleDatacenter?.id)) return `请先为设备 ${index + 1} 选择源机房。`;
+      if (showSource && !item.source_rack) return `请先为设备 ${index + 1} 选择源机柜。`;
+      if (showTarget && !(item.target_datacenter || singleDatacenter?.id)) return `请先为设备 ${index + 1} 选择目标机房。`;
+      if (showTarget && !item.target_rack) return `请先为设备 ${index + 1} 选择目标机柜。`;
+      if (!cleanText(item.device_name) && !cleanText(item.rack_device)) return `请先为设备 ${index + 1} 填写设备名称或选择现有设备。`;
+    }
+
+    return '';
+  };
+
   const submitDraft = async () => {
+    const validationMessage = validateDraft();
+    if (validationMessage) {
+      setDraftError(validationMessage);
+      return;
+    }
     setSaving(true);
     setError('');
+    setDraftError('');
     try {
       const payload = {
         ...form,
@@ -528,7 +649,7 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
             </div>
             <div className="flex flex-wrap gap-3">
               <button onClick={loadData} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50" type="button"><RefreshCw className="h-4 w-4" />刷新</button>
-              <button onClick={() => { resetForm(); setOpen(true); }} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700" type="button"><Plus className="h-4 w-4" />新建草稿</button>
+              <button onClick={() => { resetForm(); setDraftError(''); setOpen(true); }} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700" type="button"><Plus className="h-4 w-4" />新建草稿</button>
             </div>
           </div>
           {error ? <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
@@ -662,13 +783,15 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
         </section>
       </div>
 
-      <Modal isOpen={open} onClose={() => setOpen(false)} title="新建申请草稿并生成独立链接" size="xl">
+      <Modal isOpen={open} onClose={() => { setDraftError(''); setOpen(false); }} title="新建申请草稿并生成独立链接" size="xl">
         <div className="space-y-5">
           <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
             {assistanceDraft
               ? '协助事项申请会生成一条临时链接，申请人只需要补充协助缘由、内容和联系人信息即可。'
               : '设备类申请会先由管理员预填位置和网络信息，再把独立链接发给对方补充资料。单机房场景下默认隐藏机房选择。'}
           </div>
+          {draftError ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{draftError}</div> : null}
+          {!assistanceDraft && !topology.length ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">当前未加载到可用的机房拓扑数据，设备类申请无法联动机房、机柜和现有设备。请先检查机房数据，或点击页面右上角“刷新”后重试。</div> : null}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             <label className="text-sm text-slate-700">申请类型<select value={form.request_type} onChange={(e) => updateField('request_type', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5">{REQUEST_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
             <label className="text-sm text-slate-700">申请标题<input value={form.title} onChange={(e) => updateField('title', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
