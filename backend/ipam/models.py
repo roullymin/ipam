@@ -483,6 +483,30 @@ class DatacenterChangeRequest(models.Model):
         ordering = ['-created_at']
 
 
+class DatacenterChangeFirewallRule(models.Model):
+    request = models.ForeignKey(
+        DatacenterChangeRequest,
+        on_delete=models.CASCADE,
+        related_name='firewall_rules',
+        verbose_name='鎵€灞炵敵璇?',
+    )
+    destination_ip = models.CharField('鐩殑 IP 鍦板潃', max_length=120)
+    destination_port = models.CharField('鐩殑绔彛', max_length=120)
+    purpose = models.CharField('寮€閫氱敤閫?', max_length=200, blank=True)
+    sort_order = models.PositiveIntegerField('鎺掑簭', default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'{self.destination_ip}:{self.destination_port}'
+
+    class Meta:
+        verbose_name = '闃茬伀澧欒闂鍒?'
+        verbose_name_plural = '闃茬伀澧欒闂鍒?'
+        db_table = 'ops_datacenter_change_firewall_rule'
+        ordering = ['sort_order', 'id']
+
+
 class DatacenterChangeItem(models.Model):
     request = models.ForeignKey(
         DatacenterChangeRequest,

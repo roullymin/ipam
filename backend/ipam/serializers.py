@@ -6,6 +6,7 @@ from rest_framework import serializers
 
 from .models import (
     AuditLog,
+    DatacenterChangeFirewallRule,
     Blocklist,
     DatacenterChangeItem,
     DatacenterChangeRequest,
@@ -67,6 +68,25 @@ def get_change_request_value(attrs, instance, field_name, default=''):
     return default
 
 
+def normalize_firewall_rules_payload(rules):
+    normalized_rules = []
+    for index, rule in enumerate(rules or []):
+        destination_ip = str((rule or {}).get('destination_ip') or '').strip()
+        destination_port = str((rule or {}).get('destination_port') or '').strip()
+        purpose = str((rule or {}).get('purpose') or '').strip()
+        if not destination_ip and not destination_port and not purpose:
+            continue
+        normalized_rules.append(
+            {
+                'destination_ip': destination_ip,
+                'destination_port': destination_port,
+                'purpose': purpose,
+                'sort_order': index,
+            }
+        )
+    return normalized_rules
+
+
 def validate_assistance_request_payload(attrs, instance=None):
     request_type = get_change_request_value(attrs, instance, 'request_type', 'assistance')
     assistance_type = get_change_request_value(attrs, instance, 'assistance_type', 'other_support') or 'other_support'
@@ -91,6 +111,87 @@ def validate_assistance_request_payload(attrs, instance=None):
             errors['destination_ip'] = ['请填写目的 IP 地址。']
         if not str(get_change_request_value(attrs, instance, 'destination_port', '') or '').strip():
             errors['destination_port'] = ['请填写目的端口。']
+        if not get_change_request_value(attrs, instance, 'firewall_open_at', None):
+            errors['firewall_open_at'] = ['请填写端口开通时间。']
+
+    if assistance_type == 'ip_open':
+        if not str(get_change_request_value(attrs, instance, 'ip_open_details', '') or '').strip():
+            errors['ip_open_details'] = ['请填写 IP 开通说明。']
+        if not get_change_request_value(attrs, instance, 'ip_open_at', None):
+            errors['ip_open_at'] = ['请填写 IP 开通时间。']
+
+    if assistance_type == 'external_terminal_access':
+        if not str(get_change_request_value(attrs, instance, 'access_location', '') or '').strip():
+            errors['access_location'] = ['请填写接入位置。']
+        if not get_change_request_value(attrs, instance, 'access_at', None):
+            errors['access_at'] = ['请填写接入时间。']
+        if not str(get_change_request_value(attrs, instance, 'terminal_mac', '') or '').strip():
+            errors['terminal_mac'] = ['请填写终端 MAC 地址。']
+
+    if errors:
+        raise serializers.ValidationError(errors)
+
+    return attrs
+
+
+def validate_assistance_request_payload(attrs, instance=None):
+    request_type = get_change_request_value(attrs, instance, 'request_type', 'assistance')
+    assistance_type = get_change_request_value(attrs, instance, 'assistance_type', 'other_support') or 'other_support'
+    items = attrs.get('items', None)
+    errors = {}
+
+    if 'terminal_mac' in attrs:
+        attrs['terminal_mac'] = normalize_mac_address(attrs.get('terminal_mac'))
+
+    if 'firewall_rules' in attrs:
+        attrs['firewall_rules'] = normalize_firewall_rules_payload(attrs.get('firewall_rules'))
+
+    if request_type != 'assistance':
+        return attrs
+
+    if assistance_type in EQUIPMENT_ASSISTANCE_TYPES:
+        current_items = items
+        if current_items is None and instance is not None:
+            current_items = list(instance.items.all())
+        if not current_items:
+            errors['items'] = ['设备上架、下架和迁移至少要填写一台设备。']
+
+    if assistance_type == 'firewall_port_open':
+        current_rules = attrs.get('firewall_rules')
+        if current_rules is None:
+            legacy_destination_ip = str(get_change_request_value(attrs, instance, 'destination_ip', '') or '').strip()
+            legacy_destination_port = str(get_change_request_value(attrs, instance, 'destination_port', '') or '').strip()
+            legacy_purpose = str(get_change_request_value(attrs, instance, 'request_content', '') or '').strip()
+            if legacy_destination_ip or legacy_destination_port:
+                current_rules = normalize_firewall_rules_payload(
+                    [
+                        {
+                            'destination_ip': legacy_destination_ip,
+                            'destination_port': legacy_destination_port,
+                            'purpose': legacy_purpose,
+                        }
+                    ]
+                )
+                attrs['firewall_rules'] = current_rules
+        if current_rules is None and instance is not None:
+            current_rules = normalize_firewall_rules_payload(
+                instance.firewall_rules.values('destination_ip', 'destination_port', 'purpose')
+            )
+        if not current_rules:
+            errors['firewall_rules'] = ['请至少填写一条目的 IP、目的端口和开通用途。']
+        else:
+            for index, rule in enumerate(current_rules):
+                missing_fields = []
+                if not rule.get('destination_ip'):
+                    missing_fields.append('目的 IP 地址')
+                if not rule.get('destination_port'):
+                    missing_fields.append('目的端口')
+                if not rule.get('purpose'):
+                    missing_fields.append('开通用途')
+                if missing_fields:
+                    errors.setdefault('firewall_rules', []).append(
+                        f'第 {index + 1} 行请补全：{"、".join(missing_fields)}。'
+                    )
         if not get_change_request_value(attrs, instance, 'firewall_open_at', None):
             errors['firewall_open_at'] = ['请填写端口开通时间。']
 
@@ -491,8 +592,27 @@ class DatacenterChangeItemSerializer(serializers.ModelSerializer):
         }
 
 
+class DatacenterChangeFirewallRuleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DatacenterChangeFirewallRule
+        fields = [
+            'id',
+            'destination_ip',
+            'destination_port',
+            'purpose',
+            'sort_order',
+        ]
+        read_only_fields = ['id', 'sort_order']
+        extra_kwargs = {
+            'destination_ip': {'required': False, 'allow_blank': True},
+            'destination_port': {'required': False, 'allow_blank': True},
+            'purpose': {'required': False, 'allow_blank': True},
+        }
+
+
 class DatacenterChangeRequestSerializer(serializers.ModelSerializer):
     items = DatacenterChangeItemSerializer(many=True, required=False)
+    firewall_rules = DatacenterChangeFirewallRuleSerializer(many=True, required=False)
     item_count = serializers.SerializerMethodField()
     public_link = serializers.SerializerMethodField()
 
@@ -517,6 +637,7 @@ class DatacenterChangeRequestSerializer(serializers.ModelSerializer):
             'destination_ip',
             'destination_port',
             'firewall_open_at',
+            'firewall_rules',
             'ip_open_details',
             'ip_open_at',
             'access_location',
@@ -604,6 +725,7 @@ class DatacenterChangeRequestSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])
+        firewall_rules_data = validated_data.pop('firewall_rules', [])
         request = self.context.get('request')
         if request and request.user and request.user.is_authenticated:
             validated_data.setdefault('created_by', request.user)
@@ -615,10 +737,13 @@ class DatacenterChangeRequestSerializer(serializers.ModelSerializer):
         change_request = DatacenterChangeRequest.objects.create(**validated_data)
         for item_data in items_data:
             DatacenterChangeItem.objects.create(request=change_request, **item_data)
+        for rule_data in firewall_rules_data:
+            DatacenterChangeFirewallRule.objects.create(request=change_request, **rule_data)
         return change_request
 
     def update(self, instance, validated_data):
         items_data = validated_data.pop('items', None)
+        firewall_rules_data = validated_data.pop('firewall_rules', None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         if not instance.title:
@@ -633,12 +758,17 @@ class DatacenterChangeRequestSerializer(serializers.ModelSerializer):
             instance.items.all().delete()
             for item_data in items_data:
                 DatacenterChangeItem.objects.create(request=instance, **item_data)
+        if firewall_rules_data is not None:
+            instance.firewall_rules.all().delete()
+            for rule_data in firewall_rules_data:
+                DatacenterChangeFirewallRule.objects.create(request=instance, **rule_data)
 
         return instance
 
 
 class DatacenterChangeRequestPublicSerializer(serializers.ModelSerializer):
     items = DatacenterChangeItemSerializer(many=True, read_only=True)
+    firewall_rules = DatacenterChangeFirewallRuleSerializer(many=True, read_only=True)
     public_export_url = serializers.SerializerMethodField()
 
     class Meta:
@@ -661,6 +791,7 @@ class DatacenterChangeRequestPublicSerializer(serializers.ModelSerializer):
             'destination_ip',
             'destination_port',
             'firewall_open_at',
+            'firewall_rules',
             'ip_open_details',
             'ip_open_at',
             'access_location',
@@ -684,6 +815,7 @@ class DatacenterChangeRequestPublicSerializer(serializers.ModelSerializer):
 
 class DatacenterChangeRequestPublicSubmitSerializer(serializers.ModelSerializer):
     items = DatacenterChangeItemSerializer(many=True, required=False)
+    firewall_rules = DatacenterChangeFirewallRuleSerializer(many=True, required=False)
 
     class Meta:
         model = DatacenterChangeRequest
@@ -702,6 +834,7 @@ class DatacenterChangeRequestPublicSubmitSerializer(serializers.ModelSerializer)
             'destination_ip',
             'destination_port',
             'firewall_open_at',
+            'firewall_rules',
             'ip_open_details',
             'ip_open_at',
             'access_location',
@@ -740,6 +873,7 @@ class DatacenterChangeRequestPublicSubmitSerializer(serializers.ModelSerializer)
 
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])
+        firewall_rules_data = validated_data.pop('firewall_rules', [])
         validated_data.setdefault('request_type', 'assistance')
         validated_data['status'] = 'submitted'
         validated_data['title'] = build_change_request_title(
@@ -750,10 +884,13 @@ class DatacenterChangeRequestPublicSubmitSerializer(serializers.ModelSerializer)
         change_request = DatacenterChangeRequest.objects.create(**validated_data)
         for item_data in items_data:
             DatacenterChangeItem.objects.create(request=change_request, **item_data)
+        for rule_data in firewall_rules_data:
+            DatacenterChangeFirewallRule.objects.create(request=change_request, **rule_data)
         return change_request
 
     def update(self, instance, validated_data):
         items_data = validated_data.pop('items', None)
+        firewall_rules_data = validated_data.pop('firewall_rules', None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         if instance.status == 'draft':
@@ -770,6 +907,10 @@ class DatacenterChangeRequestPublicSubmitSerializer(serializers.ModelSerializer)
             instance.items.all().delete()
             for item_data in items_data:
                 DatacenterChangeItem.objects.create(request=instance, **item_data)
+        if firewall_rules_data is not None:
+            instance.firewall_rules.all().delete()
+            for rule_data in firewall_rules_data:
+                DatacenterChangeFirewallRule.objects.create(request=instance, **rule_data)
 
         return instance
 

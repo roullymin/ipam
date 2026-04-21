@@ -36,6 +36,7 @@ from rest_framework.response import Response
 from .models import (
     AuditLog,
     Blocklist,
+    DatacenterChangeFirewallRule,
     DatacenterChangeRequest,
     Datacenter,
     DatacenterChangeItem,
@@ -470,6 +471,14 @@ def _build_public_change_request_template():
         'destination_ip': '',
         'destination_port': '',
         'firewall_open_at': '',
+        'firewall_rules': [
+            {
+                'destination_ip': '',
+                'destination_port': '',
+                'purpose': '',
+                'sort_order': 0,
+            }
+        ],
         'ip_open_details': '',
         'ip_open_at': '',
         'access_location': '',
@@ -485,6 +494,7 @@ def _build_public_change_request_template():
         'items': [
             {
                 'device_name': '',
+                'rack_device': None,
                 'device_model': '',
                 'serial_number': '',
                 'quantity': 1,
@@ -983,25 +993,21 @@ def _build_change_request_pdf(response_buffer, change_request):
 
     if change_request.request_type == 'assistance':
         info_rows = [
-            ['申请类型', type_label, '协助分类', assistance_label or '未填写'],
-            ['申请标题', change_request.title or '未填写', '当前状态', status_label],
-            ['需求联系人', change_request.applicant_name or '未填写', '联系方式', change_request.applicant_phone or '未填写'],
-            ['联系邮箱', change_request.applicant_email or '未填写', '申请单位', change_request.company or '未填写'],
-            ['需求处室', change_request.department or '未填写', '项目名称', change_request.project_name or '未填写'],
-            ['期望协助时间', _format_change_datetime(change_request.planned_execute_at), '审批编号', change_request.approval_code or '未填写'],
-            ['链接状态', _format_change_link_status(change_request), '创建人', get_actor_name(change_request.created_by)],
-            ['处理完成时间', _format_change_datetime(change_request.executed_at), '打印说明', '填写后即可打印并留存签字'],
+            ['需求处室', change_request.department or '未填写', '需求联系人', change_request.applicant_name or '未填写'],
+            ['联系方式', change_request.applicant_phone or '未填写', '联系邮箱', change_request.applicant_email or '未填写'],
+            ['申请单位', change_request.company or '未填写', '协助分类', assistance_label or '未填写'],
+            ['项目名称', change_request.project_name or '未填写', '期望协助时间', _format_change_datetime(change_request.planned_execute_at)],
+            ['申请标题', change_request.title or '未填写', '审批编号', change_request.approval_code or '未填写'],
+            ['申请类型', type_label, '当前状态', status_label],
         ]
     else:
         info_rows = [
-            ['申请类型', type_label, '当前状态', status_label],
+            ['所属部门', change_request.department or '未填写', '申请人', change_request.applicant_name or '未填写'],
+            ['联系电话', change_request.applicant_phone or '未填写', '联系邮箱', change_request.applicant_email or '未填写'],
+            ['所属单位', change_request.company or '未填写', '所属项目', change_request.project_name or '未填写'],
             ['申请标题', change_request.title or '未填写', '审批编号', change_request.approval_code or '未填写'],
-            ['申请人', change_request.applicant_name or '未填写', '联系电话', change_request.applicant_phone or '未填写'],
-            ['联系邮箱', change_request.applicant_email or '未填写', '所属单位', change_request.company or '未填写'],
-            ['所属部门', change_request.department or '未填写', '所属项目', change_request.project_name or '未填写'],
-            ['计划执行时间', _format_change_datetime(change_request.planned_execute_at), '链接状态', _format_change_link_status(change_request)],
-            ['是否需要下电', '是' if change_request.requires_power_down else '否', '执行状态', status_label],
-            ['处理执行时间', _format_change_datetime(change_request.executed_at), '创建人', get_actor_name(change_request.created_by)],
+            ['申请类型', type_label, '计划执行时间', _format_change_datetime(change_request.planned_execute_at)],
+            ['是否需要下电', '是' if change_request.requires_power_down else '否', '当前状态', status_label],
         ]
 
     elements.append(Paragraph('一、申请信息', heading_style))
@@ -1029,42 +1035,93 @@ def _build_change_request_pdf(response_buffer, change_request):
 
     detail_heading = '二、协助内容' if change_request.request_type == 'assistance' else '二、变更说明'
     elements.append(Paragraph(detail_heading, heading_style))
-    elements.append(Paragraph(f'申请原因：{change_request.reason or "未填写"}', body_style))
-    elements.append(Spacer(1, 2 * mm))
+    detail_rows = [['申请原因', change_request.reason or '未填写']]
     if change_request.request_type == 'assistance':
-        elements.append(Paragraph(f'协助内容：{change_request.request_content or "未填写"}', body_style))
+        detail_rows.append(['协助内容', change_request.request_content or '未填写'])
         if change_request.assistance_type == 'firewall_port_open':
-            elements.append(Spacer(1, 2 * mm))
-            elements.append(Paragraph(f'目的 IP 地址：{change_request.destination_ip or "未填写"}', body_style))
-            elements.append(Spacer(1, 2 * mm))
-            elements.append(Paragraph(f'目的端口：{change_request.destination_port or "未填写"}', body_style))
-            elements.append(Spacer(1, 2 * mm))
-            elements.append(Paragraph(f'端口开通时间：{_format_change_datetime(change_request.firewall_open_at)}', body_style))
-            elements.append(Spacer(1, 2 * mm))
-            elements.append(Paragraph(f'相关链接：{change_request.related_links or "未填写"}', body_style))
+            firewall_rules = list(change_request.firewall_rules.all())
+            if not firewall_rules and (change_request.destination_ip or change_request.destination_port):
+                firewall_rules = [
+                    DatacenterChangeFirewallRule(
+                        destination_ip=change_request.destination_ip or '',
+                        destination_port=change_request.destination_port or '',
+                        purpose='',
+                    )
+                ]
+            detail_rows.append(['端口开通时间', _format_change_datetime(change_request.firewall_open_at)])
+            if change_request.related_links:
+                detail_rows.append(['相关链接', change_request.related_links or '未填写'])
         elif change_request.assistance_type == 'ip_open':
-            elements.append(Spacer(1, 2 * mm))
-            elements.append(Paragraph(f'IP 开通说明：{change_request.ip_open_details or "未填写"}', body_style))
-            elements.append(Spacer(1, 2 * mm))
-            elements.append(Paragraph(f'IP 开通时间：{_format_change_datetime(change_request.ip_open_at)}', body_style))
-            elements.append(Spacer(1, 2 * mm))
-            elements.append(Paragraph(f'相关链接：{change_request.related_links or "未填写"}', body_style))
+            detail_rows.append(['IP 开通说明', change_request.ip_open_details or '未填写'])
+            detail_rows.append(['IP 开通时间', _format_change_datetime(change_request.ip_open_at)])
+            if change_request.related_links:
+                detail_rows.append(['相关链接', change_request.related_links or '未填写'])
         elif change_request.assistance_type == 'external_terminal_access':
-            elements.append(Spacer(1, 2 * mm))
-            elements.append(Paragraph(f'接入位置：{change_request.access_location or "未填写"}', body_style))
-            elements.append(Spacer(1, 2 * mm))
-            elements.append(Paragraph(f'接入时间：{_format_change_datetime(change_request.access_at)}', body_style))
-            elements.append(Spacer(1, 2 * mm))
-            elements.append(Paragraph(f'是否已杀毒：{"是" if change_request.antivirus_installed else "否"}', body_style))
-            elements.append(Spacer(1, 2 * mm))
-            elements.append(Paragraph(f'终端 MAC 地址：{change_request.terminal_mac or "未填写"}', body_style))
-            elements.append(Spacer(1, 2 * mm))
-            elements.append(Paragraph(f'相关链接：{change_request.related_links or "未填写"}', body_style))
+            detail_rows.append(['接入位置', change_request.access_location or '未填写'])
+            detail_rows.append(['接入时间', _format_change_datetime(change_request.access_at)])
+            detail_rows.append(['是否已杀毒', '是' if change_request.antivirus_installed else '否'])
+            detail_rows.append(['终端 MAC 地址', change_request.terminal_mac or '未填写'])
+            if change_request.related_links:
+                detail_rows.append(['相关链接', change_request.related_links or '未填写'])
         elif change_request.related_links:
-            elements.append(Spacer(1, 2 * mm))
-            elements.append(Paragraph(f'相关链接：{change_request.related_links}', body_style))
+            detail_rows.append(['相关链接', change_request.related_links or '未填写'])
     else:
-        elements.append(Paragraph(f'影响范围：{change_request.impact_scope or "未填写"}', body_style))
+        detail_rows.append(['影响范围', change_request.impact_scope or '未填写'])
+
+    detail_table = Table(detail_rows, colWidths=[28 * mm, 136 * mm])
+    detail_table.setStyle(
+        TableStyle(
+            [
+                ('FONTNAME', (0, 0), (-1, -1), base_font),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('LEADING', (0, 0), (-1, -1), 14),
+                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#eff6ff')),
+                ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#334155')),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    elements.append(detail_table)
+    if change_request.request_type == 'assistance' and change_request.assistance_type == 'firewall_port_open':
+        elements.append(Spacer(1, 2 * mm))
+        elements.append(Paragraph('访问规则', body_style))
+        elements.append(Spacer(1, 2 * mm))
+        rule_rows = [['序号', '目的 IP 地址', '目的端口', '开通用途']]
+        if firewall_rules:
+            for index, rule in enumerate(firewall_rules, start=1):
+                rule_rows.append(
+                    [
+                        str(index),
+                        rule.destination_ip or '未填写',
+                        rule.destination_port or '未填写',
+                        rule.purpose or '未填写',
+                    ]
+                )
+        else:
+            rule_rows.append(['1', '未填写', '未填写', '未填写'])
+        firewall_table = Table(rule_rows, colWidths=[14 * mm, 44 * mm, 38 * mm, 74 * mm], repeatRows=1)
+        firewall_table.setStyle(
+            TableStyle(
+                [
+                    ('FONTNAME', (0, 0), (-1, -1), base_font),
+                    ('FONTSIZE', (0, 0), (-1, -1), 9),
+                    ('LEADING', (0, 0), (-1, -1), 13),
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e2e8f0')),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 5),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+                    ('TOPPADDING', (0, 0), (-1, -1), 5),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ]
+            )
+        )
+        elements.append(firewall_table)
     elements.append(Spacer(1, 5 * mm))
 
     show_item_table = change_request.request_type != 'assistance' or _is_equipment_assistance(change_request)
@@ -1181,14 +1238,13 @@ def _build_change_request_pdf(response_buffer, change_request):
         signature_rows = [
             ['申请单位（盖章）', change_request.company or '____________________'],
             ['业务处室签名', '签字：____________________    日期：____________________'],
-            ['科信处领导签名', f'签字：{change_request.reviewer_name or "____________________"}    日期：{_format_change_datetime(change_request.reviewed_at) if change_request.reviewed_at else "____________________"}'],
-            ['协助处理人', f'{change_request.executor_name or "____________________"}    日期：{_format_change_datetime(change_request.executed_at) if change_request.executed_at else "____________________"}'],
+            ['科信处领导签名', '签字：____________________    日期：____________________'],
         ]
     else:
         signature_rows = [
             ['申请部门签字', '签字：____________________    日期：____________________'],
-            ['审批领导签字', f'签字：{change_request.reviewer_name or "____________________"}    日期：{_format_change_datetime(change_request.reviewed_at) if change_request.reviewed_at else "____________________"}'],
-            ['执行确认签字', f'签字：{change_request.executor_name or "____________________"}    日期：{_format_change_datetime(change_request.executed_at) if change_request.executed_at else "____________________"}'],
+            ['审批领导签字', '签字：____________________    日期：____________________'],
+            ['执行确认签字', '签字：____________________    日期：____________________'],
         ]
     signature_table = Table(signature_rows, colWidths=[38 * mm, 126 * mm])
     signature_table.setStyle(
@@ -2023,6 +2079,7 @@ def public_change_request_detail(request, token):
             'items__source_rack',
             'items__target_datacenter',
             'items__target_rack',
+            'firewall_rules',
         )
         .filter(public_token=token)
         .first()
@@ -2038,16 +2095,23 @@ def public_change_request_detail(request, token):
         serializer = DatacenterChangeRequestPublicSubmitSerializer(change_request, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
+        topology = build_change_request_topology_rows(
+            Datacenter.objects.prefetch_related('racks__devices').all()
+        )
         return Response(
             {
                 'status': 'success',
                 'message': '申请信息已提交。',
+                'topology': topology,
                 'request': DatacenterChangeRequestPublicSerializer(change_request, context={'request': request}).data,
             }
         )
 
     serializer = DatacenterChangeRequestPublicSerializer(change_request, context={'request': request})
-    return Response({'status': 'success', 'request': serializer.data})
+    topology = build_change_request_topology_rows(
+        Datacenter.objects.prefetch_related('racks__devices').all()
+    )
+    return Response({'status': 'success', 'request': serializer.data, 'topology': topology})
 
 
 @api_view(['GET'])
@@ -2059,6 +2123,7 @@ def public_change_request_export_pdf(request, token):
             'items',
             'items__source_rack',
             'items__target_rack',
+            'firewall_rules',
         )
         .filter(public_token=token)
         .first()
@@ -2153,6 +2218,7 @@ class DatacenterChangeRequestViewSet(OptionalPaginationMixin, BaseViewSet):
             'items__source_rack',
             'items__target_datacenter',
             'items__target_rack',
+            'firewall_rules',
         )
         .all()
     )

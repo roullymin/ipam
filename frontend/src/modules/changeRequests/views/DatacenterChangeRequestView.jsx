@@ -143,10 +143,17 @@ const assistanceNeedsItems = (formLike) =>
   isAssistanceRequest(formLike?.request_type) && EQUIPMENT_ASSISTANCE_TYPES.has(formLike?.assistance_type);
 const shouldUseItems = (formLike) => !isAssistanceRequest(formLike?.request_type) || assistanceNeedsItems(formLike);
 
+const createEmptyFirewallRule = () => ({
+  destination_ip: '',
+  destination_port: '',
+  purpose: '',
+});
+
 const createEmptyAssistanceFields = () => ({
   destination_ip: '',
   destination_port: '',
   firewall_open_at: '',
+  firewall_rules: [createEmptyFirewallRule()],
   ip_open_details: '',
   ip_open_at: '',
   access_location: '',
@@ -442,6 +449,9 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
           next.destination_ip = '';
           next.destination_port = '';
           next.firewall_open_at = '';
+          next.firewall_rules = [createEmptyFirewallRule()];
+        } else if (!prev.firewall_rules?.length) {
+          next.firewall_rules = [createEmptyFirewallRule()];
         }
         if (value !== 'ip_open') {
           next.ip_open_details = '';
@@ -464,6 +474,28 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
       items: prev.items.map((item, itemIndex) => (itemIndex === index ? { ...item, [key]: value } : item)),
     }));
   };
+  const updateFirewallRule = (index, key, value) => {
+    setDraftError('');
+    setForm((prev) => ({
+      ...prev,
+      firewall_rules: (prev.firewall_rules?.length ? prev.firewall_rules : [createEmptyFirewallRule()]).map((rule, ruleIndex) =>
+        ruleIndex === index ? { ...rule, [key]: value } : rule
+      ),
+    }));
+  };
+  const addFirewallRule = () =>
+    setForm((prev) => ({
+      ...prev,
+      firewall_rules: [...(prev.firewall_rules?.length ? prev.firewall_rules : [createEmptyFirewallRule()]), createEmptyFirewallRule()],
+    }));
+  const removeFirewallRule = (index) =>
+    setForm((prev) => {
+      const currentRules = prev.firewall_rules?.length ? prev.firewall_rules : [createEmptyFirewallRule()];
+      return {
+        ...prev,
+        firewall_rules: currentRules.length === 1 ? [createEmptyFirewallRule()] : currentRules.filter((_, ruleIndex) => ruleIndex !== index),
+      };
+    });
   const addItem = () =>
     setForm((prev) => ({
       ...prev,
@@ -529,6 +561,15 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
     target_u_start: normalizeNumeric(item.target_u_start),
     target_u_end: normalizeNumeric(item.target_u_end),
   });
+
+  const normalizeFirewallRules = (rules) =>
+    (rules || [])
+      .map((rule) => ({
+        destination_ip: cleanText(rule.destination_ip),
+        destination_port: cleanText(rule.destination_port),
+        purpose: cleanText(rule.purpose),
+      }))
+      .filter((rule) => rule.destination_ip || rule.destination_port || rule.purpose);
 
   const normalizeExecutionItem = (item) => ({
     id: item.id,
@@ -603,6 +644,7 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
         destination_ip: assistanceDraft ? cleanText(form.destination_ip) : '',
         destination_port: assistanceDraft ? cleanText(form.destination_port) : '',
         firewall_open_at: assistanceDraft && form.firewall_open_at ? form.firewall_open_at : null,
+        firewall_rules: assistanceDraft && isFirewallPortAssistance(form) ? normalizeFirewallRules(form.firewall_rules) : [],
         ip_open_details: assistanceDraft ? cleanText(form.ip_open_details) : '',
         ip_open_at: assistanceDraft && form.ip_open_at ? form.ip_open_at : null,
         access_location: assistanceDraft ? cleanText(form.access_location) : '',
@@ -836,6 +878,10 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
                 {displayRequests.map((request) => {
                   const item = request.items?.[0];
                   const assistanceType = isAssistanceRequest(request.request_type);
+                  const firewallRule = request.firewall_rules?.[0];
+                  const firewallSummary = firewallRule
+                    ? `${firewallRule.destination_ip || '未填写 IP'} / ${firewallRule.destination_port || '未填写端口'}${request.firewall_rules?.length > 1 ? ` 等 ${request.firewall_rules.length} 条` : ''}`
+                    : `${request.destination_ip || '未填写 IP'} / ${request.destination_port || '未填写端口'}`;
                   const isFocused = focusedRequestId && String(request.id) === String(focusedRequestId);
                   return (
                     <tr
