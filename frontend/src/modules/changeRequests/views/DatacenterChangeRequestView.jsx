@@ -546,48 +546,15 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
   });
 
   const validateDraft = () => {
+    if (assistanceDraft) {
+      return '';
+    }
+
     if (!cleanText(form.applicant_name)) {
-      return assistanceDraft ? '请先填写需求联系人。' : '请先填写申请人。';
+      return '请先填写申请人。';
     }
     if (!cleanText(form.applicant_phone)) {
-      return assistanceDraft ? '请先填写联系方式。' : '请先填写联系电话。';
-    }
-    if (assistanceDraft) {
-      if (!cleanText(form.company)) return '请先填写申请单位。';
-      if (!cleanText(form.department)) return '请先填写需求处室。';
-      if (!cleanText(form.reason)) return '请先填写协助申请缘由。';
-      if (!cleanText(form.request_content)) return '请先填写协助申请内容。';
-      if (assistanceNeedsItems(form)) {
-        if (!topology.length) return '当前没有可用的机房拓扑数据，请先确认机房、机柜和设备数据是否已同步。';
-        if (!form.items.length) return '请至少填写一台设备。';
-      }
-      if (isFirewallPortAssistance(form)) {
-        if (!cleanText(form.destination_ip)) return '请先填写目的 IP 地址。';
-        if (!cleanText(form.destination_port)) return '请先填写目的端口。';
-        if (!form.firewall_open_at) return '请先填写端口开通时间。';
-      }
-      if (isIpOpenAssistance(form)) {
-        if (!cleanText(form.ip_open_details)) return '请先填写 IP 开通说明。';
-        if (!form.ip_open_at) return '请先填写 IP 开通时间。';
-      }
-      if (isExternalTerminalAssistance(form)) {
-        if (!cleanText(form.access_location)) return '请先填写接入位置。';
-        if (!form.access_at) return '请先填写接入时间。';
-        if (!cleanText(form.terminal_mac)) return '请先填写终端 MAC 地址。';
-      }
-      if (assistanceNeedsItems(form)) {
-        for (let index = 0; index < form.items.length; index += 1) {
-          const item = form.items[index];
-          const showSource = form.assistance_type === 'rack_out';
-          const showTarget = form.assistance_type !== 'rack_out';
-          if (showSource && !(item.source_datacenter || singleDatacenter?.id)) return `请先为设备 ${index + 1} 选择源机房。`;
-          if (showSource && !item.source_rack) return `请先为设备 ${index + 1} 选择源机柜。`;
-          if (showTarget && !(item.target_datacenter || singleDatacenter?.id)) return `请先为设备 ${index + 1} 选择目标机房。`;
-          if (showTarget && !item.target_rack) return `请先为设备 ${index + 1} 选择目标机柜。`;
-          if (!cleanText(item.device_name) && !cleanText(item.rack_device)) return `请先为设备 ${index + 1} 填写设备名称或选择现有设备。`;
-        }
-      }
-      return '';
+      return '请先填写联系电话。';
     }
 
     if (!topology.length) {
@@ -936,7 +903,7 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
         <div className="space-y-5">
           <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
             {assistanceDraft
-              ? '协助事项申请会生成一条临时链接，申请人只需要补充协助缘由、内容和联系人信息即可。'
+              ? '协助事项申请支持空表直接生成独立链接，你可以先发给联系人，对方再补充联系人、缘由、内容和其他资料。'
               : '设备类申请会先由管理员预填位置和网络信息，再把独立链接发给对方补充资料。单机房场景下默认隐藏机房选择。'}
           </div>
           <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
