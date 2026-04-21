@@ -16,18 +16,29 @@ import ListToolbar from '../../../components/common/ListToolbar';
 import { Modal } from '../../../components/common/UI';
 import { safeFetch } from '../../../lib/api';
 
-const REQUEST_TYPES = [
-  ['rack_in', '设备上架'],
-  ['rack_out', '设备下架'],
-  ['move_in', '设备搬入'],
-  ['move_out', '设备搬出'],
-  ['relocate', '位置迁移'],
-  ['decommission', '设备退役'],
-  ['power_change', '电力变更'],
-  ['assistance', '协助事项申请'],
+const REQUEST_TYPE_OPTIONS = [
+  ['assistance', '协助申请'],
 ];
 
-const REQUEST_TYPE_LABELS = Object.fromEntries(REQUEST_TYPES);
+const REQUEST_TYPE_LABELS = {
+  ...Object.fromEntries(REQUEST_TYPE_OPTIONS),
+  power_change: '电力变更',
+};
+
+const ASSISTANCE_TYPE_OPTIONS = [
+  ['rack_in', '设备上架'],
+  ['rack_out', '设备下架'],
+  ['relocate', '设备迁移'],
+  ['firewall_port_open', '防火墙访问开通'],
+  ['ip_open', 'IP 开通'],
+  ['external_terminal_access', '外来终端接入厅内网络'],
+  ['other_support', '其他协助'],
+];
+
+const ASSISTANCE_TYPE_LABELS = {
+  general_support: '综合协助',
+  ...Object.fromEntries(ASSISTANCE_TYPE_OPTIONS),
+};
 
 const NETWORK_ROLES = [
   ['none', '无需网络'],
@@ -82,7 +93,7 @@ const createItem = (datacenterId = '') => ({
 });
 
 const createForm = (datacenterId = '') => ({
-  request_type: 'rack_in',
+  request_type: 'assistance',
   title: '',
   applicant_name: '',
   applicant_phone: '',
@@ -90,12 +101,14 @@ const createForm = (datacenterId = '') => ({
   company: '',
   department: '',
   project_name: '',
+  assistance_type: 'other_support',
   reason: '',
   request_content: '',
+  ...createEmptyAssistanceFields(),
   impact_scope: '',
   requires_power_down: false,
   planned_execute_at: '',
-  items: [createItem(datacenterId)],
+  items: [],
 });
 
 const createExecutionForm = (request) => ({
@@ -119,6 +132,29 @@ const createExecutionForm = (request) => ({
 
 const cleanText = (value) => String(value ?? '').trim();
 const isAssistanceRequest = (requestType) => requestType === 'assistance';
+const EQUIPMENT_ASSISTANCE_TYPES = new Set(['rack_in', 'rack_out', 'relocate']);
+const isFirewallPortAssistance = (formLike) =>
+  isAssistanceRequest(formLike?.request_type) && formLike?.assistance_type === 'firewall_port_open';
+const isIpOpenAssistance = (formLike) =>
+  isAssistanceRequest(formLike?.request_type) && formLike?.assistance_type === 'ip_open';
+const isExternalTerminalAssistance = (formLike) =>
+  isAssistanceRequest(formLike?.request_type) && formLike?.assistance_type === 'external_terminal_access';
+const assistanceNeedsItems = (formLike) =>
+  isAssistanceRequest(formLike?.request_type) && EQUIPMENT_ASSISTANCE_TYPES.has(formLike?.assistance_type);
+const shouldUseItems = (formLike) => !isAssistanceRequest(formLike?.request_type) || assistanceNeedsItems(formLike);
+
+const createEmptyAssistanceFields = () => ({
+  destination_ip: '',
+  destination_port: '',
+  firewall_open_at: '',
+  ip_open_details: '',
+  ip_open_at: '',
+  access_location: '',
+  access_at: '',
+  antivirus_installed: false,
+  terminal_mac: '',
+  related_links: '',
+});
 
 const formatDateTime = (value) => {
   if (!value) return '未设置';
@@ -345,8 +381,15 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
         request.company,
         request.department,
         request.project_name,
+        ASSISTANCE_TYPE_LABELS[request.assistance_type],
         request.reason,
         request.request_content,
+        request.destination_ip,
+        request.destination_port,
+        request.ip_open_details,
+        request.access_location,
+        request.terminal_mac,
+        request.related_links,
         STATUS_LABELS[request.status],
         REQUEST_TYPE_LABELS[request.request_type],
         firstItem?.device_name,
@@ -373,7 +416,44 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
 
   const updateField = (key, value) => {
     setDraftError('');
-    setForm((prev) => ({ ...prev, [key]: value }));
+    setForm((prev) => {
+      const next = { ...prev, [key]: value };
+      if (key === 'request_type') {
+        const nextAssistanceType = value === 'assistance' ? prev.assistance_type || 'other_support' : prev.assistance_type;
+        next.assistance_type = nextAssistanceType;
+        next.items = shouldUseItems({ request_type: value, assistance_type: nextAssistanceType })
+          ? prev.items?.length
+            ? prev.items
+            : [createItem(singleDatacenter ? String(singleDatacenter.id) : '')]
+          : [];
+        if (value !== 'assistance') {
+          Object.assign(next, createEmptyAssistanceFields());
+        }
+      }
+      if (key === 'assistance_type') {
+        next.items = shouldUseItems({ request_type: next.request_type, assistance_type: value })
+          ? prev.items?.length
+            ? prev.items
+            : [createItem(singleDatacenter ? String(singleDatacenter.id) : '')]
+          : [];
+        if (value !== 'firewall_port_open') {
+          next.destination_ip = '';
+          next.destination_port = '';
+          next.firewall_open_at = '';
+        }
+        if (value !== 'ip_open') {
+          next.ip_open_details = '';
+          next.ip_open_at = '';
+        }
+        if (value !== 'external_terminal_access') {
+          next.access_location = '';
+          next.access_at = '';
+          next.antivirus_installed = false;
+          next.terminal_mac = '';
+        }
+      }
+      return next;
+    });
   };
   const updateItem = (index, key, value) => {
     setDraftError('');
@@ -475,6 +555,36 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
       if (!cleanText(form.department)) return '请先填写需求处室。';
       if (!cleanText(form.reason)) return '请先填写协助申请缘由。';
       if (!cleanText(form.request_content)) return '请先填写协助申请内容。';
+      if (assistanceNeedsItems(form)) {
+        if (!topology.length) return '当前没有可用的机房拓扑数据，请先确认机房、机柜和设备数据是否已同步。';
+        if (!form.items.length) return '请至少填写一台设备。';
+      }
+      if (isFirewallPortAssistance(form)) {
+        if (!cleanText(form.destination_ip)) return '请先填写目的 IP 地址。';
+        if (!cleanText(form.destination_port)) return '请先填写目的端口。';
+        if (!form.firewall_open_at) return '请先填写端口开通时间。';
+      }
+      if (isIpOpenAssistance(form)) {
+        if (!cleanText(form.ip_open_details)) return '请先填写 IP 开通说明。';
+        if (!form.ip_open_at) return '请先填写 IP 开通时间。';
+      }
+      if (isExternalTerminalAssistance(form)) {
+        if (!cleanText(form.access_location)) return '请先填写接入位置。';
+        if (!form.access_at) return '请先填写接入时间。';
+        if (!cleanText(form.terminal_mac)) return '请先填写终端 MAC 地址。';
+      }
+      if (assistanceNeedsItems(form)) {
+        for (let index = 0; index < form.items.length; index += 1) {
+          const item = form.items[index];
+          const showSource = form.assistance_type === 'rack_out';
+          const showTarget = form.assistance_type !== 'rack_out';
+          if (showSource && !(item.source_datacenter || singleDatacenter?.id)) return `请先为设备 ${index + 1} 选择源机房。`;
+          if (showSource && !item.source_rack) return `请先为设备 ${index + 1} 选择源机柜。`;
+          if (showTarget && !(item.target_datacenter || singleDatacenter?.id)) return `请先为设备 ${index + 1} 选择目标机房。`;
+          if (showTarget && !item.target_rack) return `请先为设备 ${index + 1} 选择目标机柜。`;
+          if (!cleanText(item.device_name) && !cleanText(item.rack_device)) return `请先为设备 ${index + 1} 填写设备名称或选择现有设备。`;
+        }
+      }
       return '';
     }
 
@@ -518,12 +628,23 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
         company: cleanText(form.company),
         department: cleanText(form.department),
         project_name: cleanText(form.project_name),
+        assistance_type: assistanceDraft ? form.assistance_type || 'other_support' : 'other_support',
         reason: cleanText(form.reason),
         request_content: cleanText(form.request_content),
+        destination_ip: assistanceDraft ? cleanText(form.destination_ip) : '',
+        destination_port: assistanceDraft ? cleanText(form.destination_port) : '',
+        firewall_open_at: assistanceDraft && form.firewall_open_at ? form.firewall_open_at : null,
+        ip_open_details: assistanceDraft ? cleanText(form.ip_open_details) : '',
+        ip_open_at: assistanceDraft && form.ip_open_at ? form.ip_open_at : null,
+        access_location: assistanceDraft ? cleanText(form.access_location) : '',
+        access_at: assistanceDraft && form.access_at ? form.access_at : null,
+        antivirus_installed: assistanceDraft ? !!form.antivirus_installed : false,
+        terminal_mac: assistanceDraft ? cleanText(form.terminal_mac) : '',
+        related_links: assistanceDraft ? cleanText(form.related_links) : '',
         impact_scope: cleanText(form.impact_scope),
         requires_power_down: !!form.requires_power_down,
         planned_execute_at: form.planned_execute_at || null,
-        items: isAssistanceRequest(form.request_type) ? [] : form.items.map(normalizeItem),
+        items: shouldUseItems(form) ? form.items.map(normalizeItem) : [],
       };
       const response = await safeFetch('/api/datacenter-change-requests/', {
         method: 'POST',
@@ -627,6 +748,7 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
     { label: '已完成', value: summary.completed },
   ];
   const assistanceDraft = isAssistanceRequest(form.request_type);
+  const showItemEditor = shouldUseItems(form);
   const executionAssistance = isAssistanceRequest(executionTarget?.request_type);
   const publicEntryLink = typeof window === 'undefined' ? '/?change-request-intake=1' : new URL('/?change-request-intake=1', window.location.origin).toString();
 
@@ -747,15 +869,27 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
                     >
                       <td className="px-6 py-4">
                         <div className="font-semibold text-slate-900">{request.title || '未填写标题'}</div>
-                        <div className="mt-1 text-xs text-slate-500">{request.request_code} / {REQUEST_TYPE_LABELS[request.request_type] || request.request_type}</div>
+                        <div className="mt-1 text-xs text-slate-500">表单号 {request.request_code} / {REQUEST_TYPE_LABELS[request.request_type] || request.request_type}{assistanceType ? ` / ${ASSISTANCE_TYPE_LABELS[request.assistance_type] || '综合协助'}` : ''}</div>
                       </td>
                       <td className="px-6 py-4">
                         <div className="font-semibold text-slate-800">{request.applicant_name || '待对方补充'}</div>
                         <div className="mt-1 text-xs text-slate-500">{request.applicant_phone || request.company || '待补充联系信息'}</div>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="font-semibold text-slate-800">{assistanceType ? request.project_name || '未填写项目' : item?.device_name || '未填写设备'}</div>
-                        <div className="mt-1 text-xs text-slate-500">{assistanceType ? request.request_content || request.reason || '等待补充协助内容' : item?.assigned_management_ip || item?.device_model || '等待补充'}</div>
+                        <div className="font-semibold text-slate-800">{assistanceType ? (ASSISTANCE_TYPE_LABELS[request.assistance_type] || request.project_name || '未填写项目') : item?.device_name || '未填写设备'}</div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {assistanceType
+                            ? (
+                              request.assistance_type === 'firewall_port_open'
+                                ? `${request.destination_ip || '未填写 IP'} / ${request.destination_port || '未填写端口'}`
+                                : request.assistance_type === 'ip_open'
+                                  ? request.ip_open_details || '等待补充 IP 开通说明'
+                                  : request.assistance_type === 'external_terminal_access'
+                                    ? `${request.access_location || '未填写位置'} / ${request.terminal_mac || '未填写 MAC'}`
+                                    : request.request_content || request.reason || '等待补充协助内容'
+                            )
+                            : item?.assigned_management_ip || item?.device_model || '等待补充'}
+                        </div>
                       </td>
                       <td className="px-6 py-4">
                         <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-bold text-slate-700">{STATUS_LABELS[request.status] || request.status}</span>
@@ -797,9 +931,9 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
               : '设备类申请会先由管理员预填位置和网络信息，再把独立链接发给对方补充资料。单机房场景下默认隐藏机房选择。'}
           </div>
           {draftError ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{draftError}</div> : null}
-          {!assistanceDraft && !topology.length ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">当前未加载到可用的机房拓扑数据，设备类申请无法联动机房、机柜和现有设备。请先检查机房数据，或点击页面右上角“刷新”后重试。</div> : null}
+          {showItemEditor && !topology.length ? <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">当前未加载到可用的机房拓扑数据，涉及设备上架、下架或迁移的协助申请暂时无法联动机房、机柜和现有设备。请先检查机房数据，或点击页面右上角“刷新”后重试。</div> : null}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <label className="text-sm text-slate-700">申请类型<select value={form.request_type} onChange={(e) => updateField('request_type', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5">{REQUEST_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+            <div className="text-sm text-slate-700">申请类型<div className="mt-1 rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 text-slate-700">协助申请</div></div>
             <label className="text-sm text-slate-700">申请标题<input value={form.title} onChange={(e) => updateField('title', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
             <label className="text-sm text-slate-700">{assistanceDraft ? '需求联系人' : '申请人'}<input value={form.applicant_name} onChange={(e) => updateField('applicant_name', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
             <label className="text-sm text-slate-700">{assistanceDraft ? '联系方式' : '联系电话'}<input value={form.applicant_phone} onChange={(e) => updateField('applicant_phone', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
@@ -812,20 +946,51 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
 
           {assistanceDraft ? (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <label className="text-sm text-slate-700">协助分类<select value={form.assistance_type} onChange={(e) => updateField('assistance_type', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5">{ASSISTANCE_TYPE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                表单号会在提交或生成独立链接后自动生成，申请方填写完成后也可以随时打印，打印单会保留领导签字栏。
+              </div>
               <label className="text-sm text-slate-700">协助申请缘由<textarea value={form.reason} onChange={(e) => updateField('reason', e.target.value)} className="mt-1 h-28 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
               <label className="text-sm text-slate-700">协助申请内容<textarea value={form.request_content} onChange={(e) => updateField('request_content', e.target.value)} className="mt-1 h-28 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+              {isFirewallPortAssistance(form) ? (
+                <>
+                  <label className="text-sm text-slate-700">目的 IP 地址<input value={form.destination_ip} onChange={(e) => updateField('destination_ip', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：10.2.2.20" /></label>
+                  <label className="text-sm text-slate-700">目的端口<input value={form.destination_port} onChange={(e) => updateField('destination_port', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：443, 8443" /></label>
+                  <label className="text-sm text-slate-700">端口开通时间<input type="datetime-local" value={form.firewall_open_at} onChange={(e) => updateField('firewall_open_at', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+                  <label className="text-sm text-slate-700">相关链接<textarea value={form.related_links} onChange={(e) => updateField('related_links', e.target.value)} className="mt-1 h-24 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：系统地址、工单地址、接口文档地址" /></label>
+                </>
+              ) : null}
+              {isIpOpenAssistance(form) ? (
+                <>
+                  <label className="text-sm text-slate-700 md:col-span-2">IP 开通说明<textarea value={form.ip_open_details} onChange={(e) => updateField('ip_open_details', e.target.value)} className="mt-1 h-24 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="填写开通用途、接入范围、使用系统等" /></label>
+                  <label className="text-sm text-slate-700">IP 开通时间<input type="datetime-local" value={form.ip_open_at} onChange={(e) => updateField('ip_open_at', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+                  <label className="text-sm text-slate-700">相关链接<textarea value={form.related_links} onChange={(e) => updateField('related_links', e.target.value)} className="mt-1 h-24 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：需求链接、工单地址、系统地址" /></label>
+                </>
+              ) : null}
+              {isExternalTerminalAssistance(form) ? (
+                <>
+                  <label className="text-sm text-slate-700">接入位置<input value={form.access_location} onChange={(e) => updateField('access_location', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：401 会议室、综合办公区" /></label>
+                  <label className="text-sm text-slate-700">接入时间<input type="datetime-local" value={form.access_at} onChange={(e) => updateField('access_at', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+                  <label className="text-sm text-slate-700">终端 MAC 地址<input value={form.terminal_mac} onChange={(e) => updateField('terminal_mac', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：782b-4645-c9a0" /></label>
+                  <label className="mt-7 flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={!!form.antivirus_installed} onChange={(e) => updateField('antivirus_installed', e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-200" />已完成杀毒</label>
+                  <label className="text-sm text-slate-700 md:col-span-2">相关链接<textarea value={form.related_links} onChange={(e) => updateField('related_links', e.target.value)} className="mt-1 h-24 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：审批单链接、工单地址、系统地址" /></label>
+                </>
+              ) : null}
+              {!isFirewallPortAssistance(form) && !isIpOpenAssistance(form) && !isExternalTerminalAssistance(form) ? (
+                <label className="text-sm text-slate-700 md:col-span-2">相关链接<textarea value={form.related_links} onChange={(e) => updateField('related_links', e.target.value)} className="mt-1 h-24 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：需求文档、工单地址、系统链接" /></label>
+              ) : null}
             </div>
           ) : null}
 
-          {!assistanceDraft ? form.items.map((item, index) => {
+          {showItemEditor ? form.items.map((item, index) => {
             const sourceDatacenterId = item.source_datacenter || (singleDatacenter ? String(singleDatacenter.id) : '');
             const targetDatacenterId = item.target_datacenter || (singleDatacenter ? String(singleDatacenter.id) : '');
             const sourceDatacenter = topology.find((dc) => String(dc.id) === String(sourceDatacenterId));
             const targetDatacenter = topology.find((dc) => String(dc.id) === String(targetDatacenterId));
             const sourceRack = sourceDatacenter?.racks?.find((rack) => String(rack.id) === String(item.source_rack));
             const targetRack = targetDatacenter?.racks?.find((rack) => String(rack.id) === String(item.target_rack));
-            const showSource = OUTBOUND_TYPES.has(form.request_type);
-            const showTarget = TARGET_TYPES.has(form.request_type);
+            const showSource = assistanceDraft ? form.assistance_type === 'rack_out' : OUTBOUND_TYPES.has(form.request_type);
+            const showTarget = assistanceDraft ? form.assistance_type !== 'rack_out' : TARGET_TYPES.has(form.request_type);
             return (
               <div key={index} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-4">
                 <div className="flex items-center justify-between">
@@ -869,7 +1034,7 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
           ) : null}
           <div className="flex items-center justify-between">
             <div>
-              {!assistanceDraft ? <button onClick={addItem} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50" type="button">增加设备</button> : null}
+              {showItemEditor ? <button onClick={addItem} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50" type="button">增加设备</button> : null}
             </div>
             <div className="flex gap-3">
               <button onClick={() => setOpen(false)} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50" type="button">取消</button>

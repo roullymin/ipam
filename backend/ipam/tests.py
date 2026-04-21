@@ -415,6 +415,7 @@ class DatacenterChangeRequestTests(BaseApiTestCase):
             '/api/datacenter-change-requests/',
             {
                 'request_type': 'assistance',
+                'assistance_type': 'other_support',
                 'title': '协助接入新项目',
                 'applicant_name': '王五',
                 'applicant_phone': '13700000000',
@@ -438,6 +439,114 @@ class DatacenterChangeRequestTests(BaseApiTestCase):
         change_request = DatacenterChangeRequest.objects.get(pk=response.data['id'])
         self.assertEqual(change_request.items.count(), 0)
         self.assertEqual(change_request.request_content, '协助开通账号、座位和网络访问权限。')
+
+    def test_can_create_equipment_rack_in_assistance_request_with_items(self):
+        response = self.client.post(
+            '/api/datacenter-change-requests/',
+            {
+                'request_type': 'assistance',
+                'assistance_type': 'rack_in',
+                'title': '设备上架协助申请',
+                'applicant_name': '孙七',
+                'applicant_phone': '13500000000',
+                'company': '数字广东',
+                'department': '运维处室',
+                'reason': '新设备需要入场上架',
+                'request_content': '请协助安排设备上架和网络接入。',
+                'items': [
+                    {
+                        'device_name': '业务服务器',
+                        'device_model': 'RH2288',
+                        'serial_number': 'SRV-001',
+                        'quantity': 1,
+                        'u_height': 2,
+                        'power_watts': 450,
+                        'network_role': 'command',
+                        'ip_action': 'allocate',
+                        'target_datacenter': self.datacenter.id,
+                        'target_rack': self.rack.id,
+                        'target_u_start': 12,
+                        'target_u_end': 11,
+                    }
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['assistance_type'], 'rack_in')
+        self.assertEqual(response.data['item_count'], 1)
+
+        change_request = DatacenterChangeRequest.objects.get(pk=response.data['id'])
+        self.assertEqual(change_request.assistance_type, 'rack_in')
+        self.assertEqual(change_request.items.count(), 1)
+
+    def test_can_create_firewall_port_assistance_request(self):
+        response = self.client.post(
+            '/api/datacenter-change-requests/',
+            {
+                'request_type': 'assistance',
+                'assistance_type': 'firewall_port_open',
+                'title': '防火墙端口开通申请',
+                'applicant_name': '赵六',
+                'applicant_phone': '13600000000',
+                'applicant_email': 'zhaoliu@example.com',
+                'company': '数字广东',
+                'department': '信息化处',
+                'project_name': '政务服务平台',
+                'reason': '新系统联调需要开放防火墙端口',
+                'request_content': '申请放通测试环境到业务环境的访问。',
+                'destination_ip': '10.2.2.20',
+                'destination_port': '443, 8443',
+                'firewall_open_at': '2026-04-22T10:30:00',
+                'related_links': 'https://example.com/ticket/123',
+                'items': [],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['request_type'], 'assistance')
+        self.assertEqual(response.data['assistance_type'], 'firewall_port_open')
+        self.assertEqual(response.data['destination_ip'], '10.2.2.20')
+        self.assertEqual(response.data['destination_port'], '443, 8443')
+        self.assertEqual(response.data['item_count'], 0)
+
+        change_request = DatacenterChangeRequest.objects.get(pk=response.data['id'])
+        self.assertEqual(change_request.assistance_type, 'firewall_port_open')
+        self.assertEqual(change_request.destination_ip, '10.2.2.20')
+        self.assertEqual(change_request.destination_port, '443, 8443')
+        self.assertEqual(change_request.related_links, 'https://example.com/ticket/123')
+
+    def test_can_create_external_terminal_access_request(self):
+        response = self.client.post(
+            '/api/datacenter-change-requests/',
+            {
+                'request_type': 'assistance',
+                'assistance_type': 'external_terminal_access',
+                'title': '外来终端接入厅内网络申请',
+                'applicant_name': '周八',
+                'applicant_phone': '13400000000',
+                'company': '省级协作单位',
+                'department': '项目处室',
+                'reason': '临时办公终端需要接入厅内网络',
+                'request_content': '用于临时联调和文档处理。',
+                'access_location': '401 会议室',
+                'access_at': '2026-04-23T09:00:00',
+                'antivirus_installed': True,
+                'terminal_mac': '782b-4645-c9a0',
+                'related_links': 'https://example.com/workorder/789',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['assistance_type'], 'external_terminal_access')
+        self.assertEqual(response.data['terminal_mac'], '782b-4645-c9a0')
+
+        change_request = DatacenterChangeRequest.objects.get(pk=response.data['id'])
+        self.assertEqual(change_request.access_location, '401 会议室')
+        self.assertTrue(change_request.antivirus_installed)
 
     def test_can_approve_change_request(self):
         change_request = DatacenterChangeRequest.objects.create(
@@ -635,7 +744,8 @@ class DatacenterChangeRequestTests(BaseApiTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data['entry']['is_permanent'])
         self.assertIn('/?change-request-intake=1', response.data['entry']['public_link'])
-        self.assertEqual(response.data['request']['request_type'], 'rack_in')
+        self.assertEqual(response.data['request']['request_type'], 'assistance')
+        self.assertEqual(response.data['request']['assistance_type'], 'other_support')
 
     def test_public_change_request_entry_can_create_new_request_without_token(self):
         response = self.client.post(

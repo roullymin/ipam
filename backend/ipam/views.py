@@ -454,7 +454,7 @@ def _format_resident_display_date(value):
 def _build_public_change_request_template():
     return {
         'request_code': '',
-        'request_type': 'rack_in',
+        'request_type': 'assistance',
         'status': 'draft',
         'approval_code': '',
         'title': '',
@@ -464,8 +464,19 @@ def _build_public_change_request_template():
         'company': '',
         'department': '',
         'project_name': '',
+        'assistance_type': 'other_support',
         'reason': '',
         'request_content': '',
+        'destination_ip': '',
+        'destination_port': '',
+        'firewall_open_at': '',
+        'ip_open_details': '',
+        'ip_open_at': '',
+        'access_location': '',
+        'access_at': '',
+        'antivirus_installed': False,
+        'terminal_mac': '',
+        'related_links': '',
         'impact_scope': '',
         'requires_power_down': False,
         'planned_execute_at': '',
@@ -878,6 +889,27 @@ def _format_change_link_status(change_request):
     return f'有效期至：{_format_change_datetime(change_request.token_expires_at)}'
 
 
+EQUIPMENT_ASSISTANCE_TYPES = {'rack_in', 'rack_out', 'relocate'}
+
+
+def _is_equipment_assistance(change_request):
+    return change_request.request_type == 'assistance' and change_request.assistance_type in EQUIPMENT_ASSISTANCE_TYPES
+
+
+def _get_assistance_request_title(change_request):
+    assistance_type = change_request.assistance_type or 'other_support'
+    return {
+        'rack_in': '设备上架申请单',
+        'rack_out': '设备下架申请单',
+        'relocate': '设备迁移申请单',
+        'firewall_port_open': '防火墙访问开通申请单',
+        'ip_open': 'IP 开通申请单',
+        'external_terminal_access': '外来终端接入厅内网络申请单',
+        'other_support': '其他协助申请单',
+        'general_support': '协助事项申请单',
+    }.get(assistance_type, '协助事项申请单')
+
+
 def _build_change_request_pdf(response_buffer, change_request):
     try:
         registerFont(UnicodeCIDFont('STSong-Light'))
@@ -926,17 +958,24 @@ def _build_change_request_pdf(response_buffer, change_request):
         change_request.request_type,
         change_request.request_type,
     )
+    assistance_label = dict(DatacenterChangeRequest._meta.get_field('assistance_type').choices).get(
+        change_request.assistance_type,
+        change_request.assistance_type,
+    )
     status_label = dict(DatacenterChangeRequest._meta.get_field('status').choices).get(
         change_request.status,
         change_request.status,
     )
 
-    title_text = '协助事项申请单' if change_request.request_type == 'assistance' else '机房设备变更申请单'
+    if change_request.request_type == 'assistance':
+        title_text = _get_assistance_request_title(change_request)
+    else:
+        title_text = '机房设备变更申请单'
 
     elements = [
         Paragraph(title_text, title_style),
         Paragraph(
-            f'申请编号：{change_request.request_code}　　导出时间：{timezone.localtime().strftime("%Y-%m-%d %H:%M")}',
+            f'表单号：{change_request.request_code}　　导出时间：{timezone.localtime().strftime("%Y-%m-%d %H:%M")}',
             body_style,
         ),
         Spacer(1, 5 * mm),
@@ -944,13 +983,14 @@ def _build_change_request_pdf(response_buffer, change_request):
 
     if change_request.request_type == 'assistance':
         info_rows = [
-            ['申请类型', type_label, '当前状态', status_label],
-            ['申请标题', change_request.title or '未填写', '审批编号', change_request.approval_code or '未填写'],
+            ['申请类型', type_label, '协助分类', assistance_label or '未填写'],
+            ['申请标题', change_request.title or '未填写', '当前状态', status_label],
             ['需求联系人', change_request.applicant_name or '未填写', '联系方式', change_request.applicant_phone or '未填写'],
             ['联系邮箱', change_request.applicant_email or '未填写', '申请单位', change_request.company or '未填写'],
             ['需求处室', change_request.department or '未填写', '项目名称', change_request.project_name or '未填写'],
-            ['期望协助时间', _format_change_datetime(change_request.planned_execute_at), '链接状态', _format_change_link_status(change_request)],
-            ['处理完成时间', _format_change_datetime(change_request.executed_at), '创建人', get_actor_name(change_request.created_by)],
+            ['期望协助时间', _format_change_datetime(change_request.planned_execute_at), '审批编号', change_request.approval_code or '未填写'],
+            ['链接状态', _format_change_link_status(change_request), '创建人', get_actor_name(change_request.created_by)],
+            ['处理完成时间', _format_change_datetime(change_request.executed_at), '打印说明', '填写后即可打印并留存签字'],
         ]
     else:
         info_rows = [
@@ -993,12 +1033,44 @@ def _build_change_request_pdf(response_buffer, change_request):
     elements.append(Spacer(1, 2 * mm))
     if change_request.request_type == 'assistance':
         elements.append(Paragraph(f'协助内容：{change_request.request_content or "未填写"}', body_style))
+        if change_request.assistance_type == 'firewall_port_open':
+            elements.append(Spacer(1, 2 * mm))
+            elements.append(Paragraph(f'目的 IP 地址：{change_request.destination_ip or "未填写"}', body_style))
+            elements.append(Spacer(1, 2 * mm))
+            elements.append(Paragraph(f'目的端口：{change_request.destination_port or "未填写"}', body_style))
+            elements.append(Spacer(1, 2 * mm))
+            elements.append(Paragraph(f'端口开通时间：{_format_change_datetime(change_request.firewall_open_at)}', body_style))
+            elements.append(Spacer(1, 2 * mm))
+            elements.append(Paragraph(f'相关链接：{change_request.related_links or "未填写"}', body_style))
+        elif change_request.assistance_type == 'ip_open':
+            elements.append(Spacer(1, 2 * mm))
+            elements.append(Paragraph(f'IP 开通说明：{change_request.ip_open_details or "未填写"}', body_style))
+            elements.append(Spacer(1, 2 * mm))
+            elements.append(Paragraph(f'IP 开通时间：{_format_change_datetime(change_request.ip_open_at)}', body_style))
+            elements.append(Spacer(1, 2 * mm))
+            elements.append(Paragraph(f'相关链接：{change_request.related_links or "未填写"}', body_style))
+        elif change_request.assistance_type == 'external_terminal_access':
+            elements.append(Spacer(1, 2 * mm))
+            elements.append(Paragraph(f'接入位置：{change_request.access_location or "未填写"}', body_style))
+            elements.append(Spacer(1, 2 * mm))
+            elements.append(Paragraph(f'接入时间：{_format_change_datetime(change_request.access_at)}', body_style))
+            elements.append(Spacer(1, 2 * mm))
+            elements.append(Paragraph(f'是否已杀毒：{"是" if change_request.antivirus_installed else "否"}', body_style))
+            elements.append(Spacer(1, 2 * mm))
+            elements.append(Paragraph(f'终端 MAC 地址：{change_request.terminal_mac or "未填写"}', body_style))
+            elements.append(Spacer(1, 2 * mm))
+            elements.append(Paragraph(f'相关链接：{change_request.related_links or "未填写"}', body_style))
+        elif change_request.related_links:
+            elements.append(Spacer(1, 2 * mm))
+            elements.append(Paragraph(f'相关链接：{change_request.related_links}', body_style))
     else:
         elements.append(Paragraph(f'影响范围：{change_request.impact_scope or "未填写"}', body_style))
     elements.append(Spacer(1, 5 * mm))
 
-    if change_request.request_type != 'assistance':
-        elements.append(Paragraph('三、设备明细', heading_style))
+    show_item_table = change_request.request_type != 'assistance' or _is_equipment_assistance(change_request)
+    if show_item_table:
+        item_heading = '三、设备明细' if change_request.request_type != 'assistance' else '三、设备信息'
+        elements.append(Paragraph(item_heading, heading_style))
         item_rows = [[
             '设备名称',
             '型号/序列号',
@@ -1066,7 +1138,10 @@ def _build_change_request_pdf(response_buffer, change_request):
         elements.append(item_table)
         elements.append(Spacer(1, 5 * mm))
 
-    action_heading = '三、审批与处理记录' if change_request.request_type == 'assistance' else '四、审批与执行记录'
+    if change_request.request_type == 'assistance':
+        action_heading = '四、审批与处理记录' if show_item_table else '三、审批与处理记录'
+    else:
+        action_heading = '四、审批与执行记录'
     elements.append(Paragraph(action_heading, heading_style))
     action_rows = [
         ['业务处室意见' if change_request.request_type == 'assistance' else '部门意见', change_request.department_comment or '未填写'],
@@ -1097,7 +1172,10 @@ def _build_change_request_pdf(response_buffer, change_request):
     elements.append(action_table)
 
     elements.append(Spacer(1, 5 * mm))
-    signature_heading = '四、签字栏' if change_request.request_type == 'assistance' else '五、签字确认'
+    if change_request.request_type == 'assistance':
+        signature_heading = '五、签字栏' if show_item_table else '四、签字栏'
+    else:
+        signature_heading = '五、签字确认'
     elements.append(Paragraph(signature_heading, heading_style))
     if change_request.request_type == 'assistance':
         signature_rows = [

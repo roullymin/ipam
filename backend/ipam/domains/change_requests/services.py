@@ -10,6 +10,19 @@ def build_change_request_title(validated_data, items_data, request_type_choices)
 
     request_type = validated_data.get('request_type') or 'change'
     request_type_label = dict(request_type_choices).get(request_type, request_type)
+    if request_type == 'assistance':
+        assistance_type = validated_data.get('assistance_type') or 'other_support'
+        assistance_label = {
+            'general_support': '协助事项',
+            'rack_in': '设备上架',
+            'rack_out': '设备下架',
+            'relocate': '设备迁移',
+            'firewall_port_open': '防火墙访问开通',
+            'ip_open': 'IP 开通',
+            'external_terminal_access': '外来终端接入厅内网络',
+            'other_support': '其他协助',
+        }.get(assistance_type, request_type_label)
+        return f'{assistance_label}申请'
     first_item = items_data[0] if items_data else {}
     device_name = str(first_item.get('device_name') or '').strip()
     return f'{request_type_label}申请{f" - {device_name}" if device_name else ""}'

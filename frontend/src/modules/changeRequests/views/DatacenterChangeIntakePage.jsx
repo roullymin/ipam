@@ -10,11 +10,34 @@ const REQUEST_TYPES = {
   move_out: '设备搬出',
   relocate: '位置迁移',
   decommission: '设备退网',
+  assistance: '协助申请',
   power_change: '电力变更',
-  assistance: '协助事项申请',
 };
 
-const REQUEST_TYPE_OPTIONS = Object.entries(REQUEST_TYPES).map(([value, label]) => ({ value, label }));
+const REQUEST_TYPE_OPTIONS = [
+  { value: 'assistance', label: '协助申请' },
+];
+
+const ASSISTANCE_TYPE_LABELS = {
+  general_support: '综合协助',
+  rack_in: '设备上架',
+  rack_out: '设备下架',
+  relocate: '设备迁移',
+  firewall_port_open: '防火墙访问开通',
+  ip_open: 'IP 开通',
+  external_terminal_access: '外来终端接入厅内网络',
+  other_support: '其他协助',
+};
+
+const ASSISTANCE_TYPE_OPTIONS = [
+  { value: 'rack_in', label: '设备上架' },
+  { value: 'rack_out', label: '设备下架' },
+  { value: 'relocate', label: '设备迁移' },
+  { value: 'firewall_port_open', label: '防火墙访问开通' },
+  { value: 'ip_open', label: 'IP 开通' },
+  { value: 'external_terminal_access', label: '外来终端接入厅内网络' },
+  { value: 'other_support', label: '其他协助' },
+];
 
 const NETWORK_ROLE_LABELS = {
   none: '无需网络',
@@ -42,6 +65,50 @@ const IP_ACTION_OPTIONS = [
 ];
 
 const isAssistanceRequest = (requestType) => requestType === 'assistance';
+const EQUIPMENT_ASSISTANCE_TYPES = new Set(['rack_in', 'rack_out', 'relocate']);
+const isFirewallPortAssistance = (formLike) =>
+  isAssistanceRequest(formLike?.request_type) && formLike?.assistance_type === 'firewall_port_open';
+const isIpOpenAssistance = (formLike) =>
+  isAssistanceRequest(formLike?.request_type) && formLike?.assistance_type === 'ip_open';
+const isExternalTerminalAssistance = (formLike) =>
+  isAssistanceRequest(formLike?.request_type) && formLike?.assistance_type === 'external_terminal_access';
+const assistanceNeedsItems = (formLike) =>
+  isAssistanceRequest(formLike?.request_type) && EQUIPMENT_ASSISTANCE_TYPES.has(formLike?.assistance_type);
+const shouldUseItems = (formLike) => !isAssistanceRequest(formLike?.request_type) || assistanceNeedsItems(formLike);
+
+const createEmptyAssistanceFields = () => ({
+  destination_ip: '',
+  destination_port: '',
+  firewall_open_at: '',
+  ip_open_details: '',
+  ip_open_at: '',
+  access_location: '',
+  access_at: '',
+  antivirus_installed: false,
+  terminal_mac: '',
+  related_links: '',
+});
+
+const getAssistancePageTitle = (assistanceType) => {
+  switch (assistanceType) {
+    case 'rack_in':
+      return '设备上架申请';
+    case 'rack_out':
+      return '设备下架申请';
+    case 'relocate':
+      return '设备迁移申请';
+    case 'firewall_port_open':
+      return '防火墙访问开通申请';
+    case 'ip_open':
+      return 'IP 开通申请';
+    case 'external_terminal_access':
+      return '外来终端接入厅内网络申请';
+    case 'other_support':
+      return '其他协助申请';
+    default:
+      return '协助申请';
+  }
+};
 
 const createEmptyItem = () => ({
   device_name: '',
@@ -64,7 +131,7 @@ const createEmptyItem = () => ({
   notes: '',
 });
 
-const createEmptyForm = (requestType = 'rack_in') => ({
+const createEmptyForm = (requestType = 'assistance', assistanceType = 'other_support') => ({
   request_type: requestType,
   title: '',
   applicant_name: '',
@@ -73,12 +140,14 @@ const createEmptyForm = (requestType = 'rack_in') => ({
   company: '',
   department: '',
   project_name: '',
+  assistance_type: assistanceType,
   reason: '',
   request_content: '',
+  ...createEmptyAssistanceFields(),
   impact_scope: '',
   requires_power_down: false,
   planned_execute_at: '',
-  items: isAssistanceRequest(requestType) ? [] : [createEmptyItem()],
+  items: shouldUseItems({ request_type: requestType, assistance_type: assistanceType }) ? [createEmptyItem()] : [],
 });
 
 const formatDateTime = (value) => {
@@ -107,7 +176,8 @@ const extractResponseMessage = async (response, fallback) => {
 };
 
 const buildFormFromRequest = (requestData) => {
-  const requestType = requestData?.request_type || 'rack_in';
+  const requestType = requestData?.request_type || 'assistance';
+  const assistanceType = requestData?.assistance_type || 'other_support';
   const sourceItems = Array.isArray(requestData?.items) ? requestData.items : [];
   const items = sourceItems.length
     ? sourceItems.map((item) => ({
@@ -130,9 +200,10 @@ const buildFormFromRequest = (requestData) => {
         target_u_end: item.target_u_end || '',
         notes: item.notes || '',
       }))
-    : isAssistanceRequest(requestType)
-      ? []
+    : shouldUseItems({ request_type: requestType, assistance_type: assistanceType })
+      ? [createEmptyItem()]
       : [createEmptyItem()];
+  const normalizedItems = shouldUseItems({ request_type: requestType, assistance_type: assistanceType }) ? items : [];
 
   return {
     request_type: requestType,
@@ -143,12 +214,23 @@ const buildFormFromRequest = (requestData) => {
     company: requestData?.company || '',
     department: requestData?.department || '',
     project_name: requestData?.project_name || '',
+    assistance_type: assistanceType,
     reason: requestData?.reason || '',
     request_content: requestData?.request_content || '',
+    destination_ip: requestData?.destination_ip || '',
+    destination_port: requestData?.destination_port || '',
+    firewall_open_at: requestData?.firewall_open_at ? String(requestData.firewall_open_at).slice(0, 16) : '',
+    ip_open_details: requestData?.ip_open_details || '',
+    ip_open_at: requestData?.ip_open_at ? String(requestData.ip_open_at).slice(0, 16) : '',
+    access_location: requestData?.access_location || '',
+    access_at: requestData?.access_at ? String(requestData.access_at).slice(0, 16) : '',
+    antivirus_installed: !!requestData?.antivirus_installed,
+    terminal_mac: requestData?.terminal_mac || '',
+    related_links: requestData?.related_links || '',
     impact_scope: requestData?.impact_scope || '',
     requires_power_down: !!requestData?.requires_power_down,
     planned_execute_at: requestData?.planned_execute_at ? String(requestData.planned_execute_at).slice(0, 16) : '',
-    items,
+    items: normalizedItems,
   };
 };
 
@@ -201,16 +283,45 @@ export default function DatacenterChangeIntakePage() {
 
   const assistance = useMemo(() => isAssistanceRequest(form.request_type), [form.request_type]);
   const summaryLabel = REQUEST_TYPES[form.request_type] || form.request_type;
+  const assistanceSubtypeLabel = ASSISTANCE_TYPE_LABELS[form.assistance_type] || form.assistance_type;
+  const showItemEditor = shouldUseItems(form);
 
   const setField = (key, value) => {
     setForm((prev) => {
       const next = { ...prev, [key]: value };
       if (key === 'request_type') {
-        next.items = isAssistanceRequest(value)
-          ? []
-          : prev.items?.length
+        const nextAssistanceType = value === 'assistance' ? prev.assistance_type || 'other_support' : prev.assistance_type;
+        next.assistance_type = nextAssistanceType;
+        next.items = shouldUseItems({ request_type: value, assistance_type: nextAssistanceType })
+          ? prev.items?.length
             ? prev.items
-            : [createEmptyItem()];
+            : [createEmptyItem()]
+          : [];
+        if (value !== 'assistance') {
+          Object.assign(next, createEmptyAssistanceFields());
+        }
+      }
+      if (key === 'assistance_type') {
+        next.items = shouldUseItems({ request_type: next.request_type, assistance_type: value })
+          ? prev.items?.length
+            ? prev.items
+            : [createEmptyItem()]
+          : [];
+        if (value !== 'firewall_port_open') {
+          next.destination_ip = '';
+          next.destination_port = '';
+          next.firewall_open_at = '';
+        }
+        if (value !== 'ip_open') {
+          next.ip_open_details = '';
+          next.ip_open_at = '';
+        }
+        if (value !== 'external_terminal_access') {
+          next.access_location = '';
+          next.access_at = '';
+          next.antivirus_installed = false;
+          next.terminal_mac = '';
+        }
       }
       return next;
     });
@@ -244,6 +355,56 @@ export default function DatacenterChangeIntakePage() {
   };
 
   const submit = async () => {
+    if (!form.applicant_name?.trim()) {
+      setError(assistance ? '请先填写需求联系人。' : '请先填写申请人。');
+      return;
+    }
+    if (!form.applicant_phone?.trim()) {
+      setError(assistance ? '请先填写联系方式。' : '请先填写联系电话。');
+      return;
+    }
+    if (assistance && assistanceNeedsItems(form) && !form.items.length) {
+      setError('请至少填写一台设备信息。');
+      return;
+    }
+    if (assistance && isFirewallPortAssistance(form)) {
+      if (!form.destination_ip?.trim()) {
+        setError('请先填写目的 IP 地址。');
+        return;
+      }
+      if (!form.destination_port?.trim()) {
+        setError('请先填写目的端口。');
+        return;
+      }
+      if (!form.firewall_open_at) {
+        setError('请先填写端口开通时间。');
+        return;
+      }
+    }
+    if (assistance && isIpOpenAssistance(form)) {
+      if (!form.ip_open_details?.trim()) {
+        setError('请先填写 IP 开通说明。');
+        return;
+      }
+      if (!form.ip_open_at) {
+        setError('请先填写 IP 开通时间。');
+        return;
+      }
+    }
+    if (assistance && isExternalTerminalAssistance(form)) {
+      if (!form.access_location?.trim()) {
+        setError('请先填写接入位置。');
+        return;
+      }
+      if (!form.access_at) {
+        setError('请先填写接入时间。');
+        return;
+      }
+      if (!form.terminal_mac?.trim()) {
+        setError('请先填写终端 MAC 地址。');
+        return;
+      }
+    }
     setSubmitting(true);
     setError('');
     setNotice('');
@@ -308,9 +469,9 @@ export default function DatacenterChangeIntakePage() {
           </div>
 
           <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
-            <div className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">申请编号</div>
+            <div className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">表单号</div>
             <div className="mt-3 text-lg font-black leading-8 text-slate-900">{submittedRequest.request_code}</div>
-            <div className="mt-2 text-xs text-slate-500">{REQUEST_TYPES[submittedRequest.request_type] || submittedRequest.request_type}</div>
+            <div className="mt-2 text-xs text-slate-500">{REQUEST_TYPES[submittedRequest.request_type] || submittedRequest.request_type}{submittedRequest.request_type === 'assistance' ? ` / ${ASSISTANCE_TYPE_LABELS[submittedRequest.assistance_type] || '综合协助'}` : ''}</div>
           </div>
 
           <div className="mt-6 flex flex-wrap gap-3">
@@ -338,10 +499,10 @@ export default function DatacenterChangeIntakePage() {
     );
   }
 
-  const pageTitle = assistance ? '协助事项申请' : '机房设备变更申请';
+  const pageTitle = assistance ? getAssistancePageTitle(form.assistance_type) : '机房设备变更申请';
   const introText = isPermanentEntry
-    ? '这是申请中心的固定公开入口，可直接分享给申请方填写，无需管理员先预建草稿或生成临时链接。'
-    : '这是管理员发送的补录入口，申请方可在此继续完善申请资料并提交。';
+    ? '这是协助申请公开入口，申请方填写后即可生成表单号，并可随时打印带签字栏的申请单。'
+    : '这是管理员发送的协助申请链接，申请方可在此继续完善资料、查看表单号并随时打印。';
 
   return (
     <div className="change-request-print-shell min-h-screen bg-slate-50 px-4 py-8">
@@ -373,18 +534,19 @@ export default function DatacenterChangeIntakePage() {
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-center gap-3">
             {requestData?.request_code ? (
-              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">{requestData.request_code}</span>
+              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">表单号 {requestData.request_code}</span>
             ) : null}
             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{summaryLabel}</span>
+            {assistance ? <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{assistanceSubtypeLabel}</span> : null}
             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
               {isPermanentEntry ? '固定公开入口' : `临时入口有效期：${formatDateTime(requestData?.token_expires_at)}`}
             </span>
           </div>
           {error ? <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
           {notice ? <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</div> : null}
-          {isPermanentEntry && !assistance ? (
+          {isPermanentEntry ? (
             <div className="mt-4 rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-700">
-              公开入口主要收集申请方资料、设备清单与需求说明，机房位置、机柜、U 位和正式 IP 分配可由后台后续补充。
+              请选择协助子类后填写资料。系统会生成表单号，填写完成后即可随时下载打印，表单内已预留领导签字位置。
             </div>
           ) : null}
         </div>
@@ -393,24 +555,7 @@ export default function DatacenterChangeIntakePage() {
           <div className="mb-6 text-2xl font-black text-slate-900">申请信息</div>
 
           <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {isPermanentEntry ? (
-              <label className="text-sm text-slate-700">
-                申请类型
-                <select
-                  value={form.request_type}
-                  onChange={(event) => setField('request_type', event.target.value)}
-                  className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5"
-                >
-                  {REQUEST_TYPE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : (
-              <ReadonlyField label="申请类型" value={summaryLabel} />
-            )}
+            <ReadonlyField label="申请类型" value={summaryLabel} />
             <label className="text-sm text-slate-700">
               申请标题
               <input value={form.title} onChange={(event) => setField('title', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" />
@@ -432,11 +577,11 @@ export default function DatacenterChangeIntakePage() {
               <input value={form.company} onChange={(event) => setField('company', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" />
             </label>
             <label className="text-sm text-slate-700">
-              {assistance ? '需求部门' : '所属部门'}
+              {assistance ? '需求处室' : '所属部门'}
               <input value={form.department} onChange={(event) => setField('department', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" />
             </label>
             <label className="text-sm text-slate-700">
-              所属项目
+              {assistance ? '项目名称' : '所属项目'}
               <input value={form.project_name} onChange={(event) => setField('project_name', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" />
             </label>
             <label className="text-sm text-slate-700">
@@ -448,6 +593,19 @@ export default function DatacenterChangeIntakePage() {
           {assistance ? (
             <section className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
               <label className="text-sm text-slate-700">
+                协助分类
+                <select value={form.assistance_type} onChange={(event) => setField('assistance_type', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5">
+                  {ASSISTANCE_TYPE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                提交后系统会自动生成表单号，当前链接后续也可以继续查看并打印，申请单中已预留领导签名位置。
+              </div>
+              <label className="text-sm text-slate-700">
                 协助申请缘由
                 <textarea value={form.reason} onChange={(event) => setField('reason', event.target.value)} className="mt-1 h-28 w-full rounded-xl border border-slate-300 px-3 py-2.5" />
               </label>
@@ -455,6 +613,159 @@ export default function DatacenterChangeIntakePage() {
                 协助申请内容
                 <textarea value={form.request_content} onChange={(event) => setField('request_content', event.target.value)} className="mt-1 h-28 w-full rounded-xl border border-slate-300 px-3 py-2.5" />
               </label>
+              {isFirewallPortAssistance(form) ? (
+                <>
+                  <label className="text-sm text-slate-700">
+                    目的 IP 地址
+                    <input value={form.destination_ip} onChange={(event) => setField('destination_ip', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：10.2.2.20" />
+                  </label>
+                  <label className="text-sm text-slate-700">
+                    目的端口
+                    <input value={form.destination_port} onChange={(event) => setField('destination_port', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：443, 8443" />
+                  </label>
+                  <label className="text-sm text-slate-700">
+                    端口开通时间
+                    <input type="datetime-local" value={form.firewall_open_at} onChange={(event) => setField('firewall_open_at', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" />
+                  </label>
+                  <label className="text-sm text-slate-700">
+                    相关链接
+                    <textarea value={form.related_links} onChange={(event) => setField('related_links', event.target.value)} className="mt-1 h-24 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="填写系统链接、接口文档、工单链接等" />
+                  </label>
+                </>
+              ) : null}
+              {isIpOpenAssistance(form) ? (
+                <>
+                  <label className="text-sm text-slate-700 md:col-span-2">
+                    IP 开通说明
+                    <textarea value={form.ip_open_details} onChange={(event) => setField('ip_open_details', event.target.value)} className="mt-1 h-24 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="填写接入网段、用途、使用系统和期望开通内容" />
+                  </label>
+                  <label className="text-sm text-slate-700">
+                    IP 开通时间
+                    <input type="datetime-local" value={form.ip_open_at} onChange={(event) => setField('ip_open_at', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" />
+                  </label>
+                  <label className="text-sm text-slate-700">
+                    相关链接
+                    <textarea value={form.related_links} onChange={(event) => setField('related_links', event.target.value)} className="mt-1 h-24 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="填写工单链接、需求文档、系统地址等" />
+                  </label>
+                </>
+              ) : null}
+              {isExternalTerminalAssistance(form) ? (
+                <>
+                  <label className="text-sm text-slate-700">
+                    接入位置
+                    <input value={form.access_location} onChange={(event) => setField('access_location', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：401 会议室、综合办公区" />
+                  </label>
+                  <label className="text-sm text-slate-700">
+                    接入时间
+                    <input type="datetime-local" value={form.access_at} onChange={(event) => setField('access_at', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" />
+                  </label>
+                  <label className="text-sm text-slate-700">
+                    终端 MAC 地址
+                    <input value={form.terminal_mac} onChange={(event) => setField('terminal_mac', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：782b-4645-c9a0" />
+                  </label>
+                  <label className="mt-7 flex items-center gap-2 text-sm text-slate-700">
+                    <input type="checkbox" checked={!!form.antivirus_installed} onChange={(event) => setField('antivirus_installed', event.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-200" />
+                    已完成杀毒
+                  </label>
+                  <label className="text-sm text-slate-700 md:col-span-2">
+                    相关链接
+                    <textarea value={form.related_links} onChange={(event) => setField('related_links', event.target.value)} className="mt-1 h-24 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="填写工单链接、审批链接或相关说明地址" />
+                  </label>
+                </>
+              ) : null}
+              {!isFirewallPortAssistance(form) && !isIpOpenAssistance(form) && !isExternalTerminalAssistance(form) ? (
+                <label className="text-sm text-slate-700 md:col-span-2">
+                  相关链接
+                  <textarea value={form.related_links} onChange={(event) => setField('related_links', event.target.value)} className="mt-1 h-24 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="可填写需求文档、工单链接、系统地址等" />
+                </label>
+              ) : null}
+              {showItemEditor ? (
+                <div className="md:col-span-2">
+                  <div className="mb-3 flex items-center justify-between">
+                    <div className="text-sm font-bold text-slate-900">设备清单</div>
+                    {isPermanentEntry ? (
+                      <button
+                        onClick={addItem}
+                        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                        type="button"
+                      >
+                        <Plus className="h-4 w-4" />
+                        增加设备
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div className="space-y-4">
+                    {form.items.map((item, index) => (
+                      <div key={`assistance-item-${index}`} className="rounded-3xl border border-slate-200 bg-slate-50/70 p-5">
+                        <div className="mb-4 flex items-center justify-between">
+                          <div className="text-sm font-bold text-slate-900">设备 {index + 1}</div>
+                          {isPermanentEntry && form.items.length > 1 ? (
+                            <button
+                              onClick={() => removeItem(index)}
+                              className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50"
+                              type="button"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              删除
+                            </button>
+                          ) : null}
+                        </div>
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                          <label className="text-sm text-slate-700">
+                            设备名称
+                            <input value={item.device_name} onChange={(event) => setItemField(index, 'device_name', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" />
+                          </label>
+                          <label className="text-sm text-slate-700">
+                            设备型号
+                            <input value={item.device_model} onChange={(event) => setItemField(index, 'device_model', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" />
+                          </label>
+                          <label className="text-sm text-slate-700">
+                            序列号
+                            <input value={item.serial_number} onChange={(event) => setItemField(index, 'serial_number', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" />
+                          </label>
+                          <label className="text-sm text-slate-700">
+                            数量
+                            <input type="number" min="1" value={item.quantity} onChange={(event) => setItemField(index, 'quantity', Number(event.target.value || 1))} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" />
+                          </label>
+                          <label className="text-sm text-slate-700">
+                            占用 U 数
+                            <input type="number" min="1" value={item.u_height} onChange={(event) => setItemField(index, 'u_height', Number(event.target.value || 1))} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" />
+                          </label>
+                          <label className="text-sm text-slate-700">
+                            网络类型
+                            <select value={item.network_role} onChange={(event) => setItemField(index, 'network_role', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5">
+                              {NETWORK_ROLE_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="text-sm text-slate-700">
+                            IP 处理
+                            <select value={item.ip_action} onChange={(event) => setItemField(index, 'ip_action', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5">
+                              {IP_ACTION_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="text-sm text-slate-700">
+                            管理 IP
+                            <input value={item.assigned_management_ip} onChange={(event) => setItemField(index, 'assigned_management_ip', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" />
+                          </label>
+                          <label className="text-sm text-slate-700">
+                            业务 IP
+                            <input value={item.assigned_service_ip} onChange={(event) => setItemField(index, 'assigned_service_ip', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" />
+                          </label>
+                          <label className="text-sm text-slate-700 md:col-span-2 xl:col-span-3">
+                            备注
+                            <textarea value={item.notes} onChange={(event) => setItemField(index, 'notes', event.target.value)} className="mt-1 h-24 w-full rounded-xl border border-slate-300 px-3 py-2.5" />
+                          </label>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </section>
           ) : (
             <>

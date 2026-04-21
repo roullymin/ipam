@@ -371,6 +371,18 @@ CHANGE_REQUEST_TYPE_CHOICES = [
 ]
 
 
+ASSISTANCE_TYPE_CHOICES = [
+    ('general_support', '综合协助'),
+    ('rack_in', '设备上架'),
+    ('rack_out', '设备下架'),
+    ('relocate', '设备迁移'),
+    ('firewall_port_open', '防火墙访问开通'),
+    ('ip_open', 'IP 开通'),
+    ('external_terminal_access', '外来终端接入厅内网络'),
+    ('other_support', '其他协助'),
+]
+
+
 CHANGE_REQUEST_STATUS_CHOICES = [
     ('draft', '草稿'),
     ('submitted', '待审批'),
@@ -414,8 +426,19 @@ class DatacenterChangeRequest(models.Model):
     company = models.CharField('所属单位', max_length=120, blank=True)
     department = models.CharField('所属部门', max_length=120, blank=True)
     project_name = models.CharField('所属项目', max_length=120, blank=True)
+    assistance_type = models.CharField('协助类型', max_length=32, choices=ASSISTANCE_TYPE_CHOICES, default='other_support', blank=True)
     reason = models.TextField('申请原因', blank=True)
     request_content = models.TextField('申请内容', blank=True)
+    destination_ip = models.CharField('目的 IP 地址', max_length=120, blank=True)
+    destination_port = models.CharField('目的端口', max_length=120, blank=True)
+    firewall_open_at = models.DateTimeField('端口开通时间', null=True, blank=True)
+    ip_open_details = models.TextField('IP 开通说明', blank=True)
+    ip_open_at = models.DateTimeField('IP 开通时间', null=True, blank=True)
+    access_location = models.CharField('接入位置', max_length=120, blank=True)
+    access_at = models.DateTimeField('接入时间', null=True, blank=True)
+    antivirus_installed = models.BooleanField('已完成杀毒', default=False)
+    terminal_mac = models.CharField('终端 MAC 地址', max_length=50, blank=True)
+    related_links = models.TextField('相关链接', blank=True)
     impact_scope = models.TextField('影响范围', blank=True)
     requires_power_down = models.BooleanField('是否涉及下电', default=False)
     department_comment = models.TextField('部门意见', blank=True)

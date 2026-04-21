@@ -56,6 +56,64 @@ def get_or_create_profile(user):
     return profile
 
 
+EQUIPMENT_ASSISTANCE_TYPES = {'rack_in', 'rack_out', 'relocate'}
+
+
+def get_change_request_value(attrs, instance, field_name, default=''):
+    if field_name in attrs:
+        return attrs.get(field_name)
+    if instance is not None:
+        return getattr(instance, field_name, default)
+    return default
+
+
+def validate_assistance_request_payload(attrs, instance=None):
+    request_type = get_change_request_value(attrs, instance, 'request_type', 'assistance')
+    assistance_type = get_change_request_value(attrs, instance, 'assistance_type', 'other_support') or 'other_support'
+    items = attrs.get('items', None)
+    errors = {}
+
+    if 'terminal_mac' in attrs:
+        attrs['terminal_mac'] = normalize_mac_address(attrs.get('terminal_mac'))
+
+    if request_type != 'assistance':
+        return attrs
+
+    if assistance_type in EQUIPMENT_ASSISTANCE_TYPES:
+        current_items = items
+        if current_items is None and instance is not None:
+            current_items = list(instance.items.all())
+        if not current_items:
+            errors['items'] = ['设备上架、下架和迁移需至少填写一台设备。']
+
+    if assistance_type == 'firewall_port_open':
+        if not str(get_change_request_value(attrs, instance, 'destination_ip', '') or '').strip():
+            errors['destination_ip'] = ['请填写目的 IP 地址。']
+        if not str(get_change_request_value(attrs, instance, 'destination_port', '') or '').strip():
+            errors['destination_port'] = ['请填写目的端口。']
+        if not get_change_request_value(attrs, instance, 'firewall_open_at', None):
+            errors['firewall_open_at'] = ['请填写端口开通时间。']
+
+    if assistance_type == 'ip_open':
+        if not str(get_change_request_value(attrs, instance, 'ip_open_details', '') or '').strip():
+            errors['ip_open_details'] = ['请填写 IP 开通说明。']
+        if not get_change_request_value(attrs, instance, 'ip_open_at', None):
+            errors['ip_open_at'] = ['请填写 IP 开通时间。']
+
+    if assistance_type == 'external_terminal_access':
+        if not str(get_change_request_value(attrs, instance, 'access_location', '') or '').strip():
+            errors['access_location'] = ['请填写接入位置。']
+        if not get_change_request_value(attrs, instance, 'access_at', None):
+            errors['access_at'] = ['请填写接入时间。']
+        if not str(get_change_request_value(attrs, instance, 'terminal_mac', '') or '').strip():
+            errors['terminal_mac'] = ['请填写终端 MAC 地址。']
+
+    if errors:
+        raise serializers.ValidationError(errors)
+
+    return attrs
+
+
 class RackDeviceSerializer(serializers.ModelSerializer):
     class Meta:
         model = RackDevice
@@ -453,8 +511,19 @@ class DatacenterChangeRequestSerializer(serializers.ModelSerializer):
             'company',
             'department',
             'project_name',
+            'assistance_type',
             'reason',
             'request_content',
+            'destination_ip',
+            'destination_port',
+            'firewall_open_at',
+            'ip_open_details',
+            'ip_open_at',
+            'access_location',
+            'access_at',
+            'antivirus_installed',
+            'terminal_mac',
+            'related_links',
             'impact_scope',
             'requires_power_down',
             'department_comment',
@@ -493,14 +562,24 @@ class DatacenterChangeRequestSerializer(serializers.ModelSerializer):
             'company': {'required': False, 'allow_blank': True},
             'department': {'required': False, 'allow_blank': True},
             'project_name': {'required': False, 'allow_blank': True},
+            'assistance_type': {'required': False, 'allow_blank': True},
             'reason': {'required': False, 'allow_blank': True},
             'request_content': {'required': False, 'allow_blank': True},
+            'destination_ip': {'required': False, 'allow_blank': True},
+            'destination_port': {'required': False, 'allow_blank': True},
+            'ip_open_details': {'required': False, 'allow_blank': True},
+            'access_location': {'required': False, 'allow_blank': True},
+            'terminal_mac': {'required': False, 'allow_blank': True},
+            'related_links': {'required': False, 'allow_blank': True},
             'impact_scope': {'required': False, 'allow_blank': True},
             'department_comment': {'required': False, 'allow_blank': True},
             'it_comment': {'required': False, 'allow_blank': True},
             'review_comment': {'required': False, 'allow_blank': True},
             'execution_comment': {'required': False, 'allow_blank': True},
         }
+
+    def validate(self, attrs):
+        return validate_assistance_request_payload(attrs, instance=self.instance)
 
     def get_item_count(self, obj):
         prefetched_items = get_prefetched_related(obj, 'items')
@@ -576,8 +655,19 @@ class DatacenterChangeRequestPublicSerializer(serializers.ModelSerializer):
             'company',
             'department',
             'project_name',
+            'assistance_type',
             'reason',
             'request_content',
+            'destination_ip',
+            'destination_port',
+            'firewall_open_at',
+            'ip_open_details',
+            'ip_open_at',
+            'access_location',
+            'access_at',
+            'antivirus_installed',
+            'terminal_mac',
+            'related_links',
             'impact_scope',
             'requires_power_down',
             'planned_execute_at',
@@ -606,8 +696,19 @@ class DatacenterChangeRequestPublicSubmitSerializer(serializers.ModelSerializer)
             'company',
             'department',
             'project_name',
+            'assistance_type',
             'reason',
             'request_content',
+            'destination_ip',
+            'destination_port',
+            'firewall_open_at',
+            'ip_open_details',
+            'ip_open_at',
+            'access_location',
+            'access_at',
+            'antivirus_installed',
+            'terminal_mac',
+            'related_links',
             'impact_scope',
             'requires_power_down',
             'planned_execute_at',
@@ -622,14 +723,24 @@ class DatacenterChangeRequestPublicSubmitSerializer(serializers.ModelSerializer)
             'company': {'required': False, 'allow_blank': True},
             'department': {'required': False, 'allow_blank': True},
             'project_name': {'required': False, 'allow_blank': True},
+            'assistance_type': {'required': False, 'allow_blank': True},
             'reason': {'required': False, 'allow_blank': True},
             'request_content': {'required': False, 'allow_blank': True},
+            'destination_ip': {'required': False, 'allow_blank': True},
+            'destination_port': {'required': False, 'allow_blank': True},
+            'ip_open_details': {'required': False, 'allow_blank': True},
+            'access_location': {'required': False, 'allow_blank': True},
+            'terminal_mac': {'required': False, 'allow_blank': True},
+            'related_links': {'required': False, 'allow_blank': True},
             'impact_scope': {'required': False, 'allow_blank': True},
         }
 
+    def validate(self, attrs):
+        return validate_assistance_request_payload(attrs, instance=self.instance)
+
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])
-        validated_data.setdefault('request_type', 'rack_in')
+        validated_data.setdefault('request_type', 'assistance')
         validated_data['status'] = 'submitted'
         validated_data['title'] = build_change_request_title(
             validated_data,
