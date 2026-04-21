@@ -869,17 +869,27 @@ def _build_change_request_pdf(response_buffer, change_request):
         Spacer(1, 5 * mm),
     ]
 
-    info_rows = [
-        ['申请类型', type_label, '当前状态', status_label],
-        ['申请标题', change_request.title or '未填写', '审批编号', change_request.approval_code or '未填写'],
-        ['申请人', change_request.applicant_name or '未填写', '联系电话', change_request.applicant_phone or '未填写'],
-        ['联系邮箱', change_request.applicant_email or '未填写', '所属单位', change_request.company or '未填写'],
-        ['所属部门', change_request.department or '未填写', '所属项目', change_request.project_name or '未填写'],
-        ['计划执行时间', _format_change_datetime(change_request.planned_execute_at), '链接状态', _format_change_link_status(change_request)],
-        ['处理执行时间', _format_change_datetime(change_request.executed_at), '创建人', get_actor_name(change_request.created_by)],
-    ]
-    if change_request.request_type != 'assistance':
-        info_rows.insert(6, ['是否需要下电', '是' if change_request.requires_power_down else '否', '执行状态', status_label])
+    if change_request.request_type == 'assistance':
+        info_rows = [
+            ['申请类型', type_label, '当前状态', status_label],
+            ['申请标题', change_request.title or '未填写', '审批编号', change_request.approval_code or '未填写'],
+            ['需求联系人', change_request.applicant_name or '未填写', '联系方式', change_request.applicant_phone or '未填写'],
+            ['联系邮箱', change_request.applicant_email or '未填写', '申请单位', change_request.company or '未填写'],
+            ['需求处室', change_request.department or '未填写', '项目名称', change_request.project_name or '未填写'],
+            ['期望协助时间', _format_change_datetime(change_request.planned_execute_at), '链接状态', _format_change_link_status(change_request)],
+            ['处理完成时间', _format_change_datetime(change_request.executed_at), '创建人', get_actor_name(change_request.created_by)],
+        ]
+    else:
+        info_rows = [
+            ['申请类型', type_label, '当前状态', status_label],
+            ['申请标题', change_request.title or '未填写', '审批编号', change_request.approval_code or '未填写'],
+            ['申请人', change_request.applicant_name or '未填写', '联系电话', change_request.applicant_phone or '未填写'],
+            ['联系邮箱', change_request.applicant_email or '未填写', '所属单位', change_request.company or '未填写'],
+            ['所属部门', change_request.department or '未填写', '所属项目', change_request.project_name or '未填写'],
+            ['计划执行时间', _format_change_datetime(change_request.planned_execute_at), '链接状态', _format_change_link_status(change_request)],
+            ['是否需要下电', '是' if change_request.requires_power_down else '否', '执行状态', status_label],
+            ['处理执行时间', _format_change_datetime(change_request.executed_at), '创建人', get_actor_name(change_request.created_by)],
+        ]
 
     elements.append(Paragraph('一、申请信息', heading_style))
     info_table = Table(info_rows, colWidths=[24 * mm, 58 * mm, 24 * mm, 56 * mm])
@@ -983,11 +993,11 @@ def _build_change_request_pdf(response_buffer, change_request):
         elements.append(item_table)
         elements.append(Spacer(1, 5 * mm))
 
-    action_heading = '三、审批与处理' if change_request.request_type == 'assistance' else '四、审批与执行'
+    action_heading = '三、审批与处理记录' if change_request.request_type == 'assistance' else '四、审批与执行记录'
     elements.append(Paragraph(action_heading, heading_style))
     action_rows = [
-        ['部门意见', change_request.department_comment or '未填写'],
-        ['信息化意见', change_request.it_comment or '未填写'],
+        ['业务处室意见' if change_request.request_type == 'assistance' else '部门意见', change_request.department_comment or '未填写'],
+        ['科技与信息化处意见' if change_request.request_type == 'assistance' else '信息化意见', change_request.it_comment or '未填写'],
         ['审批意见', change_request.review_comment or '未填写'],
         ['审批人 / 时间', f'{change_request.reviewer_name or "未填写"} / {_format_change_datetime(change_request.reviewed_at)}'],
         ['处理人 / 时间' if change_request.request_type == 'assistance' else '执行人 / 时间', f'{change_request.executor_name or "未填写"} / {_format_change_datetime(change_request.executed_at)}'],
@@ -1012,6 +1022,42 @@ def _build_change_request_pdf(response_buffer, change_request):
         )
     )
     elements.append(action_table)
+
+    elements.append(Spacer(1, 5 * mm))
+    signature_heading = '四、签字栏' if change_request.request_type == 'assistance' else '五、签字确认'
+    elements.append(Paragraph(signature_heading, heading_style))
+    if change_request.request_type == 'assistance':
+        signature_rows = [
+            ['申请单位（盖章）', change_request.company or '____________________'],
+            ['业务处室签名', '签字：____________________    日期：____________________'],
+            ['科信处领导签名', f'签字：{change_request.reviewer_name or "____________________"}    日期：{_format_change_datetime(change_request.reviewed_at) if change_request.reviewed_at else "____________________"}'],
+            ['协助处理人', f'{change_request.executor_name or "____________________"}    日期：{_format_change_datetime(change_request.executed_at) if change_request.executed_at else "____________________"}'],
+        ]
+    else:
+        signature_rows = [
+            ['申请部门签字', '签字：____________________    日期：____________________'],
+            ['审批领导签字', f'签字：{change_request.reviewer_name or "____________________"}    日期：{_format_change_datetime(change_request.reviewed_at) if change_request.reviewed_at else "____________________"}'],
+            ['执行确认签字', f'签字：{change_request.executor_name or "____________________"}    日期：{_format_change_datetime(change_request.executed_at) if change_request.executed_at else "____________________"}'],
+        ]
+    signature_table = Table(signature_rows, colWidths=[38 * mm, 126 * mm])
+    signature_table.setStyle(
+        TableStyle(
+            [
+                ('FONTNAME', (0, 0), (-1, -1), base_font),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('LEADING', (0, 0), (-1, -1), 16),
+                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#eff6ff')),
+                ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#334155')),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                ('TOPPADDING', (0, 0), (-1, -1), 8),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ]
+        )
+    )
+    elements.append(signature_table)
     doc.build(elements)
 
 

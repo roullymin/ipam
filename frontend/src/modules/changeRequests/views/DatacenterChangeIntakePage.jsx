@@ -32,6 +32,25 @@ const formatDateTime = (value) => {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('zh-CN', { hour12: false });
 };
 
+const extractResponseMessage = async (response, fallback) => {
+  try {
+    const payload = await response.clone().json();
+    if (typeof payload === 'string') return payload;
+    return payload.detail || payload.message || payload.error || JSON.stringify(payload);
+  } catch {
+    try {
+      const text = await response.text();
+      if (!text) return fallback;
+      if (text.includes('<!doctype') || text.includes('<html')) {
+        return '接口返回了网页内容而不是 JSON，请检查后端服务是否已更新、已重启，并已执行数据库迁移。';
+      }
+      return text;
+    } catch {
+      return fallback;
+    }
+  }
+};
+
 const ReadonlyField = ({ label, value }) => (
   <div>
     <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</div>
@@ -61,8 +80,8 @@ export default function DatacenterChangeIntakePage() {
     try {
       await fetchCsrfToken();
       const response = await safeFetch(`/api/public/change-requests/${token}/`);
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail || payload.message || '加载申请信息失败。');
+      if (!response.ok) throw new Error(await extractResponseMessage(response, '加载申请信息失败。'));
+      const payload = await response.json().catch(() => ({}));
       setRequestData(payload.request);
       setForm({
         title: payload.request.title || '',
@@ -135,8 +154,8 @@ export default function DatacenterChangeIntakePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
       });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail || payload.message || '提交申请失败。');
+      if (!response.ok) throw new Error(await extractResponseMessage(response, '提交申请失败。'));
+      const payload = await response.json().catch(() => ({}));
       setNotice('申请信息已提交，后续将进入审批流程。');
       setRequestData(payload.request);
     } catch (requestError) {
@@ -215,13 +234,13 @@ export default function DatacenterChangeIntakePage() {
 
           <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <label className="text-sm text-slate-700">申请标题<input value={form.title} onChange={(e) => setField('title', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
-            <label className="text-sm text-slate-700">申请人<input value={form.applicant_name} onChange={(e) => setField('applicant_name', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
-            <label className="text-sm text-slate-700">联系电话<input value={form.applicant_phone} onChange={(e) => setField('applicant_phone', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            <label className="text-sm text-slate-700">{assistance ? '需求联系人' : '申请人'}<input value={form.applicant_name} onChange={(e) => setField('applicant_name', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            <label className="text-sm text-slate-700">{assistance ? '联系方式' : '联系电话'}<input value={form.applicant_phone} onChange={(e) => setField('applicant_phone', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
             <label className="text-sm text-slate-700">联系邮箱<input value={form.applicant_email} onChange={(e) => setField('applicant_email', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
-            <label className="text-sm text-slate-700">所属单位<input value={form.company} onChange={(e) => setField('company', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
-            <label className="text-sm text-slate-700">所属部门<input value={form.department} onChange={(e) => setField('department', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
-            <label className="text-sm text-slate-700">项目名称<input value={form.project_name} onChange={(e) => setField('project_name', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
-            <label className="text-sm text-slate-700">{assistance ? '期望处理时间' : '计划执行时间'}<input type="datetime-local" value={form.planned_execute_at} onChange={(e) => setField('planned_execute_at', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            <label className="text-sm text-slate-700">{assistance ? '申请单位' : '所属单位'}<input value={form.company} onChange={(e) => setField('company', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            <label className="text-sm text-slate-700">{assistance ? '需求处室' : '所属部门'}<input value={form.department} onChange={(e) => setField('department', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            <label className="text-sm text-slate-700">{assistance ? '项目名称' : '所属项目'}<input value={form.project_name} onChange={(e) => setField('project_name', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            <label className="text-sm text-slate-700">{assistance ? '期望协助时间' : '计划执行时间'}<input type="datetime-local" value={form.planned_execute_at} onChange={(e) => setField('planned_execute_at', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
           </section>
 
           {assistance ? (

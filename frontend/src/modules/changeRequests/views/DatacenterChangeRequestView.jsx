@@ -160,6 +160,24 @@ const formatApiError = (payload, fallback) => {
   return messages.join(' | ') || fallback;
 };
 
+const extractResponseMessage = async (response, fallback) => {
+  try {
+    const payload = await response.clone().json();
+    return formatApiError(payload, fallback);
+  } catch {
+    try {
+      const text = await response.text();
+      if (!text) return fallback;
+      if (text.includes('<!doctype') || text.includes('<html')) {
+        return '接口返回了网页内容而不是 JSON，请检查后端服务是否已更新、已重启，并已执行数据库迁移。';
+      }
+      return text;
+    } catch {
+      return fallback;
+    }
+  }
+};
+
 const isLinkActive = (request) => request?.token_expires_at && new Date(request.token_expires_at).getTime() > Date.now();
 
 const findRack = (topology, datacenterId, rackId) =>
@@ -190,10 +208,10 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
         safeFetch('/api/datacenter-change-requests/'),
         safeFetch('/api/datacenter-change-requests/topology/'),
       ]);
-      const listData = await listRes.json();
-      const topologyData = await topologyRes.json();
-      if (!listRes.ok) throw new Error(listData.detail || listData.message || '加载申请列表失败。');
-      if (!topologyRes.ok) throw new Error(topologyData.detail || topologyData.message || '加载机房拓扑失败。');
+      if (!listRes.ok) throw new Error(await extractResponseMessage(listRes, '加载申请列表失败。'));
+      if (!topologyRes.ok) throw new Error(await extractResponseMessage(topologyRes, '加载机房拓扑失败。'));
+      const listData = await listRes.json().catch(() => []);
+      const topologyData = await topologyRes.json().catch(() => ({}));
       setRequests(Array.isArray(listData) ? listData : listData?.results || []);
       setTopology(topologyData.datacenters || []);
     } catch (requestError) {
@@ -395,8 +413,8 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const result = await response.json();
-      if (!response.ok) throw new Error(formatApiError(result, '创建草稿失败。'));
+      if (!response.ok) throw new Error(await extractResponseMessage(response, '创建草稿失败。'));
+      const result = await response.json().catch(() => ({}));
       setNotice(`已生成独立链接：${result.request_code}`);
       setOpen(false);
       resetForm();
@@ -416,8 +434,8 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const result = await response.json();
-      if (!response.ok) throw new Error(formatApiError(result, '操作失败。'));
+      if (!response.ok) throw new Error(await extractResponseMessage(response, '操作失败。'));
+      const result = await response.json().catch(() => ({}));
       setNotice(message);
       await loadData();
     } catch (requestError) {
@@ -463,8 +481,8 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
           items: executionForm.items.map(normalizeExecutionItem),
         }),
       });
-      const result = await response.json();
-      if (!response.ok) throw new Error(formatApiError(result, executionAssistance ? '处理回填失败。' : '执行回填失败。'));
+      if (!response.ok) throw new Error(await extractResponseMessage(response, executionAssistance ? '处理回填失败。' : '执行回填失败。'));
+      const result = await response.json().catch(() => ({}));
       setNotice(`申请 ${result.request?.request_code || executionTarget.request_code} 已${executionAssistance ? '处理回填' : '执行回填'}并标记为完成。`);
       setExecutionOpen(false);
       setExecutionTarget(null);
@@ -654,13 +672,13 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             <label className="text-sm text-slate-700">申请类型<select value={form.request_type} onChange={(e) => updateField('request_type', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5">{REQUEST_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
             <label className="text-sm text-slate-700">申请标题<input value={form.title} onChange={(e) => updateField('title', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
-            <label className="text-sm text-slate-700">申请人<input value={form.applicant_name} onChange={(e) => updateField('applicant_name', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
-            <label className="text-sm text-slate-700">联系电话<input value={form.applicant_phone} onChange={(e) => updateField('applicant_phone', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            <label className="text-sm text-slate-700">{assistanceDraft ? '需求联系人' : '申请人'}<input value={form.applicant_name} onChange={(e) => updateField('applicant_name', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            <label className="text-sm text-slate-700">{assistanceDraft ? '联系方式' : '联系电话'}<input value={form.applicant_phone} onChange={(e) => updateField('applicant_phone', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
             <label className="text-sm text-slate-700">联系邮箱<input value={form.applicant_email} onChange={(e) => updateField('applicant_email', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
-            <label className="text-sm text-slate-700">所属单位<input value={form.company} onChange={(e) => updateField('company', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
-            <label className="text-sm text-slate-700">所属部门<input value={form.department} onChange={(e) => updateField('department', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
-            <label className="text-sm text-slate-700">项目名称<input value={form.project_name} onChange={(e) => updateField('project_name', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
-            <label className="text-sm text-slate-700">计划处理时间<input type="datetime-local" value={form.planned_execute_at} onChange={(e) => updateField('planned_execute_at', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            <label className="text-sm text-slate-700">{assistanceDraft ? '申请单位' : '所属单位'}<input value={form.company} onChange={(e) => updateField('company', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            <label className="text-sm text-slate-700">{assistanceDraft ? '需求处室' : '所属部门'}<input value={form.department} onChange={(e) => updateField('department', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            <label className="text-sm text-slate-700">{assistanceDraft ? '项目名称' : '所属项目'}<input value={form.project_name} onChange={(e) => updateField('project_name', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+            <label className="text-sm text-slate-700">{assistanceDraft ? '期望协助时间' : '计划处理时间'}<input type="datetime-local" value={form.planned_execute_at} onChange={(e) => updateField('planned_execute_at', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
           </div>
 
           {assistanceDraft ? (
