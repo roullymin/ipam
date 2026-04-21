@@ -393,6 +393,10 @@ def _get_resident_registration_url(request):
     return request.build_absolute_uri('/?resident-intake=1')
 
 
+def _get_public_change_request_entry_url(request):
+    return request.build_absolute_uri('/?change-request-intake=1')
+
+
 def _get_resident_intake_url(request, token=''):
     suffix = '/?resident-intake=1'
     if token:
@@ -445,6 +449,60 @@ def _format_resident_display_date(value):
     if isinstance(value, datetime):
         value = value.date()
     return value.strftime('%Y-%m-%d')
+
+
+def _build_public_change_request_template():
+    return {
+        'request_code': '',
+        'request_type': 'rack_in',
+        'status': 'draft',
+        'approval_code': '',
+        'title': '',
+        'applicant_name': '',
+        'applicant_phone': '',
+        'applicant_email': '',
+        'company': '',
+        'department': '',
+        'project_name': '',
+        'reason': '',
+        'request_content': '',
+        'impact_scope': '',
+        'requires_power_down': False,
+        'planned_execute_at': '',
+        'token_expires_at': None,
+        'public_export_url': '',
+        'items': [
+            {
+                'device_name': '',
+                'device_model': '',
+                'serial_number': '',
+                'quantity': 1,
+                'is_rack_mounted': True,
+                'u_height': 1,
+                'power_watts': 0,
+                'power_circuit': '',
+                'network_role': 'none',
+                'ip_quantity': 0,
+                'requires_static_ip': False,
+                'ip_action': 'allocate',
+                'assigned_management_ip': '',
+                'assigned_service_ip': '',
+                'source_datacenter': None,
+                'source_datacenter_name': '',
+                'source_rack': None,
+                'source_rack_code': '',
+                'source_u_start': None,
+                'source_u_end': None,
+                'target_datacenter': None,
+                'target_datacenter_name': '',
+                'target_rack': None,
+                'target_rack_code': '',
+                'target_u_start': None,
+                'target_u_end': None,
+                'notes': '',
+            }
+        ],
+    }
 
 
 def _resolve_existing_resident_for_intake(company, name, phone='', email=''):
@@ -1859,6 +1917,39 @@ def api_resident_intake_export_pdf(request):
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 @authentication_classes([])
+def public_change_request_entry(request):
+    if request.method == 'POST':
+        serializer = DatacenterChangeRequestPublicSubmitSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        change_request = serializer.save()
+        return Response(
+            {
+                'status': 'success',
+                'message': '申请信息已提交。',
+                'entry': {
+                    'public_link': _get_public_change_request_entry_url(request),
+                    'is_permanent': True,
+                },
+                'request': DatacenterChangeRequestPublicSerializer(change_request, context={'request': request}).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    return Response(
+        {
+            'status': 'success',
+            'entry': {
+                'public_link': _get_public_change_request_entry_url(request),
+                'is_permanent': True,
+            },
+            'request': _build_public_change_request_template(),
+        }
+    )
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([AllowAny])
+@authentication_classes([])
 def public_change_request_detail(request, token):
     change_request = (
         DatacenterChangeRequest.objects.prefetch_related(
@@ -1886,11 +1977,11 @@ def public_change_request_detail(request, token):
             {
                 'status': 'success',
                 'message': '申请信息已提交。',
-                'request': DatacenterChangeRequestPublicSerializer(change_request).data,
+                'request': DatacenterChangeRequestPublicSerializer(change_request, context={'request': request}).data,
             }
         )
 
-    serializer = DatacenterChangeRequestPublicSerializer(change_request)
+    serializer = DatacenterChangeRequestPublicSerializer(change_request, context={'request': request})
     return Response({'status': 'success', 'request': serializer.data})
 
 

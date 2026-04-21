@@ -4,10 +4,8 @@ import {
   Copy,
   ExternalLink,
   FileText,
-  Link2Off,
   Plus,
   RefreshCw,
-  RotateCcw,
   Send,
   Trash2,
   Wrench,
@@ -177,8 +175,6 @@ const extractResponseMessage = async (response, fallback) => {
     }
   }
 };
-
-const isLinkActive = (request) => request?.token_expires_at && new Date(request.token_expires_at).getTime() > Date.now();
 
 const findRack = (topology, datacenterId, rackId) =>
   topology.find((dc) => String(dc.id) === String(datacenterId))?.racks?.find((rack) => String(rack.id) === String(rackId));
@@ -632,6 +628,7 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
   ];
   const assistanceDraft = isAssistanceRequest(form.request_type);
   const executionAssistance = isAssistanceRequest(executionTarget?.request_type);
+  const publicEntryLink = typeof window === 'undefined' ? '/?change-request-intake=1' : new URL('/?change-request-intake=1', window.location.origin).toString();
 
   if (loading && !requests.length) {
     return <div className="p-8 text-sm text-slate-500">正在加载申请中心...</div>;
@@ -654,6 +651,20 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
           </div>
           {error ? <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
           {notice ? <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</div> : null}
+        </section>
+
+        <section className="rounded-[24px] border border-slate-200 bg-white px-6 py-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="text-sm font-bold text-slate-900">公开申请入口</div>
+              <div className="text-sm text-slate-500">这是固定公开表单地址，可直接复制发给申请方，无需先创建草稿或设置链接时效。</div>
+              <div className="break-all font-mono text-xs text-slate-400">{publicEntryLink}</div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => copyLink(publicEntryLink)} className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-bold text-blue-700 hover:bg-blue-100" type="button"><Copy className="h-4 w-4" />复制公开链接</button>
+              <button onClick={() => window.open(publicEntryLink, '_blank', 'noopener,noreferrer')} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50" type="button"><ExternalLink className="h-4 w-4" />打开公开入口</button>
+            </div>
+          </div>
         </section>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -727,7 +738,6 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
                 {displayRequests.map((request) => {
                   const item = request.items?.[0];
                   const assistanceType = isAssistanceRequest(request.request_type);
-                  const active = isLinkActive(request);
                   const isFocused = focusedRequestId && String(request.id) === String(focusedRequestId);
                   return (
                     <tr
@@ -748,13 +758,12 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
                         <div className="mt-1 text-xs text-slate-500">{assistanceType ? request.request_content || request.reason || '等待补充协助内容' : item?.assigned_management_ip || item?.device_model || '等待补充'}</div>
                       </td>
                       <td className="px-6 py-4">
-                        <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${active ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>{STATUS_LABELS[request.status] || request.status}</span>
-                        <div className="mt-2 text-xs text-slate-500">{active ? '链接有效' : '链接失效'} / {formatDateTime(request.token_expires_at)}</div>
+                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-bold text-slate-700">{STATUS_LABELS[request.status] || request.status}</span>
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex flex-wrap gap-2">
-                          <button onClick={() => copyLink(request.public_link)} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button"><Copy className="h-3.5 w-3.5" />复制</button>
-                          <button onClick={() => window.open(request.public_link, '_blank', 'noopener,noreferrer')} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button"><ExternalLink className="h-3.5 w-3.5" />打开</button>
+                          <button onClick={() => copyLink(publicEntryLink)} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button"><Copy className="h-3.5 w-3.5" />复制</button>
+                          <button onClick={() => window.open(publicEntryLink, '_blank', 'noopener,noreferrer')} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button"><ExternalLink className="h-3.5 w-3.5" />打开</button>
                           <button onClick={() => window.open(`/api/datacenter-change-requests/${request.id}/export_pdf/`, '_blank', 'noopener,noreferrer')} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button"><FileText className="h-3.5 w-3.5" />PDF</button>
                         </div>
                       </td>
@@ -769,9 +778,6 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
                             </>
                           ) : null}
                           {['approved', 'scheduled'].includes(request.status) ? <button onClick={() => openExecutionModal(request)} className="inline-flex items-center gap-1 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700" type="button"><Wrench className="h-3.5 w-3.5" />{assistanceType ? '处理回填' : '执行回填'}</button> : null}
-                          <button onClick={() => triggerAction(request.id, 'set_link_expiry', '链接有效期已设置为 7 天。', { expires_in_days: 7 })} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button">7天</button>
-                          <button onClick={() => triggerAction(request.id, 'set_link_expiry', '链接有效期已设置为 30 天。', { expires_in_days: 30 })} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50" type="button">30天</button>
-                          {active ? <button onClick={() => triggerAction(request.id, 'revoke_link', '公开申请链接已作废。')} className="inline-flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700" type="button"><Link2Off className="h-3.5 w-3.5" />作废</button> : <button onClick={() => triggerAction(request.id, 'restore_link', '公开申请链接已恢复。', { expires_in_days: 14 })} className="inline-flex items-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700" type="button"><RotateCcw className="h-3.5 w-3.5" />恢复</button>}
                         </div>
                       </td>
                     </tr>

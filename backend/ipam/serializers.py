@@ -510,7 +510,7 @@ class DatacenterChangeRequestSerializer(serializers.ModelSerializer):
 
     def get_public_link(self, obj):
         request = self.context.get('request')
-        path = f'/?change-request-intake=1&token={obj.public_token}'
+        path = '/?change-request-intake=1'
         return request.build_absolute_uri(path) if request else path
 
     def _build_default_title(self, validated_data, items_data):
@@ -560,6 +560,7 @@ class DatacenterChangeRequestSerializer(serializers.ModelSerializer):
 
 class DatacenterChangeRequestPublicSerializer(serializers.ModelSerializer):
     items = DatacenterChangeItemSerializer(many=True, read_only=True)
+    public_export_url = serializers.SerializerMethodField()
 
     class Meta:
         model = DatacenterChangeRequest
@@ -581,8 +582,14 @@ class DatacenterChangeRequestPublicSerializer(serializers.ModelSerializer):
             'requires_power_down',
             'planned_execute_at',
             'token_expires_at',
+            'public_export_url',
             'items',
         ]
+
+    def get_public_export_url(self, obj):
+        request = self.context.get('request')
+        path = f'/api/public/change-requests/{obj.public_token}/export-pdf/'
+        return request.build_absolute_uri(path) if request else path
 
 
 class DatacenterChangeRequestPublicSubmitSerializer(serializers.ModelSerializer):
@@ -591,6 +598,7 @@ class DatacenterChangeRequestPublicSubmitSerializer(serializers.ModelSerializer)
     class Meta:
         model = DatacenterChangeRequest
         fields = [
+            'request_type',
             'title',
             'applicant_name',
             'applicant_phone',
@@ -610,6 +618,7 @@ class DatacenterChangeRequestPublicSubmitSerializer(serializers.ModelSerializer)
             'applicant_name': {'required': False, 'allow_blank': True},
             'applicant_phone': {'required': False, 'allow_blank': True},
             'applicant_email': {'required': False, 'allow_blank': True},
+            'request_type': {'required': False},
             'company': {'required': False, 'allow_blank': True},
             'department': {'required': False, 'allow_blank': True},
             'project_name': {'required': False, 'allow_blank': True},
@@ -618,12 +627,32 @@ class DatacenterChangeRequestPublicSubmitSerializer(serializers.ModelSerializer)
             'impact_scope': {'required': False, 'allow_blank': True},
         }
 
+    def create(self, validated_data):
+        items_data = validated_data.pop('items', [])
+        validated_data.setdefault('request_type', 'rack_in')
+        validated_data['status'] = 'submitted'
+        validated_data['title'] = build_change_request_title(
+            validated_data,
+            items_data,
+            DatacenterChangeRequest._meta.get_field('request_type').choices,
+        )
+        change_request = DatacenterChangeRequest.objects.create(**validated_data)
+        for item_data in items_data:
+            DatacenterChangeItem.objects.create(request=change_request, **item_data)
+        return change_request
+
     def update(self, instance, validated_data):
         items_data = validated_data.pop('items', None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         if instance.status == 'draft':
             instance.status = 'submitted'
+        if not instance.title:
+            instance.title = build_change_request_title(
+                {'request_type': instance.request_type, 'title': instance.title},
+                items_data if items_data is not None else list(instance.items.values('device_name')[:1]),
+                DatacenterChangeRequest._meta.get_field('request_type').choices,
+            )
         instance.save()
 
         if items_data is not None:
