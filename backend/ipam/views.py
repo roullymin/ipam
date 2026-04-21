@@ -400,6 +400,21 @@ def _get_resident_intake_url(request, token=''):
     return request.build_absolute_uri(suffix)
 
 
+def _build_resident_intake_link_payload(request, intake_link=None):
+    if intake_link is None:
+        return {
+            'token': '',
+            'expires_at': None,
+            'created_at': None,
+            'intake_url': _get_resident_registration_url(request),
+            'is_permanent': True,
+        }
+
+    payload = ResidentIntakeLinkSerializer(intake_link, context={'request': request}).data
+    payload['is_permanent'] = False
+    return payload
+
+
 def _resolve_resident_intake_link(token):
     normalized = str(token or '').strip()
     if not normalized:
@@ -1664,16 +1679,18 @@ class ResidentStaffViewSet(OptionalPaginationMixin, BaseViewSet):
 @permission_classes([AllowAny])
 @authentication_classes([])
 def api_resident_intake(request):
-    token = request.query_params.get('token') or request.data.get('token')
-    intake_link, error_response = _resolve_resident_intake_link(token)
-    if error_response is not None:
-        return error_response
+    token = (request.query_params.get('token') or request.data.get('token') or '').strip()
+    intake_link = None
+    if token:
+        intake_link, error_response = _resolve_resident_intake_link(token)
+        if error_response is not None:
+            return error_response
 
     if request.method == 'GET':
         return Response(
             {
                 'status': 'success',
-                'link': ResidentIntakeLinkSerializer(intake_link, context={'request': request}).data,
+                'link': _build_resident_intake_link_payload(request, intake_link),
             }
         )
 
@@ -1763,7 +1780,7 @@ def api_resident_intake(request):
         return Response(
             {
                 'status': 'success',
-                'link': ResidentIntakeLinkSerializer(intake_link, context={'request': request}).data,
+                'link': _build_resident_intake_link_payload(request, intake_link),
                 'message': f'提交完成：新增 {created_count} 人，更新 {updated_count} 人。',
                 'created': created_count,
                 'updated': updated_count,
@@ -1789,7 +1806,7 @@ def api_resident_intake(request):
         return Response(
             {
                 'status': 'success',
-                'link': ResidentIntakeLinkSerializer(intake_link, context={'request': request}).data,
+                'link': _build_resident_intake_link_payload(request, intake_link),
                 'message': '提交完成：新增 1 人，更新 0 人。' if existing_resident is None else '提交完成：新增 0 人，更新 1 人。',
                 'created': 1 if existing_resident is None else 0,
                 'updated': 0 if existing_resident is None else 1,

@@ -1061,6 +1061,45 @@ class ResidentIntakeTests(BaseApiTestCase):
     def setUp(self):
         self.client = self.make_authenticated_client(self.dc_operator)
 
+    def test_public_resident_intake_without_token_returns_fixed_entry(self):
+        response = self.client.get('/api/resident-intake/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['link']['token'], '')
+        self.assertTrue(response.data['link']['is_permanent'])
+        self.assertIn('/?resident-intake=1', response.data['link']['intake_url'])
+
+    def test_public_resident_intake_without_token_allows_submission(self):
+        response = self.client.post(
+            '/api/resident-intake/',
+            {
+                'company_profile': {
+                    'company': 'Example Co',
+                    'project_name': 'Project X',
+                    'department': 'Ops',
+                    'resident_type': 'implementation',
+                },
+                'staff_members': [
+                    {
+                        'name': 'Alice',
+                        'phone': '13800000000',
+                        'email': 'alice@example.com',
+                        'devices': [],
+                    }
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['created'], 1)
+        self.assertEqual(response.data['updated'], 0)
+        self.assertTrue(response.data['link']['is_permanent'])
+        resident = ResidentStaff.objects.get()
+        self.assertEqual(resident.company, 'Example Co')
+        self.assertEqual(resident.approval_status, 'pending')
+        self.assertEqual(resident.intake_source, 'qr')
+
     def test_public_resident_intake_updates_existing_record_and_formats_mac(self):
         resident = ResidentStaff.objects.create(
             company='Example Co',

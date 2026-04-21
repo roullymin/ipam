@@ -87,23 +87,20 @@ export default function ResidentIntakePage() {
 
   useEffect(() => {
     const loadLink = async () => {
-      if (!token) {
-        setLinkError('缺少驻场登记链接令牌。');
-        setLoadingLink(false);
-        return;
-      }
-
       setLoadingLink(true);
       setLinkError('');
       try {
-        const response = await safeFetch(`/api/resident-intake/?token=${encodeURIComponent(token)}`);
+        const requestUrl = token
+          ? `/api/resident-intake/?token=${encodeURIComponent(token)}`
+          : '/api/resident-intake/';
+        const response = await safeFetch(requestUrl);
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
-          throw new Error(payload.detail || payload.message || '加载驻场登记链接失败。');
+          throw new Error(payload.detail || payload.message || '加载驻场登记入口失败。');
         }
         setLinkData(payload.link || null);
       } catch (error) {
-        setLinkError(error.message || '加载驻场登记链接失败。');
+        setLinkError(error.message || '加载驻场登记入口失败。');
       } finally {
         setLoadingLink(false);
       }
@@ -119,12 +116,11 @@ export default function ResidentIntakePage() {
     }),
     [submittedCodes],
   );
+  const isPermanentEntry = !token || !!linkData?.is_permanent;
 
   const updateMember = (index, patch) => {
     setStaffMembers((prev) =>
-      prev.map((member, memberIndex) =>
-        memberIndex === index ? { ...member, ...patch } : member,
-      ),
+      prev.map((member, memberIndex) => (memberIndex === index ? { ...member, ...patch } : member)),
     );
   };
 
@@ -152,7 +148,9 @@ export default function ResidentIntakePage() {
   };
 
   const removeMember = (index) => {
-    setStaffMembers((prev) => (prev.length === 1 ? [{ ...EMPTY_MEMBER }] : prev.filter((_, currentIndex) => currentIndex !== index)));
+    setStaffMembers((prev) =>
+      prev.length === 1 ? [{ ...EMPTY_MEMBER }] : prev.filter((_, currentIndex) => currentIndex !== index),
+    );
   };
 
   const addDevice = (memberIndex) => {
@@ -206,9 +204,7 @@ export default function ResidentIntakePage() {
       ),
     }));
 
-    const invalidMemberIndex = normalizedMembers.findIndex(
-      (member) => !member.name || !member.phone,
-    );
+    const invalidMemberIndex = normalizedMembers.findIndex((member) => !member.name || !member.phone);
     if (invalidMemberIndex >= 0) {
       alert(`第 ${invalidMemberIndex + 1} 位人员缺少姓名或联系电话。`);
       return;
@@ -220,14 +216,14 @@ export default function ResidentIntakePage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          token,
+          ...(token ? { token } : {}),
           company_profile: companyProfile,
           staff_members: normalizedMembers,
         }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        alert(JSON.stringify(payload.errors || payload.detail || '提交失败'));
+        alert(JSON.stringify(payload.errors || payload.detail || '提交失败。'));
         return;
       }
 
@@ -275,7 +271,7 @@ export default function ResidentIntakePage() {
             <div className="flex-1">
               <div className="text-3xl font-black text-slate-900">登记已提交</div>
               <div className="mt-2 text-sm leading-6 text-slate-500">
-                本次提交的驻场资料已进入待审核列表。你可以现在直接下载或打印申请单，拿给项目经理或领导签字。
+                本次提交的驻场资料已进入待审核列表。你现在可以直接下载或打印本次申请单，用于后续签字与备案。
               </div>
             </div>
           </div>
@@ -303,7 +299,7 @@ export default function ResidentIntakePage() {
               type="button"
             >
               <Printer className="mr-2 h-4 w-4" />
-              打开打印版
+              打开打印预览
             </button>
             <button
               onClick={resetForm}
@@ -321,7 +317,7 @@ export default function ResidentIntakePage() {
   if (loadingLink) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6 text-sm text-slate-500">
-        正在校验驻场登记链接...
+        正在加载驻场登记入口...
       </div>
     );
   }
@@ -330,7 +326,7 @@ export default function ResidentIntakePage() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
         <div className="w-full max-w-2xl rounded-3xl border border-rose-200 bg-white p-8 shadow-xl">
-          <div className="text-2xl font-black text-slate-900">驻场登记链接不可用</div>
+          <div className="text-2xl font-black text-slate-900">驻场登记入口不可用</div>
           <div className="mt-3 text-sm leading-6 text-slate-500">{linkError}</div>
         </div>
       </div>
@@ -346,10 +342,14 @@ export default function ResidentIntakePage() {
             <div>
               <h1 className="text-3xl font-black tracking-tight text-slate-900">驻场人员登记</h1>
               <p className="mt-2 text-sm leading-6 text-slate-500">
-                这是管理员生成的临时驻场登记链接。支持同公司多名人员一次登记，提交后即可下载或打印本次申请单。
+                {isPermanentEntry
+                  ? '这是公开登记入口，可由外部单位直接填写驻场信息并提交。支持同公司多名人员一次登记，提交后即可下载或打印本次申请单。'
+                  : '这是管理员生成的临时驻场登记链接。支持同公司多名人员一次登记，提交后即可下载或打印本次申请单。'}
               </p>
               <div className="mt-3 inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
-                链接有效期：{linkData?.expires_at ? new Date(linkData.expires_at).toLocaleString('zh-CN', { hour12: false }) : '未设置'}
+                {isPermanentEntry
+                  ? '公开固定入口'
+                  : `链接有效期至：${linkData?.expires_at ? new Date(linkData.expires_at).toLocaleString('zh-CN', { hour12: false }) : '未设置'}`}
               </div>
             </div>
           </div>
@@ -524,7 +524,9 @@ export default function ResidentIntakePage() {
                           <Field
                             label="设备名称"
                             value={device.device_name}
-                            onChange={(value) => updateDevice(memberIndex, deviceIndex, { device_name: value })}
+                            onChange={(value) =>
+                              updateDevice(memberIndex, deviceIndex, { device_name: value })
+                            }
                           />
                           <Field
                             label="序列号"
@@ -546,13 +548,17 @@ export default function ResidentIntakePage() {
                           <Field
                             label="有线 MAC"
                             value={device.wired_mac}
-                            onChange={(value) => updateDeviceMac(memberIndex, deviceIndex, 'wired_mac', value)}
+                            onChange={(value) =>
+                              updateDeviceMac(memberIndex, deviceIndex, 'wired_mac', value)
+                            }
                             placeholder="782b-4645-c9a0"
                           />
                           <Field
                             label="无线 MAC"
                             value={device.wireless_mac}
-                            onChange={(value) => updateDeviceMac(memberIndex, deviceIndex, 'wireless_mac', value)}
+                            onChange={(value) =>
+                              updateDeviceMac(memberIndex, deviceIndex, 'wireless_mac', value)
+                            }
                             placeholder="782b-4645-c9a0"
                           />
                           <Field

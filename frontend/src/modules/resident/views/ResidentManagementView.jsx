@@ -127,7 +127,6 @@ export default function ResidentManagementView({ residentStaff, onRefresh, initi
   const fileInputRef = useRef(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [formData, setFormData] = useState(EMPTY_FORM);
-  const [intakeLink, setIntakeLink] = useState(null);
   const [editingResident, setEditingResident] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -220,6 +219,10 @@ export default function ResidentManagementView({ residentStaff, onRefresh, initi
     () => Object.entries(typeLabels).map(([value, label]) => ({ value, label })),
     [],
   );
+  const registrationLink = useMemo(() => {
+    if (typeof window === 'undefined') return '/?resident-intake=1';
+    return new URL('/?resident-intake=1', window.location.origin).toString();
+  }, []);
 
   const toggleExpandedResident = (residentId) => {
     setExpandedResidentIds((prev) =>
@@ -379,26 +382,7 @@ export default function ResidentManagementView({ residentStaff, onRefresh, initi
   };
 
   const downloadRegistrationQr = () => {
-    if (!intakeLink?.token) {
-      alert('请先生成一条时效分享链接。');
-      return;
-    }
-    window.open(`/api/resident-staff/registration_qr/?token=${encodeURIComponent(intakeLink.token)}`, '_blank');
-  };
-
-  const createRegistrationLink = async (expiresInHours) => {
-    const response = await safeFetch('/api/resident-staff/create_intake_link/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ expires_in_hours: expiresInHours }),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      alert(payload.detail || payload.message || '生成分享链接失败。');
-      return null;
-    }
-    setIntakeLink(payload.link || null);
-    return payload.link || null;
+    window.open('/api/resident-staff/registration_qr/', '_blank');
   };
 
   const triggerImport = () => {
@@ -447,13 +431,11 @@ export default function ResidentManagementView({ residentStaff, onRefresh, initi
   };
 
   const copyRegistrationLink = async () => {
-    const activeLink = intakeLink?.intake_url || (await createRegistrationLink(24))?.intake_url;
-    if (!activeLink) return;
     try {
-      await navigator.clipboard.writeText(activeLink);
+      await navigator.clipboard.writeText(registrationLink);
       alert('分享链接已复制，可直接发给驻场人员。');
     } catch {
-      alert(`请手动复制这条链接：\n${activeLink}`);
+      alert(`请手动复制这条链接：\n${registrationLink}`);
     }
   };
 
@@ -471,11 +453,8 @@ export default function ResidentManagementView({ residentStaff, onRefresh, initi
         <ResidentOverview stats={stats} onOpenCreate={openCreate} />
 
         <ResidentRegistrationCard
-          intakeLink={intakeLink}
+          registrationLink={registrationLink}
           importing={importing}
-          onCreateShortLink={() => createRegistrationLink(4)}
-          onCreateDayLink={() => createRegistrationLink(24)}
-          onCreateThreeDayLink={() => createRegistrationLink(72)}
           onCopyRegistrationLink={copyRegistrationLink}
           onDownloadRegistrationQr={downloadRegistrationQr}
           onDownloadTemplate={downloadTemplate}
