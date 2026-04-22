@@ -7,6 +7,7 @@ export function useAppEntryMode() {
         isResidentIntakeMode: false,
         isChangeRequestIntakeMode: false,
         isDcOverviewMode: false,
+        isDcElevationMode: false,
       };
     }
 
@@ -15,6 +16,7 @@ export function useAppEntryMode() {
       isResidentIntakeMode: params.get('resident-intake') === '1',
       isChangeRequestIntakeMode: params.get('change-request-intake') === '1',
       isDcOverviewMode: params.get('dc-overview') === '1',
+      isDcElevationMode: params.get('dc-elevation') === '1',
     };
   }, []);
 }

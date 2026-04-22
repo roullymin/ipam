@@ -92,6 +92,7 @@ def normalize_firewall_rules_payload(rules):
 def validate_assistance_request_payload(attrs, instance=None):
     request_type = get_change_request_value(attrs, instance, 'request_type', 'assistance')
     assistance_type = get_change_request_value(attrs, instance, 'assistance_type', 'other_support') or 'other_support'
+    current_status = attrs.get('status') if 'status' in attrs else None
     items = attrs.get('items', None)
     errors = {}
 
@@ -102,6 +103,9 @@ def validate_assistance_request_payload(attrs, instance=None):
         attrs['firewall_rules'] = normalize_firewall_rules_payload(attrs.get('firewall_rules'))
 
     if request_type != 'assistance':
+        return attrs
+
+    if instance is None and current_status == 'draft':
         return attrs
 
     if assistance_type in EQUIPMENT_ASSISTANCE_TYPES:

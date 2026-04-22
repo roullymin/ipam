@@ -15,8 +15,6 @@ import {
   Server,
   Upload,
   Zap,
-  ZoomIn,
-  ZoomOut,
 } from 'lucide-react';
 import RackElevation from '../../../components/RackElevation';
 import { DcimRackCard, DcimRackSidebar } from '../components';
@@ -35,6 +33,7 @@ const TEXT = {
   exportHtml: 'HTML',
   exportImage: '导出图片',
   readonlyOverview: '只读总览',
+  elevationWindow: '立面新窗口',
   addRack: '新增机柜',
   rackCount: '机柜数',
   deviceCount: '设备数',
@@ -50,10 +49,8 @@ const TEXT = {
   rackCodeFallback: '未命名机柜',
   detail: '查看详情',
   rackElevation: '机柜立面',
-  rackElevationHint: '当前采用紧凑缩放，便于在屏幕上浏览机柜立面。',
-  zoomOut: '缩小',
-  zoomIn: '放大',
-  zoomReset: '重置缩放',
+  rackElevationHint: '这里改成机柜立面的清爽预览，完整立面会在新窗口里单独打开，浏览和滚轮体验更稳定。',
+  elevationWindowHint: '新窗口会隐藏后台操作区，专门用于浏览机柜立面和给他人展示。',
   closeDetail: '关闭机柜详情',
   deviceList: '设备列表',
   deviceListHint: '设备按 U 位从高到低排序。',
@@ -225,16 +222,6 @@ export default function DcimView(props) {
     setSelectedRack,
     handleDeleteRack,
     setEditingDevice,
-    handleZoomIn,
-    handleZoomOut,
-    handleZoomReset,
-    elevationScrollRef,
-    elevationContentRef,
-    handleElevationMouseDown,
-    handleElevationMouseLeave,
-    handleElevationMouseUp,
-    handleElevationMouseMove,
-    viewState,
     rackDevices,
   } = props;
 
@@ -276,15 +263,20 @@ export default function DcimView(props) {
     };
   }, [allDevices, currentDevices.length, datacenterPowerStats?.total_pdu, datacenterPowerStats?.total_rated, getRackCalculatedPower, rackList]);
 
-  const elevationScale = Math.max(0.5, Math.min(viewState?.scale || 0.7, 0.92));
-  const elevationCardWidth = Math.max(190, Math.round(236 * elevationScale));
-  const elevationUnitHeight = Math.max(16, Math.round(22 * elevationScale));
-
   const openReadonlyOverview = () => {
     if (typeof window === 'undefined') return;
     const url = new URL(window.location.href);
     url.search = '';
     url.searchParams.set('dc-overview', '1');
+    if (activeLocation) url.searchParams.set('datacenter', String(activeLocation));
+    window.open(url.toString(), '_blank');
+  };
+
+  const openElevationWindow = () => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    url.search = '';
+    url.searchParams.set('dc-elevation', '1');
     if (activeLocation) url.searchParams.set('datacenter', String(activeLocation));
     window.open(url.toString(), '_blank');
   };
@@ -476,98 +468,67 @@ export default function DcimView(props) {
               )}
             </div>
           ) : (
-            <div className="flex h-full min-h-0 flex-col rounded-[32px] border border-slate-200/80 bg-white/86 p-5 shadow-[0_24px_52px_rgba(15,23,42,0.08)] backdrop-blur">
-              <div className="mb-4 flex items-center justify-between rounded-[26px] border border-slate-100 bg-[linear-gradient(135deg,#fbfdff_0%,#f4f8fe_52%,#eef7ff_100%)] px-5 py-4">
-                <div>
-                  <div className="text-base font-black text-slate-900">{TEXT.rackElevation}</div>
-                  <div className="mt-1 text-sm text-slate-500">{TEXT.rackElevationHint}</div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    title={TEXT.zoomOut}
-                    onClick={handleZoomOut}
-                    className="rounded-2xl border border-slate-200 bg-white p-2 text-slate-500 hover:border-slate-300 hover:bg-slate-100 hover:text-slate-700"
-                  >
-                    <ZoomOut className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    title={TEXT.zoomIn}
-                    onClick={handleZoomIn}
-                    className="rounded-2xl border border-slate-200 bg-white p-2 text-slate-500 hover:border-slate-300 hover:bg-slate-100 hover:text-slate-700"
-                  >
-                    <ZoomIn className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    title={TEXT.zoomReset}
-                    onClick={handleZoomReset}
-                    className="rounded-2xl border border-slate-200 bg-white p-2 text-slate-500 hover:border-slate-300 hover:bg-slate-100 hover:text-slate-700"
-                  >
-                    <Maximize className="h-4 w-4" />
-                  </button>
+            <div className="custom-scrollbar h-full overflow-y-auto rounded-[32px] border border-slate-200/80 bg-white/86 p-5 shadow-[0_24px_52px_rgba(15,23,42,0.08)] backdrop-blur">
+              <div className="mb-4 rounded-[26px] border border-slate-100 bg-[linear-gradient(135deg,#fbfdff_0%,#f4f8fe_52%,#eef7ff_100%)] px-5 py-5">
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+                  <div>
+                    <div className="text-base font-black text-slate-900">{TEXT.rackElevation}</div>
+                    <div className="mt-1 text-sm text-slate-500">{TEXT.rackElevationHint}</div>
+                    <div className="mt-3 text-sm leading-6 text-slate-500">{TEXT.elevationWindowHint}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <ActionButton icon={Maximize} label={TEXT.elevationWindow} onClick={openElevationWindow} primary />
+                    <ActionButton icon={Columns} label={TEXT.cardView} onClick={() => setDcimViewMode('card')} />
+                  </div>
                 </div>
               </div>
 
-              <div
-                ref={elevationScrollRef}
-                className="custom-scrollbar min-h-0 flex-1 overflow-auto rounded-[28px] border border-slate-800/60 bg-[radial-gradient(circle_at_top_left,rgba(14,165,233,0.1),transparent_22%),linear-gradient(180deg,#0b1325_0%,#0f172a_100%)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
-              >
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
                 {rackList.length ? (
-                  <div
-                    ref={elevationContentRef}
-                    className="grid content-start gap-3"
-                    onMouseDown={handleElevationMouseDown}
-                    onMouseMove={handleElevationMouseMove}
-                    onMouseUp={handleElevationMouseUp}
-                    onMouseLeave={handleElevationMouseLeave}
-                    style={{
-                      cursor: 'grab',
-                      gridTemplateColumns: `repeat(${rackList.length}, ${elevationCardWidth}px)`,
-                      width: 'max-content',
-                    }}
-                  >
-                    {rackList.map((rack) => {
-                      const devices = allDevices.filter((item) => String(item.rack) === String(rack.id));
-                      return (
-                        <button
-                          key={rack.id}
-                          onClick={() => setSelectedRack(rack)}
-                          type="button"
-                          className="rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.82)_0%,rgba(15,23,42,0.68)_100%)] p-3.5 text-left shadow-[0_14px_28px_rgba(2,6,23,0.28)] transition hover:-translate-y-0.5 hover:border-cyan-300/40 hover:bg-[linear-gradient(180deg,rgba(15,23,42,0.92)_0%,rgba(15,23,42,0.8)_100%)]"
-                        >
-                          <div className="flex items-start justify-between gap-3 pb-3">
-                            <div>
-                              <div className="inline-flex rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-bold text-slate-300">
-                                {rack.code || TEXT.rackCodeFallback}
-                              </div>
-                              <div className="mt-3 text-[18px] font-black text-white">{rack.name}</div>
-                              <div className="mt-1 text-sm text-slate-300">
-                                {safeInt(rack.height, 42)}U · {devices.length} 台设备
-                              </div>
+                  rackList.map((rack) => {
+                    const devices = allDevices.filter((item) => String(item.rack) === String(rack.id));
+                    return (
+                      <button
+                        key={rack.id}
+                        onClick={() => setSelectedRack(rack)}
+                        type="button"
+                        className="rounded-[26px] border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-cyan-200 hover:shadow-[0_18px_40px_rgba(15,23,42,0.08)]"
+                      >
+                        <div className="mb-4 flex items-start justify-between gap-3">
+                          <div>
+                            <div className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500">
+                              {rack.code || TEXT.rackCodeFallback}
                             </div>
-                            <div className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-sm font-bold text-slate-200">
-                              {TEXT.detail}
+                            <div className="mt-3 text-[22px] font-black text-slate-900">{rack.name}</div>
+                            <div className="mt-1 text-sm text-slate-500">
+                              {safeInt(rack.height, 42)}U · {devices.length} 台设备
                             </div>
                           </div>
+                          <div className="rounded-full bg-cyan-50 px-3 py-1 text-sm font-bold text-cyan-700">
+                            {TEXT.detail}
+                          </div>
+                        </div>
+
+                        <div className="overflow-x-auto pb-1">
                           <RackElevation
                             rack={rack}
                             devices={devices}
                             onSelect={setSelectedRack}
                             onEdit={setEditingDevice}
-                            unitHeight={elevationUnitHeight}
+                            readonly
+                            showHeader={false}
+                            unitHeight={18}
                           />
-                        </button>
-                      );
-                    })}
-                  </div>
+                        </div>
+                      </button>
+                    );
+                  })
                 ) : (
-                  <div className="flex h-full min-h-[320px] items-center justify-center text-center text-slate-400">
+                  <div className="col-span-full flex min-h-[320px] items-center justify-center rounded-[24px] border border-dashed border-slate-200 bg-slate-50 text-center text-slate-400">
                     <div>
-                      <HardDrive className="mx-auto h-10 w-10 text-slate-500" />
-                      <div className="mt-4 text-xl font-black text-white">{TEXT.noRacks}</div>
-                      <div className="mt-2 text-sm text-slate-300">{TEXT.noRacksHint}</div>
+                      <HardDrive className="mx-auto h-10 w-10 text-slate-300" />
+                      <div className="mt-4 text-xl font-black text-slate-900">{TEXT.noRacks}</div>
+                      <div className="mt-2 text-sm text-slate-500">{TEXT.noRacksHint}</div>
                     </div>
                   </div>
                 )}

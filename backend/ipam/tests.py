@@ -548,6 +548,28 @@ class DatacenterChangeRequestTests(BaseApiTestCase):
         self.assertEqual(change_request.access_location, '401 会议室')
         self.assertTrue(change_request.antivirus_installed)
 
+    def test_can_create_empty_external_terminal_access_draft(self):
+        response = self.client.post(
+            '/api/datacenter-change-requests/',
+            {
+                'status': 'draft',
+                'request_type': 'assistance',
+                'assistance_type': 'external_terminal_access',
+                'title': '',
+                'applicant_name': '',
+                'applicant_phone': '',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['status'], 'draft')
+        self.assertEqual(response.data['assistance_type'], 'external_terminal_access')
+
+        change_request = DatacenterChangeRequest.objects.get(pk=response.data['id'])
+        self.assertEqual(change_request.status, 'draft')
+        self.assertEqual(change_request.assistance_type, 'external_terminal_access')
+
     def test_can_approve_change_request(self):
         change_request = DatacenterChangeRequest.objects.create(
             request_type='rack_in',

@@ -43,7 +43,7 @@ import { useAppScreenProps } from './hooks/useAppScreenProps';
 import { useSystemOverview } from './hooks/useSystemOverview';
 import { useUserManagementHandlers } from './hooks/useUserManagementHandlers';
 import { DatacenterChangeIntakePage } from './modules/changeRequests';
-import { DcimOverviewPage, useDcimDerivedData, useDcimViewState } from './modules/dcim';
+import { DcimElevationPage, DcimOverviewPage, useDcimDerivedData, useDcimViewState } from './modules/dcim';
 import { useIpamDerivedData, useIpamViewActions, useIpamViewState } from './modules/ipam';
 import { ResidentIntakePage } from './modules/resident';
 
@@ -179,6 +179,7 @@ function MainApp() {
     isResidentIntakeMode,
     isChangeRequestIntakeMode,
     isDcOverviewMode,
+    isDcElevationMode,
   } = useAppEntryMode();
 
   useEffect(() => {
@@ -1526,9 +1527,13 @@ function MainApp() {
       return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500 text-sm">正在检查登录状态...</div>;
   }
 
-  if (isDcOverviewMode) {
+    if (isDcElevationMode) {
+      return <DcimElevationPage />;
+    }
+
+    if (isDcOverviewMode) {
       return <DcimOverviewPage />;
-  }
+    }
 
   if (isChangeRequestIntakeMode) {
       return <DatacenterChangeIntakePage />;

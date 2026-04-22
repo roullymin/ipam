@@ -638,6 +638,7 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
     try {
       const payload = {
         ...form,
+        status: 'draft',
         title: cleanText(form.title),
         applicant_name: cleanText(form.applicant_name),
         applicant_phone: cleanText(form.applicant_phone),
@@ -676,7 +677,9 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
       resetForm();
       await loadData();
     } catch (requestError) {
-      setError(requestError.message || '创建草稿失败。');
+      const message = requestError.message || '创建草稿失败。';
+      setDraftError(message);
+      setError(message);
     } finally {
       setSaving(false);
     }
