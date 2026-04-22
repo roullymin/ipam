@@ -9,6 +9,7 @@ import secrets
 import subprocess
 from functools import lru_cache
 from datetime import date, datetime, timedelta
+from urllib.parse import quote
 
 import pandas as pd
 import qrcode
@@ -473,6 +474,7 @@ def _build_public_change_request_template():
         'firewall_open_at': '',
         'firewall_rules': [
             {
+                'rule_type': 'destination',
                 'destination_ip': '',
                 'destination_port': '',
                 'purpose': '',
@@ -920,6 +922,77 @@ def _get_assistance_request_title(change_request):
     }.get(assistance_type, '协助事项申请单')
 
 
+def _get_firewall_rule_type_label(rule_type):
+    return {
+        'destination': '目标访问',
+        'snat': 'SNAT',
+    }.get(rule_type or 'destination', rule_type or '目标访问')
+
+
+def _get_pdf_text(value):
+    if value is None:
+        return ''
+    text = str(value).strip()
+    return '' if text in {'未填写', 'None'} else text
+
+
+def _append_pdf_pair_row(rows, left_label, left_value='', right_label='', right_value=''):
+    left_text = _get_pdf_text(left_value)
+    right_text = _get_pdf_text(right_value)
+    if not left_text and not right_text:
+        return
+    rows.append([left_label, left_text, right_label, right_text])
+
+
+def _append_pdf_detail_row(rows, label, value):
+    text = _get_pdf_text(value)
+    if text:
+        rows.append([label, text])
+
+
+def _get_section_heading(index, title):
+    numerals = '一二三四五六七八九十'
+    prefix = numerals[index - 1] if 1 <= index <= len(numerals) else str(index)
+    return f'{prefix}、{title}'
+
+
+def _sanitize_pdf_filename_part(value, default='申请单'):
+    text = _get_pdf_text(value)
+    if not text:
+        return default
+    text = re.sub(r'[\\/:*?"<>|\r\n]+', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text[:48].strip() or default
+
+
+def _build_change_request_export_filename(change_request):
+    title_text = _get_pdf_text(change_request.title)
+    request_content = _get_pdf_text(change_request.request_content)
+    reason = _get_pdf_text(change_request.reason)
+    first_rule_purpose = ''
+    if change_request.request_type == 'assistance' and change_request.assistance_type == 'firewall_port_open':
+        first_rule = change_request.firewall_rules.order_by('sort_order', 'id').first()
+        if first_rule:
+            first_rule_purpose = _get_pdf_text(first_rule.purpose)
+
+    default_name = _get_assistance_request_title(change_request).replace('申请单', '') if change_request.request_type == 'assistance' else '机房设备变更申请'
+    filename_base = next(
+        (
+            _sanitize_pdf_filename_part(candidate, default_name)
+            for candidate in [first_rule_purpose, request_content, reason, title_text, default_name]
+            if _get_pdf_text(candidate)
+        ),
+        default_name,
+    )
+    return f'{filename_base}.pdf'
+
+
+def _set_pdf_download_filename(response, filename):
+    ascii_base = re.sub(r'[^A-Za-z0-9._-]+', '_', os.path.splitext(filename)[0]).strip('._') or 'request'
+    ascii_filename = f'{ascii_base}.pdf'
+    response['Content-Disposition'] = f"attachment; filename=\"{ascii_filename}\"; filename*=UTF-8''{quote(filename)}"
+
+
 def _build_change_request_pdf(response_buffer, change_request):
     try:
         registerFont(UnicodeCIDFont('STSong-Light'))
@@ -954,6 +1027,15 @@ def _build_change_request_pdf(response_buffer, change_request):
         leading=15,
         textColor=colors.HexColor('#334155'),
     )
+    signature_style = ParagraphStyle(
+        'ChangeRequestSignature',
+        parent=body_style,
+        fontName=base_font,
+        fontSize=11,
+        leading=22,
+        textColor=colors.HexColor('#0f172a'),
+        spaceAfter=3 * mm,
+    )
 
     doc = SimpleDocTemplate(
         response_buffer,
@@ -972,10 +1054,6 @@ def _build_change_request_pdf(response_buffer, change_request):
         change_request.assistance_type,
         change_request.assistance_type,
     )
-    status_label = dict(DatacenterChangeRequest._meta.get_field('status').choices).get(
-        change_request.status,
-        change_request.status,
-    )
 
     if change_request.request_type == 'assistance':
         title_text = _get_assistance_request_title(change_request)
@@ -990,27 +1068,26 @@ def _build_change_request_pdf(response_buffer, change_request):
         ),
         Spacer(1, 5 * mm),
     ]
+    section_index = 1
 
+    info_rows = []
     if change_request.request_type == 'assistance':
-        info_rows = [
-            ['需求处室', change_request.department or '未填写', '需求联系人', change_request.applicant_name or '未填写'],
-            ['联系方式', change_request.applicant_phone or '未填写', '联系邮箱', change_request.applicant_email or '未填写'],
-            ['申请单位', change_request.company or '未填写', '协助分类', assistance_label or '未填写'],
-            ['项目名称', change_request.project_name or '未填写', '期望协助时间', _format_change_datetime(change_request.planned_execute_at)],
-            ['申请标题', change_request.title or '未填写', '审批编号', change_request.approval_code or '未填写'],
-            ['申请类型', type_label, '当前状态', status_label],
-        ]
+        _append_pdf_pair_row(info_rows, '申请标题', change_request.title or title_text, '协助分类', assistance_label)
+        _append_pdf_pair_row(info_rows, '申请单位', change_request.company, '需求处室', change_request.department)
+        _append_pdf_pair_row(info_rows, '需求联系人', change_request.applicant_name, '联系方式', change_request.applicant_phone)
+        _append_pdf_pair_row(info_rows, '联系邮箱', change_request.applicant_email, '项目名称', change_request.project_name)
+        _append_pdf_pair_row(info_rows, '期望协助时间', _format_change_datetime(change_request.planned_execute_at), '审批编号', change_request.approval_code)
     else:
-        info_rows = [
-            ['所属部门', change_request.department or '未填写', '申请人', change_request.applicant_name or '未填写'],
-            ['联系电话', change_request.applicant_phone or '未填写', '联系邮箱', change_request.applicant_email or '未填写'],
-            ['所属单位', change_request.company or '未填写', '所属项目', change_request.project_name or '未填写'],
-            ['申请标题', change_request.title or '未填写', '审批编号', change_request.approval_code or '未填写'],
-            ['申请类型', type_label, '计划执行时间', _format_change_datetime(change_request.planned_execute_at)],
-            ['是否需要下电', '是' if change_request.requires_power_down else '否', '当前状态', status_label],
-        ]
+        _append_pdf_pair_row(info_rows, '申请标题', change_request.title or type_label, '申请类型', type_label)
+        _append_pdf_pair_row(info_rows, '所属单位', change_request.company, '所属部门', change_request.department)
+        _append_pdf_pair_row(info_rows, '申请人', change_request.applicant_name, '联系电话', change_request.applicant_phone)
+        _append_pdf_pair_row(info_rows, '联系邮箱', change_request.applicant_email, '所属项目', change_request.project_name)
+        _append_pdf_pair_row(info_rows, '计划执行时间', _format_change_datetime(change_request.planned_execute_at), '审批编号', change_request.approval_code)
+        if change_request.requires_power_down:
+            _append_pdf_pair_row(info_rows, '是否需要下电', '是')
 
-    elements.append(Paragraph('一、申请信息', heading_style))
+    elements.append(Paragraph(_get_section_heading(section_index, '申请信息'), heading_style))
+    section_index += 1
     info_table = Table(info_rows, colWidths=[24 * mm, 58 * mm, 24 * mm, 56 * mm])
     info_table.setStyle(
         TableStyle(
@@ -1033,101 +1110,108 @@ def _build_change_request_pdf(response_buffer, change_request):
     elements.append(info_table)
     elements.append(Spacer(1, 5 * mm))
 
-    detail_heading = '二、协助内容' if change_request.request_type == 'assistance' else '二、变更说明'
-    elements.append(Paragraph(detail_heading, heading_style))
-    detail_rows = [['申请原因', change_request.reason or '未填写']]
+    detail_rows = []
+    _append_pdf_detail_row(detail_rows, '申请原因', change_request.reason)
     if change_request.request_type == 'assistance':
-        detail_rows.append(['协助内容', change_request.request_content or '未填写'])
+        _append_pdf_detail_row(detail_rows, '协助内容', change_request.request_content)
         if change_request.assistance_type == 'firewall_port_open':
             firewall_rules = list(change_request.firewall_rules.all())
             if not firewall_rules and (change_request.destination_ip or change_request.destination_port):
                 firewall_rules = [
                     DatacenterChangeFirewallRule(
+                        rule_type='destination',
                         destination_ip=change_request.destination_ip or '',
                         destination_port=change_request.destination_port or '',
                         purpose='',
                     )
                 ]
-            detail_rows.append(['端口开通时间', _format_change_datetime(change_request.firewall_open_at)])
+            _append_pdf_detail_row(detail_rows, '规则开通时间', _format_change_datetime(change_request.firewall_open_at))
             if change_request.related_links:
-                detail_rows.append(['相关链接', change_request.related_links or '未填写'])
+                _append_pdf_detail_row(detail_rows, '相关链接', change_request.related_links)
         elif change_request.assistance_type == 'ip_open':
-            detail_rows.append(['IP 开通说明', change_request.ip_open_details or '未填写'])
-            detail_rows.append(['IP 开通时间', _format_change_datetime(change_request.ip_open_at)])
+            _append_pdf_detail_row(detail_rows, 'IP 开通说明', change_request.ip_open_details)
+            _append_pdf_detail_row(detail_rows, 'IP 开通时间', _format_change_datetime(change_request.ip_open_at))
             if change_request.related_links:
-                detail_rows.append(['相关链接', change_request.related_links or '未填写'])
+                _append_pdf_detail_row(detail_rows, '相关链接', change_request.related_links)
         elif change_request.assistance_type == 'external_terminal_access':
-            detail_rows.append(['接入位置', change_request.access_location or '未填写'])
-            detail_rows.append(['接入时间', _format_change_datetime(change_request.access_at)])
-            detail_rows.append(['是否已杀毒', '是' if change_request.antivirus_installed else '否'])
-            detail_rows.append(['终端 MAC 地址', change_request.terminal_mac or '未填写'])
+            _append_pdf_detail_row(detail_rows, '接入位置', change_request.access_location)
+            _append_pdf_detail_row(detail_rows, '接入时间', _format_change_datetime(change_request.access_at))
+            _append_pdf_detail_row(detail_rows, '是否已杀毒', '是' if change_request.antivirus_installed else '')
+            _append_pdf_detail_row(detail_rows, '终端 MAC 地址', change_request.terminal_mac)
             if change_request.related_links:
-                detail_rows.append(['相关链接', change_request.related_links or '未填写'])
+                _append_pdf_detail_row(detail_rows, '相关链接', change_request.related_links)
         elif change_request.related_links:
-            detail_rows.append(['相关链接', change_request.related_links or '未填写'])
+            _append_pdf_detail_row(detail_rows, '相关链接', change_request.related_links)
     else:
-        detail_rows.append(['影响范围', change_request.impact_scope or '未填写'])
+        _append_pdf_detail_row(detail_rows, '影响范围', change_request.impact_scope)
 
-    detail_table = Table(detail_rows, colWidths=[28 * mm, 136 * mm])
-    detail_table.setStyle(
-        TableStyle(
-            [
-                ('FONTNAME', (0, 0), (-1, -1), base_font),
-                ('FONTSIZE', (0, 0), (-1, -1), 10),
-                ('LEADING', (0, 0), (-1, -1), 14),
-                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#eff6ff')),
-                ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#334155')),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
-                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ('LEFTPADDING', (0, 0), (-1, -1), 6),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
-                ('TOPPADDING', (0, 0), (-1, -1), 6),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-            ]
+    has_firewall_table = change_request.request_type == 'assistance' and change_request.assistance_type == 'firewall_port_open'
+    if detail_rows or has_firewall_table:
+        detail_heading = '协助内容' if change_request.request_type == 'assistance' else '变更说明'
+        elements.append(Paragraph(_get_section_heading(section_index, detail_heading), heading_style))
+        section_index += 1
+    if detail_rows:
+        detail_table = Table(detail_rows, colWidths=[28 * mm, 136 * mm])
+        detail_table.setStyle(
+            TableStyle(
+                [
+                    ('FONTNAME', (0, 0), (-1, -1), base_font),
+                    ('FONTSIZE', (0, 0), (-1, -1), 10),
+                    ('LEADING', (0, 0), (-1, -1), 14),
+                    ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#eff6ff')),
+                    ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#334155')),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                    ('TOPPADDING', (0, 0), (-1, -1), 6),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ]
+            )
         )
-    )
-    elements.append(detail_table)
-    if change_request.request_type == 'assistance' and change_request.assistance_type == 'firewall_port_open':
+        elements.append(detail_table)
+    if has_firewall_table:
         elements.append(Spacer(1, 2 * mm))
         elements.append(Paragraph('访问规则', body_style))
         elements.append(Spacer(1, 2 * mm))
-        rule_rows = [['序号', '目的 IP 地址', '目的端口', '开通用途']]
+        rule_rows = [['序号', '规则类型', '地址', '端口', '用途说明']]
         if firewall_rules:
             for index, rule in enumerate(firewall_rules, start=1):
                 rule_rows.append(
                     [
                         str(index),
-                        rule.destination_ip or '未填写',
-                        rule.destination_port or '未填写',
-                        rule.purpose or '未填写',
+                        _get_firewall_rule_type_label(getattr(rule, 'rule_type', 'destination')),
+                        _get_pdf_text(rule.destination_ip),
+                        _get_pdf_text(rule.destination_port),
+                        _get_pdf_text(rule.purpose),
                     ]
                 )
-        else:
-            rule_rows.append(['1', '未填写', '未填写', '未填写'])
-        firewall_table = Table(rule_rows, colWidths=[14 * mm, 44 * mm, 38 * mm, 74 * mm], repeatRows=1)
-        firewall_table.setStyle(
-            TableStyle(
-                [
-                    ('FONTNAME', (0, 0), (-1, -1), base_font),
-                    ('FONTSIZE', (0, 0), (-1, -1), 9),
-                    ('LEADING', (0, 0), (-1, -1), 13),
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e2e8f0')),
-                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                    ('LEFTPADDING', (0, 0), (-1, -1), 5),
-                    ('RIGHTPADDING', (0, 0), (-1, -1), 5),
-                    ('TOPPADDING', (0, 0), (-1, -1), 5),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
-                ]
+        if len(rule_rows) > 1:
+            firewall_table = Table(rule_rows, colWidths=[12 * mm, 24 * mm, 38 * mm, 28 * mm, 68 * mm], repeatRows=1)
+            firewall_table.setStyle(
+                TableStyle(
+                    [
+                        ('FONTNAME', (0, 0), (-1, -1), base_font),
+                        ('FONTSIZE', (0, 0), (-1, -1), 9),
+                        ('LEADING', (0, 0), (-1, -1), 13),
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e2e8f0')),
+                        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                        ('LEFTPADDING', (0, 0), (-1, -1), 5),
+                        ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+                        ('TOPPADDING', (0, 0), (-1, -1), 5),
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                    ]
+                )
             )
-        )
-        elements.append(firewall_table)
+            elements.append(firewall_table)
     elements.append(Spacer(1, 5 * mm))
 
     show_item_table = change_request.request_type != 'assistance' or _is_equipment_assistance(change_request)
     if show_item_table:
-        item_heading = '三、设备明细' if change_request.request_type != 'assistance' else '三、设备信息'
-        elements.append(Paragraph(item_heading, heading_style))
+        item_heading = '设备明细' if change_request.request_type != 'assistance' else '设备信息'
+        elements.append(Paragraph(_get_section_heading(section_index, item_heading), heading_style))
+        section_index += 1
         item_rows = [[
             '设备名称',
             '型号/序列号',
@@ -1159,13 +1243,13 @@ def _build_change_request_pdf(response_buffer, change_request):
                 location_lines.append(f'目标：{item.target_rack.code} / {item.target_u_start or "-"}-{item.target_u_end or "-"}')
             item_rows.append(
                 [
-                    item.device_name or '未填写',
-                    ' / '.join(filter(None, [item.device_model, item.serial_number])) or '未填写',
+                    _get_pdf_text(item.device_name),
+                    _get_pdf_text(' / '.join(filter(None, [item.device_model, item.serial_number]))),
                     f'{item.quantity} 台 / {item.u_height}U',
                     network_label,
                     '\n'.join(ip_lines),
-                    '\n'.join(location_lines) or '未填写',
-                    item.notes or '未填写',
+                    _get_pdf_text('\n'.join(location_lines)),
+                    _get_pdf_text(item.notes),
                 ]
             )
 
@@ -1195,76 +1279,61 @@ def _build_change_request_pdf(response_buffer, change_request):
         elements.append(item_table)
         elements.append(Spacer(1, 5 * mm))
 
+    action_rows = []
     if change_request.request_type == 'assistance':
-        action_heading = '四、审批与处理记录' if show_item_table else '三、审批与处理记录'
+        action_heading = '审批与处理记录'
     else:
-        action_heading = '四、审批与执行记录'
-    elements.append(Paragraph(action_heading, heading_style))
-    action_rows = [
-        ['业务处室意见' if change_request.request_type == 'assistance' else '部门意见', change_request.department_comment or '未填写'],
-        ['科技与信息化处意见' if change_request.request_type == 'assistance' else '信息化意见', change_request.it_comment or '未填写'],
-        ['审批意见', change_request.review_comment or '未填写'],
-        ['审批人 / 时间', f'{change_request.reviewer_name or "未填写"} / {_format_change_datetime(change_request.reviewed_at)}'],
-        ['处理人 / 时间' if change_request.request_type == 'assistance' else '执行人 / 时间', f'{change_request.executor_name or "未填写"} / {_format_change_datetime(change_request.executed_at)}'],
-        ['处理备注' if change_request.request_type == 'assistance' else '执行备注', change_request.execution_comment or '未填写'],
-    ]
-    action_table = Table(action_rows, colWidths=[28 * mm, 136 * mm])
-    action_table.setStyle(
-        TableStyle(
-            [
-                ('FONTNAME', (0, 0), (-1, -1), base_font),
-                ('FONTSIZE', (0, 0), (-1, -1), 10),
-                ('LEADING', (0, 0), (-1, -1), 14),
-                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#eff6ff')),
-                ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#334155')),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
-                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ('LEFTPADDING', (0, 0), (-1, -1), 6),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
-                ('TOPPADDING', (0, 0), (-1, -1), 6),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-            ]
-        )
-    )
-    elements.append(action_table)
+        action_heading = '审批与执行记录'
+    _append_pdf_detail_row(action_rows, '业务处室意见' if change_request.request_type == 'assistance' else '部门意见', change_request.department_comment)
+    _append_pdf_detail_row(action_rows, '科技与信息化处意见' if change_request.request_type == 'assistance' else '信息化意见', change_request.it_comment)
+    _append_pdf_detail_row(action_rows, '审批意见', change_request.review_comment)
+    reviewer_summary = ' / '.join(filter(None, [_get_pdf_text(change_request.reviewer_name), _get_pdf_text(_format_change_datetime(change_request.reviewed_at))]))
+    executor_label = '处理人 / 时间' if change_request.request_type == 'assistance' else '执行人 / 时间'
+    executor_summary = ' / '.join(filter(None, [_get_pdf_text(change_request.executor_name), _get_pdf_text(_format_change_datetime(change_request.executed_at))]))
+    _append_pdf_detail_row(action_rows, '审批人 / 时间', reviewer_summary)
+    _append_pdf_detail_row(action_rows, executor_label, executor_summary)
+    _append_pdf_detail_row(action_rows, '处理备注' if change_request.request_type == 'assistance' else '执行备注', change_request.execution_comment)
 
-    elements.append(Spacer(1, 5 * mm))
-    if change_request.request_type == 'assistance':
-        signature_heading = '五、签字栏' if show_item_table else '四、签字栏'
-    else:
-        signature_heading = '五、签字确认'
-    elements.append(Paragraph(signature_heading, heading_style))
-    if change_request.request_type == 'assistance':
-        signature_rows = [
-            ['申请单位（盖章）', change_request.company or '____________________'],
-            ['业务处室签名', '签字：____________________    日期：____________________'],
-            ['科信处领导签名', '签字：____________________    日期：____________________'],
-        ]
-    else:
-        signature_rows = [
-            ['申请部门签字', '签字：____________________    日期：____________________'],
-            ['审批领导签字', '签字：____________________    日期：____________________'],
-            ['执行确认签字', '签字：____________________    日期：____________________'],
-        ]
-    signature_table = Table(signature_rows, colWidths=[38 * mm, 126 * mm])
-    signature_table.setStyle(
-        TableStyle(
-            [
-                ('FONTNAME', (0, 0), (-1, -1), base_font),
-                ('FONTSIZE', (0, 0), (-1, -1), 10),
-                ('LEADING', (0, 0), (-1, -1), 16),
-                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#eff6ff')),
-                ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#334155')),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('LEFTPADDING', (0, 0), (-1, -1), 6),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
-                ('TOPPADDING', (0, 0), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-            ]
+    if action_rows:
+        elements.append(Paragraph(_get_section_heading(section_index, action_heading), heading_style))
+        section_index += 1
+        action_table = Table(action_rows, colWidths=[28 * mm, 136 * mm])
+        action_table.setStyle(
+            TableStyle(
+                [
+                    ('FONTNAME', (0, 0), (-1, -1), base_font),
+                    ('FONTSIZE', (0, 0), (-1, -1), 10),
+                    ('LEADING', (0, 0), (-1, -1), 14),
+                    ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#eff6ff')),
+                    ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#334155')),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                    ('TOPPADDING', (0, 0), (-1, -1), 6),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ]
+            )
         )
-    )
-    elements.append(signature_table)
+        elements.append(action_table)
+        elements.append(Spacer(1, 5 * mm))
+
+    signature_heading = '签字栏' if change_request.request_type == 'assistance' else '签字确认'
+    elements.append(Paragraph(_get_section_heading(section_index, signature_heading), heading_style))
+    if change_request.request_type == 'assistance':
+        signature_lines = [
+            f'申请单位（盖章）：{_get_pdf_text(change_request.company) or "____________________"}',
+            '业务处室签字：____________________    日期：____________________',
+            '科信处领导签字：____________________    日期：____________________',
+        ]
+    else:
+        signature_lines = [
+            '申请部门签字：____________________    日期：____________________',
+            '审批领导签字：____________________    日期：____________________',
+            '执行确认签字：____________________    日期：____________________',
+        ]
+    for line in signature_lines:
+        elements.append(Paragraph(line, signature_style))
     doc.build(elements)
 
 
@@ -2137,7 +2206,7 @@ def public_change_request_export_pdf(request, token):
     _build_change_request_pdf(buffer, change_request)
     buffer.seek(0)
     response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
-    response['Content-Disposition'] = f'attachment; filename="change_request_{change_request.request_code}.pdf"'
+    _set_pdf_download_filename(response, _build_change_request_export_filename(change_request))
     return response
 
 
@@ -2411,7 +2480,7 @@ class DatacenterChangeRequestViewSet(OptionalPaginationMixin, BaseViewSet):
         _build_change_request_pdf(buffer, change_request)
         buffer.seek(0)
         response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="change_request_{change_request.request_code}.pdf"'
+        _set_pdf_download_filename(response, _build_change_request_export_filename(change_request))
         return response
 
     @action(detail=False, methods=['get'])

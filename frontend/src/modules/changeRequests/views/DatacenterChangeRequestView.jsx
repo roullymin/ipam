@@ -144,10 +144,16 @@ const assistanceNeedsItems = (formLike) =>
 const shouldUseItems = (formLike) => !isAssistanceRequest(formLike?.request_type) || assistanceNeedsItems(formLike);
 
 const createEmptyFirewallRule = () => ({
+  rule_type: 'destination',
   destination_ip: '',
   destination_port: '',
   purpose: '',
 });
+
+const FIREWALL_RULE_TYPE_OPTIONS = [
+  { value: 'destination', label: '目标访问' },
+  { value: 'snat', label: 'SNAT' },
+];
 
 const createEmptyAssistanceFields = () => ({
   destination_ip: '',
@@ -565,6 +571,7 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
   const normalizeFirewallRules = (rules) =>
     (rules || [])
       .map((rule) => ({
+        rule_type: rule.rule_type || 'destination',
         destination_ip: cleanText(rule.destination_ip),
         destination_port: cleanText(rule.destination_port),
         purpose: cleanText(rule.purpose),
@@ -880,8 +887,8 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
                   const assistanceType = isAssistanceRequest(request.request_type);
                   const firewallRule = request.firewall_rules?.[0];
                   const firewallSummary = firewallRule
-                    ? `${firewallRule.destination_ip || '未填写 IP'} / ${firewallRule.destination_port || '未填写端口'}${request.firewall_rules?.length > 1 ? ` 等 ${request.firewall_rules.length} 条` : ''}`
-                    : `${request.destination_ip || '未填写 IP'} / ${request.destination_port || '未填写端口'}`;
+                    ? `${FIREWALL_RULE_TYPE_OPTIONS.find((option) => option.value === firewallRule.rule_type)?.label || '目标访问'} / ${firewallRule.destination_ip || '未填写地址'} / ${firewallRule.destination_port || '未填写端口'}${request.firewall_rules?.length > 1 ? ` 等 ${request.firewall_rules.length} 条` : ''}`
+                    : `${request.destination_ip || '未填写地址'} / ${request.destination_port || '未填写端口'}`;
                   const isFocused = focusedRequestId && String(request.id) === String(focusedRequestId);
                   return (
                     <tr
@@ -903,7 +910,7 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
                           {assistanceType
                             ? (
                               request.assistance_type === 'firewall_port_open'
-                                ? `${request.destination_ip || '未填写 IP'} / ${request.destination_port || '未填写端口'}`
+                                ? firewallSummary
                                 : request.assistance_type === 'ip_open'
                                   ? request.ip_open_details || '等待补充 IP 开通说明'
                                   : request.assistance_type === 'external_terminal_access'
@@ -979,9 +986,29 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
               <label className="text-sm text-slate-700">协助申请内容<textarea value={form.request_content} onChange={(e) => updateField('request_content', e.target.value)} className="mt-1 h-28 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
               {isFirewallPortAssistance(form) ? (
                 <>
-                  <label className="text-sm text-slate-700">目的 IP 地址<input value={form.destination_ip} onChange={(e) => updateField('destination_ip', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：10.2.2.20" /></label>
-                  <label className="text-sm text-slate-700">目的端口<input value={form.destination_port} onChange={(e) => updateField('destination_port', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：443, 8443" /></label>
-                  <label className="text-sm text-slate-700">端口开通时间<input type="datetime-local" value={form.firewall_open_at} onChange={(e) => updateField('firewall_open_at', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 md:col-span-2">
+                    <div className="mb-3 flex items-center justify-between">
+                      <div className="text-sm font-bold text-slate-900">访问规则</div>
+                      <button onClick={addFirewallRule} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50" type="button"><Plus className="h-4 w-4" />增加规则</button>
+                    </div>
+                    <div className="space-y-3">
+                      {(form.firewall_rules?.length ? form.firewall_rules : [createEmptyFirewallRule()]).map((rule, index) => (
+                        <div key={`draft-firewall-rule-${index}`} className="rounded-2xl border border-slate-200 bg-white p-4">
+                          <div className="mb-3 flex items-center justify-between">
+                            <div className="text-sm font-bold text-slate-900">规则 {index + 1}</div>
+                            {(form.firewall_rules?.length || 0) > 1 ? <button onClick={() => removeFirewallRule(index)} className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50" type="button"><Trash2 className="h-3.5 w-3.5" />删除</button> : null}
+                          </div>
+                          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+                            <label className="text-sm text-slate-700">规则类型<select value={rule.rule_type || 'destination'} onChange={(e) => updateFirewallRule(index, 'rule_type', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5">{FIREWALL_RULE_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+                            <label className="text-sm text-slate-700">地址<input value={rule.destination_ip} onChange={(e) => updateFirewallRule(index, 'destination_ip', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：10.2.2.20" /></label>
+                            <label className="text-sm text-slate-700">端口<input value={rule.destination_port} onChange={(e) => updateFirewallRule(index, 'destination_port', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：443" /></label>
+                            <label className="text-sm text-slate-700">用途说明<input value={rule.purpose} onChange={(e) => updateFirewallRule(index, 'purpose', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：接口联调、业务访问、地址转换" /></label>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <label className="text-sm text-slate-700">开通时间<input type="datetime-local" value={form.firewall_open_at} onChange={(e) => updateField('firewall_open_at', e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" /></label>
                   <label className="text-sm text-slate-700">相关链接<textarea value={form.related_links} onChange={(e) => updateField('related_links', e.target.value)} className="mt-1 h-24 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：系统地址、工单地址、接口文档地址" /></label>
                 </>
               ) : null}

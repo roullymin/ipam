@@ -71,6 +71,7 @@ def get_change_request_value(attrs, instance, field_name, default=''):
 def normalize_firewall_rules_payload(rules):
     normalized_rules = []
     for index, rule in enumerate(rules or []):
+        rule_type = str((rule or {}).get('rule_type') or 'destination').strip() or 'destination'
         destination_ip = str((rule or {}).get('destination_ip') or '').strip()
         destination_port = str((rule or {}).get('destination_port') or '').strip()
         purpose = str((rule or {}).get('purpose') or '').strip()
@@ -78,6 +79,7 @@ def normalize_firewall_rules_payload(rules):
             continue
         normalized_rules.append(
             {
+                'rule_type': rule_type if rule_type in {'destination', 'snat'} else 'destination',
                 'destination_ip': destination_ip,
                 'destination_port': destination_port,
                 'purpose': purpose,
@@ -85,53 +87,6 @@ def normalize_firewall_rules_payload(rules):
             }
         )
     return normalized_rules
-
-
-def validate_assistance_request_payload(attrs, instance=None):
-    request_type = get_change_request_value(attrs, instance, 'request_type', 'assistance')
-    assistance_type = get_change_request_value(attrs, instance, 'assistance_type', 'other_support') or 'other_support'
-    items = attrs.get('items', None)
-    errors = {}
-
-    if 'terminal_mac' in attrs:
-        attrs['terminal_mac'] = normalize_mac_address(attrs.get('terminal_mac'))
-
-    if request_type != 'assistance':
-        return attrs
-
-    if assistance_type in EQUIPMENT_ASSISTANCE_TYPES:
-        current_items = items
-        if current_items is None and instance is not None:
-            current_items = list(instance.items.all())
-        if not current_items:
-            errors['items'] = ['设备上架、下架和迁移需至少填写一台设备。']
-
-    if assistance_type == 'firewall_port_open':
-        if not str(get_change_request_value(attrs, instance, 'destination_ip', '') or '').strip():
-            errors['destination_ip'] = ['请填写目的 IP 地址。']
-        if not str(get_change_request_value(attrs, instance, 'destination_port', '') or '').strip():
-            errors['destination_port'] = ['请填写目的端口。']
-        if not get_change_request_value(attrs, instance, 'firewall_open_at', None):
-            errors['firewall_open_at'] = ['请填写端口开通时间。']
-
-    if assistance_type == 'ip_open':
-        if not str(get_change_request_value(attrs, instance, 'ip_open_details', '') or '').strip():
-            errors['ip_open_details'] = ['请填写 IP 开通说明。']
-        if not get_change_request_value(attrs, instance, 'ip_open_at', None):
-            errors['ip_open_at'] = ['请填写 IP 开通时间。']
-
-    if assistance_type == 'external_terminal_access':
-        if not str(get_change_request_value(attrs, instance, 'access_location', '') or '').strip():
-            errors['access_location'] = ['请填写接入位置。']
-        if not get_change_request_value(attrs, instance, 'access_at', None):
-            errors['access_at'] = ['请填写接入时间。']
-        if not str(get_change_request_value(attrs, instance, 'terminal_mac', '') or '').strip():
-            errors['terminal_mac'] = ['请填写终端 MAC 地址。']
-
-    if errors:
-        raise serializers.ValidationError(errors)
-
-    return attrs
 
 
 def validate_assistance_request_payload(attrs, instance=None):
@@ -166,6 +121,7 @@ def validate_assistance_request_payload(attrs, instance=None):
                 current_rules = normalize_firewall_rules_payload(
                     [
                         {
+                            'rule_type': 'destination',
                             'destination_ip': legacy_destination_ip,
                             'destination_port': legacy_destination_port,
                             'purpose': legacy_purpose,
@@ -178,16 +134,18 @@ def validate_assistance_request_payload(attrs, instance=None):
                 instance.firewall_rules.values('destination_ip', 'destination_port', 'purpose')
             )
         if not current_rules:
-            errors['firewall_rules'] = ['请至少填写一条目的 IP、目的端口和开通用途。']
+            errors['firewall_rules'] = ['请至少填写一条访问规则，包含类型、地址、端口和用途说明。']
         else:
             for index, rule in enumerate(current_rules):
                 missing_fields = []
+                if not rule.get('rule_type'):
+                    missing_fields.append('规则类型')
                 if not rule.get('destination_ip'):
-                    missing_fields.append('目的 IP 地址')
+                    missing_fields.append('地址')
                 if not rule.get('destination_port'):
-                    missing_fields.append('目的端口')
+                    missing_fields.append('端口')
                 if not rule.get('purpose'):
-                    missing_fields.append('开通用途')
+                    missing_fields.append('用途说明')
                 if missing_fields:
                     errors.setdefault('firewall_rules', []).append(
                         f'第 {index + 1} 行请补全：{"、".join(missing_fields)}。'
@@ -597,6 +555,7 @@ class DatacenterChangeFirewallRuleSerializer(serializers.ModelSerializer):
         model = DatacenterChangeFirewallRule
         fields = [
             'id',
+            'rule_type',
             'destination_ip',
             'destination_port',
             'purpose',
@@ -604,6 +563,7 @@ class DatacenterChangeFirewallRuleSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'sort_order']
         extra_kwargs = {
+            'rule_type': {'required': False, 'allow_blank': False},
             'destination_ip': {'required': False, 'allow_blank': True},
             'destination_port': {'required': False, 'allow_blank': True},
             'purpose': {'required': False, 'allow_blank': True},

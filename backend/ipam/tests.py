@@ -854,10 +854,13 @@ class DatacenterChangeRequestTests(BaseApiTestCase):
         response = self.client.get(f'/api/datacenter-change-requests/{change_request.id}/export_pdf/')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/pdf')
+        self.assertIn("filename*=UTF-8''PDF%20Export.pdf", response['Content-Disposition'])
+        self.assertNotIn(change_request.request_code, response['Content-Disposition'])
 
         public_response = self.client.get(f'/api/public/change-requests/{change_request.public_token}/export-pdf/')
         self.assertEqual(public_response.status_code, 200)
         self.assertEqual(public_response['Content-Type'], 'application/pdf')
+        self.assertIn("filename*=UTF-8''PDF%20Export.pdf", public_response['Content-Disposition'])
 
     def test_topology_endpoint_returns_datacenter_racks_and_occupied_ranges(self):
         response = self.client.get('/api/datacenter-change-requests/topology/')

@@ -76,10 +76,23 @@ const assistanceNeedsItems = (formLike) =>
   isAssistanceRequest(formLike?.request_type) && EQUIPMENT_ASSISTANCE_TYPES.has(formLike?.assistance_type);
 const shouldUseItems = (formLike) => !isAssistanceRequest(formLike?.request_type) || assistanceNeedsItems(formLike);
 
+const createEmptyFirewallRule = () => ({
+  rule_type: 'destination',
+  destination_ip: '',
+  destination_port: '',
+  purpose: '',
+});
+
+const FIREWALL_RULE_TYPE_OPTIONS = [
+  { value: 'destination', label: '目标访问' },
+  { value: 'snat', label: 'SNAT' },
+];
+
 const createEmptyAssistanceFields = () => ({
   destination_ip: '',
   destination_port: '',
   firewall_open_at: '',
+  firewall_rules: [createEmptyFirewallRule()],
   ip_open_details: '',
   ip_open_at: '',
   access_location: '',
@@ -113,6 +126,7 @@ const getAssistancePageTitle = (assistanceType) => {
 const REQUEST_FLOW_STEPS = ['填写资料', '生成表单号', '领导签批', '施工处理', '打印留档'];
 
 const createEmptyItem = () => ({
+  rack_device: '',
   device_name: '',
   device_model: '',
   serial_number: '',
@@ -124,9 +138,13 @@ const createEmptyItem = () => ({
   ip_action: 'allocate',
   assigned_management_ip: '',
   assigned_service_ip: '',
+  source_datacenter: '',
+  source_rack: '',
   source_rack_code: '',
   source_u_start: '',
   source_u_end: '',
+  target_datacenter: '',
+  target_rack: '',
   target_rack_code: '',
   target_u_start: '',
   target_u_end: '',
@@ -194,9 +212,14 @@ const buildFormFromRequest = (requestData) => {
         ip_action: item.ip_action || 'allocate',
         assigned_management_ip: item.assigned_management_ip || '',
         assigned_service_ip: item.assigned_service_ip || '',
+        rack_device: item.rack_device ? String(item.rack_device) : '',
+        source_datacenter: item.source_datacenter ? String(item.source_datacenter) : '',
+        source_rack: item.source_rack ? String(item.source_rack) : '',
         source_rack_code: item.source_rack_code || '',
         source_u_start: item.source_u_start || '',
         source_u_end: item.source_u_end || '',
+        target_datacenter: item.target_datacenter ? String(item.target_datacenter) : '',
+        target_rack: item.target_rack ? String(item.target_rack) : '',
         target_rack_code: item.target_rack_code || '',
         target_u_start: item.target_u_start || '',
         target_u_end: item.target_u_end || '',
@@ -206,6 +229,21 @@ const buildFormFromRequest = (requestData) => {
       ? [createEmptyItem()]
       : [createEmptyItem()];
   const normalizedItems = shouldUseItems({ request_type: requestType, assistance_type: assistanceType }) ? items : [];
+  const firewallRules = Array.isArray(requestData?.firewall_rules) && requestData.firewall_rules.length
+    ? requestData.firewall_rules.map((rule) => ({
+        rule_type: rule.rule_type || 'destination',
+        destination_ip: rule.destination_ip || '',
+        destination_port: rule.destination_port || '',
+        purpose: rule.purpose || '',
+      }))
+    : requestData?.destination_ip || requestData?.destination_port
+      ? [{
+          rule_type: 'destination',
+          destination_ip: requestData?.destination_ip || '',
+          destination_port: requestData?.destination_port || '',
+          purpose: requestData?.request_content || '',
+        }]
+      : [createEmptyFirewallRule()];
 
   return {
     request_type: requestType,
@@ -222,6 +260,7 @@ const buildFormFromRequest = (requestData) => {
     destination_ip: requestData?.destination_ip || '',
     destination_port: requestData?.destination_port || '',
     firewall_open_at: requestData?.firewall_open_at ? String(requestData.firewall_open_at).slice(0, 16) : '',
+    firewall_rules: firewallRules,
     ip_open_details: requestData?.ip_open_details || '',
     ip_open_at: requestData?.ip_open_at ? String(requestData.ip_open_at).slice(0, 16) : '',
     access_location: requestData?.access_location || '',
@@ -257,6 +296,7 @@ export default function DatacenterChangeIntakePage() {
   const [entryData, setEntryData] = useState(null);
   const [requestData, setRequestData] = useState(null);
   const [form, setForm] = useState(createEmptyForm());
+  const [topology, setTopology] = useState([]);
   const [submittedRequest, setSubmittedRequest] = useState(null);
   const [showFlowIntro, setShowFlowIntro] = useState(false);
 
@@ -268,6 +308,7 @@ export default function DatacenterChangeIntakePage() {
         setEntryData({ public_link: '', is_permanent: false, requires_token: true });
         setRequestData(null);
         setForm(createEmptyForm());
+        setTopology([]);
         setError('');
         setNotice('');
         setLoading(false);
@@ -285,6 +326,7 @@ export default function DatacenterChangeIntakePage() {
         setEntryData(payload.entry || { public_link: '', is_permanent: false, requires_token: true });
         setRequestData(payload.request || null);
         setForm(buildFormFromRequest(payload.request || createEmptyForm()));
+        setTopology(Array.isArray(payload.topology) ? payload.topology : []);
       } catch (requestError) {
         setError(requestError.message || '加载申请信息失败。');
       } finally {
@@ -311,6 +353,7 @@ export default function DatacenterChangeIntakePage() {
   const summaryLabel = REQUEST_TYPES[form.request_type] || form.request_type;
   const assistanceSubtypeLabel = ASSISTANCE_TYPE_LABELS[form.assistance_type] || form.assistance_type;
   const showItemEditor = shouldUseItems(form);
+  const singleDatacenter = topology.length === 1 ? topology[0] : null;
 
   const handleContinueFromIntro = () => {
     if (typeof window !== 'undefined' && introStorageKey) {
@@ -344,6 +387,9 @@ export default function DatacenterChangeIntakePage() {
           next.destination_ip = '';
           next.destination_port = '';
           next.firewall_open_at = '';
+          next.firewall_rules = [createEmptyFirewallRule()];
+        } else if (!prev.firewall_rules?.length) {
+          next.firewall_rules = [createEmptyFirewallRule()];
         }
         if (value !== 'ip_open') {
           next.ip_open_details = '';
@@ -367,6 +413,32 @@ export default function DatacenterChangeIntakePage() {
     }));
   };
 
+  const updateFirewallRule = (index, key, value) => {
+    setForm((prev) => ({
+      ...prev,
+      firewall_rules: (prev.firewall_rules?.length ? prev.firewall_rules : [createEmptyFirewallRule()]).map((rule, ruleIndex) =>
+        ruleIndex === index ? { ...rule, [key]: value } : rule
+      ),
+    }));
+  };
+
+  const addFirewallRule = () => {
+    setForm((prev) => ({
+      ...prev,
+      firewall_rules: [...(prev.firewall_rules?.length ? prev.firewall_rules : [createEmptyFirewallRule()]), createEmptyFirewallRule()],
+    }));
+  };
+
+  const removeFirewallRule = (index) => {
+    setForm((prev) => {
+      const rules = prev.firewall_rules?.length ? prev.firewall_rules : [createEmptyFirewallRule()];
+      return {
+        ...prev,
+        firewall_rules: rules.length === 1 ? [createEmptyFirewallRule()] : rules.filter((_, ruleIndex) => ruleIndex !== index),
+      };
+    });
+  };
+
   const addItem = () => {
     setForm((prev) => ({ ...prev, items: [...prev.items, createEmptyItem()] }));
   };
@@ -387,6 +459,36 @@ export default function DatacenterChangeIntakePage() {
     setForm(empty);
   };
 
+  const applyDevicePreset = (index, rackId, rackDeviceId) => {
+    const sourceDatacenterId = singleDatacenter ? String(singleDatacenter.id) : form.items[index]?.source_datacenter;
+    const sourceDatacenter = topology.find((dc) => String(dc.id) === String(sourceDatacenterId));
+    const sourceRack = sourceDatacenter?.racks?.find((rack) => String(rack.id) === String(rackId));
+    const device = sourceRack?.devices?.find((candidate) => String(candidate.id) === String(rackDeviceId));
+    if (!device) return;
+
+    setForm((prev) => ({
+      ...prev,
+      items: prev.items.map((item, itemIndex) =>
+        itemIndex === index
+          ? {
+              ...item,
+              rack_device: String(device.id),
+              device_name: device.name || item.device_name,
+              device_model: device.model || device.device_type || item.device_model,
+              serial_number: device.serial_number || item.serial_number,
+              quantity: 1,
+              u_height: device.u_height || item.u_height || 1,
+              assigned_management_ip: item.assigned_management_ip || device.mgmt_ip || '',
+              source_rack: String(rackId),
+              source_rack_code: sourceRack?.code || sourceRack?.name || '',
+              source_u_start: device.position || '',
+              source_u_end: device.position && device.u_height ? device.position - device.u_height + 1 : '',
+            }
+          : item
+      ),
+    }));
+  };
+
   const submit = async () => {
     if (!form.applicant_name?.trim()) {
       setError(assistance ? '请先填写需求联系人。' : '请先填写申请人。');
@@ -400,17 +502,48 @@ export default function DatacenterChangeIntakePage() {
       setError('请至少填写一台设备信息。');
       return;
     }
+    if (assistance && assistanceNeedsItems(form)) {
+      for (let index = 0; index < form.items.length; index += 1) {
+        const item = form.items[index];
+        if (form.assistance_type === 'rack_out') {
+          if (!(item.source_datacenter || singleDatacenter?.id)) {
+            setError(`请先为设备 ${index + 1} 选择下架机房。`);
+            return;
+          }
+          if (!item.source_rack) {
+            setError(`请先为设备 ${index + 1} 选择下架机柜。`);
+            return;
+          }
+        }
+        if (form.assistance_type !== 'rack_out') {
+          if (!(item.target_datacenter || singleDatacenter?.id)) {
+            setError(`请先为设备 ${index + 1} 选择上架机房。`);
+            return;
+          }
+          if (!item.target_rack) {
+            setError(`请先为设备 ${index + 1} 选择上架机柜。`);
+            return;
+          }
+        }
+      }
+    }
     if (assistance && isFirewallPortAssistance(form)) {
-      if (!form.destination_ip?.trim()) {
-        setError('请先填写目的 IP 地址。');
+      const firewallRules = (form.firewall_rules || []).filter(
+        (rule) => rule.destination_ip?.trim() || rule.destination_port?.trim() || rule.purpose?.trim()
+      );
+      if (!firewallRules.length) {
+        setError('请至少填写一条访问规则。');
         return;
       }
-      if (!form.destination_port?.trim()) {
-        setError('请先填写目的端口。');
-        return;
+      for (let index = 0; index < firewallRules.length; index += 1) {
+        const rule = firewallRules[index];
+        if (!rule.rule_type || !rule.destination_ip?.trim() || !rule.destination_port?.trim() || !rule.purpose?.trim()) {
+          setError(`请补全第 ${index + 1} 条访问规则的类型、地址、端口和用途说明。`);
+          return;
+        }
       }
       if (!form.firewall_open_at) {
-        setError('请先填写端口开通时间。');
+        setError('请先填写访问规则开通时间。');
         return;
       }
     }
@@ -453,6 +586,9 @@ export default function DatacenterChangeIntakePage() {
       const nextRequest = payload.request || null;
       setRequestData(nextRequest);
       setForm(buildFormFromRequest(nextRequest || form));
+      if (Array.isArray(payload.topology)) {
+        setTopology(payload.topology);
+      }
       if (token) {
         setNotice('申请信息已提交，后续将进入审批流程。');
       } else {
@@ -767,16 +903,54 @@ export default function DatacenterChangeIntakePage() {
               </label>
               {isFirewallPortAssistance(form) ? (
                 <>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 md:col-span-2">
+                    <div className="mb-3 flex items-center justify-between">
+                      <div className="text-sm font-bold text-slate-900">访问规则</div>
+                      <button onClick={addFirewallRule} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50" type="button">
+                        <Plus className="h-4 w-4" />
+                        增加规则
+                      </button>
+                    </div>
+                    <div className="space-y-3">
+                      {(form.firewall_rules?.length ? form.firewall_rules : [createEmptyFirewallRule()]).map((rule, index) => (
+                        <div key={`public-firewall-rule-${index}`} className="rounded-2xl border border-slate-200 bg-white p-4">
+                          <div className="mb-3 flex items-center justify-between">
+                            <div className="text-sm font-bold text-slate-900">规则 {index + 1}</div>
+                            {(form.firewall_rules?.length || 0) > 1 ? (
+                              <button onClick={() => removeFirewallRule(index)} className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50" type="button">
+                                <Trash2 className="h-3.5 w-3.5" />
+                                删除
+                              </button>
+                            ) : null}
+                          </div>
+                          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+                            <label className="text-sm text-slate-700">
+                              规则类型
+                              <select value={rule.rule_type || 'destination'} onChange={(event) => updateFirewallRule(index, 'rule_type', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5">
+                                {FIREWALL_RULE_TYPE_OPTIONS.map((option) => (
+                                  <option key={option.value} value={option.value}>{option.label}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="text-sm text-slate-700">
+                              地址
+                              <input value={rule.destination_ip} onChange={(event) => updateFirewallRule(index, 'destination_ip', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：10.2.2.20" />
+                            </label>
+                            <label className="text-sm text-slate-700">
+                              端口
+                              <input value={rule.destination_port} onChange={(event) => updateFirewallRule(index, 'destination_port', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：443" />
+                            </label>
+                            <label className="text-sm text-slate-700">
+                              用途说明
+                              <input value={rule.purpose} onChange={(event) => updateFirewallRule(index, 'purpose', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：接口联调、业务访问、SNAT 转换" />
+                            </label>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                   <label className="text-sm text-slate-700">
-                    目的 IP 地址
-                    <input value={form.destination_ip} onChange={(event) => setField('destination_ip', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：10.2.2.20" />
-                  </label>
-                  <label className="text-sm text-slate-700">
-                    目的端口
-                    <input value={form.destination_port} onChange={(event) => setField('destination_port', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" placeholder="例如：443, 8443" />
-                  </label>
-                  <label className="text-sm text-slate-700">
-                    端口开通时间
+                    规则开通时间
                     <input type="datetime-local" value={form.firewall_open_at} onChange={(event) => setField('firewall_open_at', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" />
                   </label>
                   <label className="text-sm text-slate-700">
@@ -863,7 +1037,63 @@ export default function DatacenterChangeIntakePage() {
                             </button>
                           ) : null}
                         </div>
+                        {(() => {
+                          const showSource = form.assistance_type === 'rack_out';
+                          const showTarget = form.assistance_type !== 'rack_out';
+                          const sourceDatacenterId = item.source_datacenter || (singleDatacenter ? String(singleDatacenter.id) : '');
+                          const targetDatacenterId = item.target_datacenter || (singleDatacenter ? String(singleDatacenter.id) : '');
+                          const sourceDatacenter = topology.find((dc) => String(dc.id) === String(sourceDatacenterId));
+                          const targetDatacenter = topology.find((dc) => String(dc.id) === String(targetDatacenterId));
+                          const sourceRack = sourceDatacenter?.racks?.find((rack) => String(rack.id) === String(item.source_rack));
+                          const targetRack = targetDatacenter?.racks?.find((rack) => String(rack.id) === String(item.target_rack));
+
+                          return (
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                          {showSource && !singleDatacenter ? (
+                            <label className="text-sm text-slate-700">
+                              下架机房
+                              <select value={item.source_datacenter} onChange={(event) => { setItemField(index, 'source_datacenter', event.target.value); setItemField(index, 'source_rack', ''); setItemField(index, 'rack_device', ''); }} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5">
+                                <option value="">请选择</option>
+                                {topology.map((dc) => <option key={dc.id} value={dc.id}>{dc.name}</option>)}
+                              </select>
+                            </label>
+                          ) : null}
+                          {showSource ? (
+                            <label className="text-sm text-slate-700">
+                              下架机柜
+                              <select value={item.source_rack} onChange={(event) => { setItemField(index, 'source_rack', event.target.value); setItemField(index, 'rack_device', ''); }} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5">
+                                <option value="">请选择</option>
+                                {(sourceDatacenter?.racks || []).map((rack) => <option key={rack.id} value={rack.id}>{rack.name || rack.code}</option>)}
+                              </select>
+                            </label>
+                          ) : null}
+                          {showSource ? (
+                            <label className="text-sm text-slate-700">
+                              现有设备
+                              <select value={item.rack_device} onChange={(event) => { setItemField(index, 'rack_device', event.target.value); applyDevicePreset(index, item.source_rack, event.target.value); }} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5">
+                                <option value="">可选</option>
+                                {(sourceRack?.devices || []).map((device) => <option key={device.id} value={device.id}>{device.name}{device.mgmt_ip ? ` / ${device.mgmt_ip}` : ''}</option>)}
+                              </select>
+                            </label>
+                          ) : null}
+                          {showTarget && !singleDatacenter ? (
+                            <label className="text-sm text-slate-700">
+                              上架机房
+                              <select value={item.target_datacenter} onChange={(event) => { setItemField(index, 'target_datacenter', event.target.value); setItemField(index, 'target_rack', ''); }} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5">
+                                <option value="">请选择</option>
+                                {topology.map((dc) => <option key={dc.id} value={dc.id}>{dc.name}</option>)}
+                              </select>
+                            </label>
+                          ) : null}
+                          {showTarget ? (
+                            <label className="text-sm text-slate-700">
+                              上架机柜
+                              <select value={item.target_rack} onChange={(event) => setItemField(index, 'target_rack', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5">
+                                <option value="">请选择</option>
+                                {(targetDatacenter?.racks || []).map((rack) => <option key={rack.id} value={rack.id}>{rack.name || rack.code}</option>)}
+                              </select>
+                            </label>
+                          ) : null}
                           <label className="text-sm text-slate-700">
                             设备名称
                             <input value={item.device_name} onChange={(event) => setItemField(index, 'device_name', event.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2.5" />
@@ -913,6 +1143,8 @@ export default function DatacenterChangeIntakePage() {
                             <textarea value={item.notes} onChange={(event) => setItemField(index, 'notes', event.target.value)} className="mt-1 h-24 w-full rounded-xl border border-slate-300 px-3 py-2.5" />
                           </label>
                         </div>
+                          );
+                        })()}
                       </div>
                     ))}
                   </div>

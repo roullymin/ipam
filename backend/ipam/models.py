@@ -383,6 +383,12 @@ ASSISTANCE_TYPE_CHOICES = [
 ]
 
 
+FIREWALL_RULE_TYPE_CHOICES = [
+    ('destination', '目标访问'),
+    ('snat', 'SNAT'),
+]
+
+
 CHANGE_REQUEST_STATUS_CHOICES = [
     ('draft', '草稿'),
     ('submitted', '待审批'),
@@ -490,9 +496,10 @@ class DatacenterChangeFirewallRule(models.Model):
         related_name='firewall_rules',
         verbose_name='所属申请',
     )
-    destination_ip = models.CharField('目的 IP 地址', max_length=120)
-    destination_port = models.CharField('目的端口', max_length=120)
-    purpose = models.CharField('开通用途', max_length=200, blank=True)
+    rule_type = models.CharField('规则类型', max_length=20, choices=FIREWALL_RULE_TYPE_CHOICES, default='destination')
+    destination_ip = models.CharField('地址', max_length=120)
+    destination_port = models.CharField('端口', max_length=120)
+    purpose = models.CharField('用途说明', max_length=200, blank=True)
     sort_order = models.PositiveIntegerField('排序', default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
