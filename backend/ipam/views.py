@@ -950,6 +950,11 @@ def _append_pdf_detail_row(rows, label, value):
         rows.append([label, text])
 
 
+def _get_pdf_value(value, placeholder='—'):
+    text = _get_pdf_text(value)
+    return text or placeholder
+
+
 def _get_section_heading(index, title):
     numerals = '一二三四五六七八九十'
     prefix = numerals[index - 1] if 1 <= index <= len(numerals) else str(index)
@@ -1027,23 +1032,24 @@ def _build_change_request_pdf(response_buffer, change_request):
         leading=15,
         textColor=colors.HexColor('#334155'),
     )
-    summary_style = ParagraphStyle(
-        'ChangeRequestSummary',
+    intro_style = ParagraphStyle(
+        'ChangeRequestIntro',
         parent=body_style,
         fontName=base_font,
-        fontSize=9,
-        leading=13,
-        textColor=colors.HexColor('#0f172a'),
+        fontSize=10,
+        leading=16,
+        textColor=colors.HexColor('#64748b'),
         alignment=1,
+        spaceAfter=4 * mm,
     )
     signature_style = ParagraphStyle(
         'ChangeRequestSignature',
         parent=body_style,
         fontName=base_font,
         fontSize=11,
-        leading=22,
+        leading=18,
         textColor=colors.HexColor('#0f172a'),
-        spaceAfter=3 * mm,
+        spaceAfter=2 * mm,
     )
 
     doc = SimpleDocTemplate(
@@ -1071,82 +1077,48 @@ def _build_change_request_pdf(response_buffer, change_request):
 
     elements = [
         Paragraph(title_text, title_style),
+        Paragraph('请核对申请重点信息与实施内容后签字确认。', intro_style),
         Spacer(1, 2 * mm),
     ]
     section_index = 1
 
     info_rows = []
-    summary_cards = []
     if change_request.request_type == 'assistance':
-        summary_cards = [
-            ('协助分类', assistance_label),
-            ('需求联系人', change_request.applicant_name),
-            ('联系方式', change_request.applicant_phone),
+        info_rows = [
+            ['协助分类', _get_pdf_value(assistance_label), '申请标题', _get_pdf_value(change_request.title or title_text)],
+            ['申请单位', _get_pdf_value(change_request.company), '需求处室', _get_pdf_value(change_request.department)],
+            ['需求联系人', _get_pdf_value(change_request.applicant_name), '联系方式', _get_pdf_value(change_request.applicant_phone)],
+            ['联系邮箱', _get_pdf_value(change_request.applicant_email), '项目名称', _get_pdf_value(change_request.project_name)],
         ]
-        _append_pdf_pair_row(info_rows, '申请标题', change_request.title or title_text, '申请单位', change_request.company)
-        _append_pdf_pair_row(info_rows, '需求处室', change_request.department, '项目名称', change_request.project_name)
-        _append_pdf_pair_row(info_rows, '联系邮箱', change_request.applicant_email)
     else:
-        summary_cards = [
-            ('申请类型', type_label),
-            ('申请人', change_request.applicant_name),
-            ('联系电话', change_request.applicant_phone),
+        info_rows = [
+            ['申请类型', _get_pdf_value(type_label), '申请标题', _get_pdf_value(change_request.title or type_label)],
+            ['所属单位', _get_pdf_value(change_request.company), '所属部门', _get_pdf_value(change_request.department)],
+            ['申请人', _get_pdf_value(change_request.applicant_name), '联系电话', _get_pdf_value(change_request.applicant_phone)],
+            ['联系邮箱', _get_pdf_value(change_request.applicant_email), '所属项目', _get_pdf_value(change_request.project_name)],
         ]
-        _append_pdf_pair_row(info_rows, '申请标题', change_request.title or type_label, '所属单位', change_request.company)
-        _append_pdf_pair_row(info_rows, '所属部门', change_request.department, '所属项目', change_request.project_name)
-        _append_pdf_pair_row(info_rows, '联系邮箱', change_request.applicant_email)
         if change_request.requires_power_down:
-            _append_pdf_pair_row(info_rows, '是否需要下电', '是')
-
-    visible_summary_cards = [(label, _get_pdf_text(value)) for label, value in summary_cards if _get_pdf_text(value)]
-    if visible_summary_cards:
-        summary_cells = [
-            Paragraph(
-                f'<font size="8" color="#64748b">{label}</font><br/><font size="12"><b>{value}</b></font>',
-                summary_style,
-            )
-            for label, value in visible_summary_cards
-        ]
-        while len(summary_cells) < 4:
-            summary_cells.append(Paragraph('', summary_style))
-        summary_table = Table([summary_cells], colWidths=[41 * mm, 41 * mm, 41 * mm, 41 * mm])
-        summary_table.setStyle(
-            TableStyle(
-                [
-                    ('FONTNAME', (0, 0), (-1, -1), base_font),
-                    ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f8fbff')),
-                    ('BOX', (0, 0), (-1, -1), 0.6, colors.HexColor('#cfe3ff')),
-                    ('INNERGRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#dbeafe')),
-                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                    ('LEFTPADDING', (0, 0), (-1, -1), 8),
-                    ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-                    ('TOPPADDING', (0, 0), (-1, -1), 8),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-                ]
-            )
-        )
-        elements.append(summary_table)
-        elements.append(Spacer(1, 5 * mm))
+            info_rows.append(['是否需要下电', '是', '', ''])
 
     elements.append(Paragraph(_get_section_heading(section_index, '申请信息'), heading_style))
     section_index += 1
-    info_table = Table(info_rows, colWidths=[24 * mm, 58 * mm, 24 * mm, 56 * mm])
+    info_table = Table(info_rows, colWidths=[22 * mm, 60 * mm, 22 * mm, 60 * mm])
     info_table.setStyle(
         TableStyle(
             [
                 ('FONTNAME', (0, 0), (-1, -1), base_font),
                 ('FONTSIZE', (0, 0), (-1, -1), 10),
                 ('LEADING', (0, 0), (-1, -1), 14),
-                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f3f7fd')),
-                ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#f3f7fd')),
+                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#eef5ff')),
+                ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#eef5ff')),
                 ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#334155')),
-                ('BOX', (0, 0), (-1, -1), 0.6, colors.HexColor('#cbd5e1')),
-                ('INNERGRID', (0, 0), (-1, -1), 0.45, colors.HexColor('#d7e0ea')),
+                ('BOX', (0, 0), (-1, -1), 0.8, colors.HexColor('#cbd5e1')),
+                ('INNERGRID', (0, 0), (-1, -1), 0.55, colors.HexColor('#d7e0ea')),
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('LEFTPADDING', (0, 0), (-1, -1), 6),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
-                ('TOPPADDING', (0, 0), (-1, -1), 6),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('LEFTPADDING', (0, 0), (-1, -1), 8),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+                ('TOPPADDING', (0, 0), (-1, -1), 8),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
             ]
         )
     )
@@ -1215,7 +1187,7 @@ def _build_change_request_pdf(response_buffer, change_request):
         elements.append(detail_table)
     if has_firewall_table:
         elements.append(Spacer(1, 2 * mm))
-        elements.append(Paragraph('访问规则', body_style))
+        elements.append(Paragraph('访问规则', signature_style))
         elements.append(Spacer(1, 2 * mm))
         rule_rows = [['序号', '规则类型', '地址', '端口', '用途说明']]
         if firewall_rules:
@@ -1322,36 +1294,38 @@ def _build_change_request_pdf(response_buffer, change_request):
         elements.append(item_table)
         elements.append(Spacer(1, 5 * mm))
 
-    signature_heading = '签字栏' if change_request.request_type == 'assistance' else '签字确认'
+    signature_heading = '签字确认'
     elements.append(Paragraph(_get_section_heading(section_index, signature_heading), heading_style))
+    elements.append(Paragraph('以下签字用于确认申请内容、业务需求与领导审批意见。', body_style))
+    elements.append(Spacer(1, 2 * mm))
     if change_request.request_type == 'assistance':
         signature_rows = [
-            ['申请人签字', '____________________', '日期', '____________________'],
-            ['业务处室签字', '____________________', '日期', '____________________'],
-            ['科信处领导签字', '____________________', '日期', '____________________'],
+            ['申请人确认', '已确认本申请内容真实、完整。', '签字：____________________', '日期：____________________'],
+            ['业务处室审核', '已核对本次协助需求与实施范围。', '签字：____________________', '日期：____________________'],
+            ['科信处领导审批', '同意按本申请内容安排实施。', '签字：____________________', '日期：____________________'],
         ]
     else:
         signature_rows = [
-            ['申请人签字', '____________________', '日期', '____________________'],
-            ['审批领导签字', '____________________', '日期', '____________________'],
-            ['执行确认签字', '____________________', '日期', '____________________'],
+            ['申请人确认', '已确认本次变更内容与影响范围。', '签字：____________________', '日期：____________________'],
+            ['审批领导签字', '同意按本申请单安排实施。', '签字：____________________', '日期：____________________'],
+            ['执行确认签字', '已确认实施完成情况。', '签字：____________________', '日期：____________________'],
         ]
-    signature_table = Table(signature_rows, colWidths=[30 * mm, 52 * mm, 18 * mm, 64 * mm])
+    signature_table = Table(signature_rows, colWidths=[26 * mm, 60 * mm, 42 * mm, 34 * mm])
     signature_table.setStyle(
         TableStyle(
             [
                 ('FONTNAME', (0, 0), (-1, -1), base_font),
                 ('FONTSIZE', (0, 0), (-1, -1), 10.5),
-                ('LEADING', (0, 0), (-1, -1), 17),
-                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f8fbff')),
+                ('LEADING', (0, 0), (-1, -1), 18),
+                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#eef5ff')),
                 ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#f8fbff')),
-                ('BOX', (0, 0), (-1, -1), 0.6, colors.HexColor('#cbd5e1')),
-                ('INNERGRID', (0, 0), (-1, -1), 0.45, colors.HexColor('#d7e0ea')),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('BOX', (0, 0), (-1, -1), 0.8, colors.HexColor('#cbd5e1')),
+                ('INNERGRID', (0, 0), (-1, -1), 0.55, colors.HexColor('#d7e0ea')),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
                 ('LEFTPADDING', (0, 0), (-1, -1), 8),
                 ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-                ('TOPPADDING', (0, 0), (-1, -1), 10),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+                ('TOPPADDING', (0, 0), (-1, -1), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
             ]
         )
     )
