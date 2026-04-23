@@ -1027,6 +1027,15 @@ def _build_change_request_pdf(response_buffer, change_request):
         leading=15,
         textColor=colors.HexColor('#334155'),
     )
+    summary_style = ParagraphStyle(
+        'ChangeRequestSummary',
+        parent=body_style,
+        fontName=base_font,
+        fontSize=9,
+        leading=13,
+        textColor=colors.HexColor('#0f172a'),
+        alignment=1,
+    )
     signature_style = ParagraphStyle(
         'ChangeRequestSignature',
         parent=body_style,
@@ -1062,29 +1071,62 @@ def _build_change_request_pdf(response_buffer, change_request):
 
     elements = [
         Paragraph(title_text, title_style),
-        Paragraph(
-            f'表单号：{change_request.request_code}　　导出时间：{timezone.localtime().strftime("%Y-%m-%d %H:%M")}',
-            body_style,
-        ),
-        Spacer(1, 5 * mm),
+        Spacer(1, 2 * mm),
     ]
     section_index = 1
 
     info_rows = []
+    summary_cards = []
     if change_request.request_type == 'assistance':
-        _append_pdf_pair_row(info_rows, '申请标题', change_request.title or title_text, '协助分类', assistance_label)
-        _append_pdf_pair_row(info_rows, '申请单位', change_request.company, '需求处室', change_request.department)
-        _append_pdf_pair_row(info_rows, '需求联系人', change_request.applicant_name, '联系方式', change_request.applicant_phone)
-        _append_pdf_pair_row(info_rows, '联系邮箱', change_request.applicant_email, '项目名称', change_request.project_name)
-        _append_pdf_pair_row(info_rows, '期望协助时间', _format_change_datetime(change_request.planned_execute_at), '审批编号', change_request.approval_code)
+        summary_cards = [
+            ('协助分类', assistance_label),
+            ('需求联系人', change_request.applicant_name),
+            ('联系方式', change_request.applicant_phone),
+        ]
+        _append_pdf_pair_row(info_rows, '申请标题', change_request.title or title_text, '申请单位', change_request.company)
+        _append_pdf_pair_row(info_rows, '需求处室', change_request.department, '项目名称', change_request.project_name)
+        _append_pdf_pair_row(info_rows, '联系邮箱', change_request.applicant_email)
     else:
-        _append_pdf_pair_row(info_rows, '申请标题', change_request.title or type_label, '申请类型', type_label)
-        _append_pdf_pair_row(info_rows, '所属单位', change_request.company, '所属部门', change_request.department)
-        _append_pdf_pair_row(info_rows, '申请人', change_request.applicant_name, '联系电话', change_request.applicant_phone)
-        _append_pdf_pair_row(info_rows, '联系邮箱', change_request.applicant_email, '所属项目', change_request.project_name)
-        _append_pdf_pair_row(info_rows, '计划执行时间', _format_change_datetime(change_request.planned_execute_at), '审批编号', change_request.approval_code)
+        summary_cards = [
+            ('申请类型', type_label),
+            ('申请人', change_request.applicant_name),
+            ('联系电话', change_request.applicant_phone),
+        ]
+        _append_pdf_pair_row(info_rows, '申请标题', change_request.title or type_label, '所属单位', change_request.company)
+        _append_pdf_pair_row(info_rows, '所属部门', change_request.department, '所属项目', change_request.project_name)
+        _append_pdf_pair_row(info_rows, '联系邮箱', change_request.applicant_email)
         if change_request.requires_power_down:
             _append_pdf_pair_row(info_rows, '是否需要下电', '是')
+
+    visible_summary_cards = [(label, _get_pdf_text(value)) for label, value in summary_cards if _get_pdf_text(value)]
+    if visible_summary_cards:
+        summary_cells = [
+            Paragraph(
+                f'<font size="8" color="#64748b">{label}</font><br/><font size="12"><b>{value}</b></font>',
+                summary_style,
+            )
+            for label, value in visible_summary_cards
+        ]
+        while len(summary_cells) < 4:
+            summary_cells.append(Paragraph('', summary_style))
+        summary_table = Table([summary_cells], colWidths=[41 * mm, 41 * mm, 41 * mm, 41 * mm])
+        summary_table.setStyle(
+            TableStyle(
+                [
+                    ('FONTNAME', (0, 0), (-1, -1), base_font),
+                    ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f8fbff')),
+                    ('BOX', (0, 0), (-1, -1), 0.6, colors.HexColor('#cfe3ff')),
+                    ('INNERGRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#dbeafe')),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 8),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+                    ('TOPPADDING', (0, 0), (-1, -1), 8),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                ]
+            )
+        )
+        elements.append(summary_table)
+        elements.append(Spacer(1, 5 * mm))
 
     elements.append(Paragraph(_get_section_heading(section_index, '申请信息'), heading_style))
     section_index += 1
@@ -1095,10 +1137,11 @@ def _build_change_request_pdf(response_buffer, change_request):
                 ('FONTNAME', (0, 0), (-1, -1), base_font),
                 ('FONTSIZE', (0, 0), (-1, -1), 10),
                 ('LEADING', (0, 0), (-1, -1), 14),
-                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#eff6ff')),
-                ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#eff6ff')),
+                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f3f7fd')),
+                ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#f3f7fd')),
                 ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#334155')),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+                ('BOX', (0, 0), (-1, -1), 0.6, colors.HexColor('#cbd5e1')),
+                ('INNERGRID', (0, 0), (-1, -1), 0.45, colors.HexColor('#d7e0ea')),
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                 ('LEFTPADDING', (0, 0), (-1, -1), 6),
                 ('RIGHTPADDING', (0, 0), (-1, -1), 6),
@@ -1279,61 +1322,40 @@ def _build_change_request_pdf(response_buffer, change_request):
         elements.append(item_table)
         elements.append(Spacer(1, 5 * mm))
 
-    action_rows = []
-    if change_request.request_type == 'assistance':
-        action_heading = '审批与处理记录'
-    else:
-        action_heading = '审批与执行记录'
-    _append_pdf_detail_row(action_rows, '业务处室意见' if change_request.request_type == 'assistance' else '部门意见', change_request.department_comment)
-    _append_pdf_detail_row(action_rows, '科技与信息化处意见' if change_request.request_type == 'assistance' else '信息化意见', change_request.it_comment)
-    _append_pdf_detail_row(action_rows, '审批意见', change_request.review_comment)
-    reviewer_summary = ' / '.join(filter(None, [_get_pdf_text(change_request.reviewer_name), _get_pdf_text(_format_change_datetime(change_request.reviewed_at))]))
-    executor_label = '处理人 / 时间' if change_request.request_type == 'assistance' else '执行人 / 时间'
-    executor_summary = ' / '.join(filter(None, [_get_pdf_text(change_request.executor_name), _get_pdf_text(_format_change_datetime(change_request.executed_at))]))
-    _append_pdf_detail_row(action_rows, '审批人 / 时间', reviewer_summary)
-    _append_pdf_detail_row(action_rows, executor_label, executor_summary)
-    _append_pdf_detail_row(action_rows, '处理备注' if change_request.request_type == 'assistance' else '执行备注', change_request.execution_comment)
-
-    if action_rows:
-        elements.append(Paragraph(_get_section_heading(section_index, action_heading), heading_style))
-        section_index += 1
-        action_table = Table(action_rows, colWidths=[28 * mm, 136 * mm])
-        action_table.setStyle(
-            TableStyle(
-                [
-                    ('FONTNAME', (0, 0), (-1, -1), base_font),
-                    ('FONTSIZE', (0, 0), (-1, -1), 10),
-                    ('LEADING', (0, 0), (-1, -1), 14),
-                    ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#eff6ff')),
-                    ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#334155')),
-                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
-                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                    ('LEFTPADDING', (0, 0), (-1, -1), 6),
-                    ('RIGHTPADDING', (0, 0), (-1, -1), 6),
-                    ('TOPPADDING', (0, 0), (-1, -1), 6),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                ]
-            )
-        )
-        elements.append(action_table)
-        elements.append(Spacer(1, 5 * mm))
-
     signature_heading = '签字栏' if change_request.request_type == 'assistance' else '签字确认'
     elements.append(Paragraph(_get_section_heading(section_index, signature_heading), heading_style))
     if change_request.request_type == 'assistance':
-        signature_lines = [
-            f'申请单位（盖章）：{_get_pdf_text(change_request.company) or "____________________"}',
-            '业务处室签字：____________________    日期：____________________',
-            '科信处领导签字：____________________    日期：____________________',
+        signature_rows = [
+            ['申请人签字', '____________________', '日期', '____________________'],
+            ['业务处室签字', '____________________', '日期', '____________________'],
+            ['科信处领导签字', '____________________', '日期', '____________________'],
         ]
     else:
-        signature_lines = [
-            '申请部门签字：____________________    日期：____________________',
-            '审批领导签字：____________________    日期：____________________',
-            '执行确认签字：____________________    日期：____________________',
+        signature_rows = [
+            ['申请人签字', '____________________', '日期', '____________________'],
+            ['审批领导签字', '____________________', '日期', '____________________'],
+            ['执行确认签字', '____________________', '日期', '____________________'],
         ]
-    for line in signature_lines:
-        elements.append(Paragraph(line, signature_style))
+    signature_table = Table(signature_rows, colWidths=[30 * mm, 52 * mm, 18 * mm, 64 * mm])
+    signature_table.setStyle(
+        TableStyle(
+            [
+                ('FONTNAME', (0, 0), (-1, -1), base_font),
+                ('FONTSIZE', (0, 0), (-1, -1), 10.5),
+                ('LEADING', (0, 0), (-1, -1), 17),
+                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f8fbff')),
+                ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#f8fbff')),
+                ('BOX', (0, 0), (-1, -1), 0.6, colors.HexColor('#cbd5e1')),
+                ('INNERGRID', (0, 0), (-1, -1), 0.45, colors.HexColor('#d7e0ea')),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 8),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+                ('TOPPADDING', (0, 0), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ]
+        )
+    )
+    elements.append(signature_table)
     doc.build(elements)
 
 
