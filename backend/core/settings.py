@@ -170,6 +170,13 @@ PUBLIC_DCIM_OVERVIEW_ENABLED = get_env_bool('PUBLIC_DCIM_OVERVIEW_ENABLED', defa
 PUBLIC_DCIM_ACCESS_TOKEN = get_env('PUBLIC_DCIM_ACCESS_TOKEN', default='')
 PUBLIC_DCIM_INCLUDE_SENSITIVE = get_env_bool('PUBLIC_DCIM_INCLUDE_SENSITIVE', default=False)
 
+OPENBAO_ENABLED = get_env_bool('OPENBAO_ENABLED', default=False)
+OPENBAO_ADDR = get_env('OPENBAO_ADDR', default='http://openbao:8200')
+OPENBAO_TOKEN = get_env('OPENBAO_TOKEN', default='')
+OPENBAO_KV_MOUNT = get_env('OPENBAO_KV_MOUNT', default='secret')
+OPENBAO_NAMESPACE = get_env('OPENBAO_NAMESPACE', default='')
+OPENBAO_TIMEOUT_SECONDS = int(get_env('OPENBAO_TIMEOUT_SECONDS', default='5'))
+
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
     { 'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator', },

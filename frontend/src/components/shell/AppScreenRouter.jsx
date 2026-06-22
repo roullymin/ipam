@@ -16,10 +16,12 @@ const SecurityCenterView = lazy(
 const UserManagementView = lazy(
   () => import('../../modules/users/views/UserManagementView'),
 );
+const VaultView = lazy(() => import('../../modules/vault/views/VaultView'));
 
 export default function AppScreenRouter(props) {
   const {
     activeTab,
+    currentRole,
     dashboardProps,
     ipamProps,
     dcimProps,
@@ -37,6 +39,7 @@ export default function AppScreenRouter(props) {
   if (activeTab === 'changes') screen = <DatacenterChangeRequestView {...changesProps} />;
   if (activeTab === 'security') screen = <SecurityCenterView {...securityProps} />;
   if (activeTab === 'resident') screen = <ResidentManagementView {...residentProps} />;
+  if (activeTab === 'vault') screen = <VaultView currentRole={currentRole} />;
   if (activeTab === 'backup') screen = <BackupView {...backupProps} />;
   if (activeTab === 'users') screen = <UserManagementView {...usersProps} />;
 

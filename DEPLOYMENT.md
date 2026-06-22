@@ -36,8 +36,8 @@ As long as the server still uses the same `data/mysql` directory, MySQL data wil
 ## Current code-change policy
 
 The release preserves the existing database name and MySQL volume path. It includes
-an additive Django migration for structured IP/DCIM metadata, so a verified backup is
-required before the first start.
+additive Django migrations for structured IP/DCIM metadata and the password-vault
+ledger, so a verified backup is required before the first start.
 
 ## Recommended deployment flow
 
@@ -68,6 +68,8 @@ Before deploying this refactor, update the production `.env`:
 - leave `ALLOW_PERMANENT_RESIDENT_INTAKE=False` unless a permanent public form is explicitly required
 - leave `PUBLIC_DCIM_OVERVIEW_ENABLED=False` unless a public DCIM board is explicitly required
 - when enabling the public DCIM board, set a long `PUBLIC_DCIM_ACCESS_TOKEN`
+- keep `OPENBAO_ENABLED=False` until OpenBao has been initialized and unsealed
+- after initialization, configure a scoped `OPENBAO_TOKEN` rather than the root token
 
 Generate a production key without displaying the existing key:
 
@@ -199,6 +201,28 @@ columns:
 The backend container now runs `migrate` and `collectstatic` before Gunicorn starts.
 Create a database backup before the first deployment and verify these fields after the
 container becomes healthy.
+
+## Password vault migration
+
+Migration `0015_secretrecord_secretauditevent_secretaccessrequest` adds only password
+ledger metadata, access requests, and audit events. It does not add a plaintext
+password column.
+
+Before enabling the password-book module in production:
+
+1. Follow `docs/PASSWORD_VAULT.md` to initialize and unseal OpenBao.
+2. Put the scoped application token in the server `.env`.
+3. Set `OPENBAO_ENABLED=True`.
+4. Start the updated stack and verify the migration:
+
+```bash
+docker compose up -d --build
+docker compose exec backend python manage.py showmigrations ipam
+docker compose logs --tail=100 openbao backend
+```
+
+The OpenBao data directory is `./data/openbao`. Preserve and back it up together with
+`data/mysql`; losing one side leaves either orphaned metadata or inaccessible secrets.
 
 ## Public-link behavior
 

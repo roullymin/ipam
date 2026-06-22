@@ -31,7 +31,7 @@ from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, 
 from rest_framework import filters, serializers, status, viewsets
 from rest_framework.authentication import BasicAuthentication, SessionAuthentication
 from rest_framework.decorators import action, api_view, authentication_classes, parser_classes, permission_classes
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import APIException, PermissionDenied
 from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
@@ -51,6 +51,9 @@ from .models import (
     ResidentDevice,
     ResidentIntakeLink,
     ResidentStaff,
+    SecretAccessRequest,
+    SecretAuditEvent,
+    SecretRecord,
     Subnet,
     UserProfile,
 )
@@ -62,6 +65,9 @@ from .permissions import (
     IpamAccessPermission,
     IpamWritePermission,
     ResidentAccessPermission,
+    SecretActionPermission,
+    SecretAuditPermission,
+    SecretRecordPermission,
     get_user_role,
 )
 from .domains.backup.selectors import build_backup_summary, collect_backup_files, get_backup_dir
@@ -94,6 +100,12 @@ from .domains.security.services import (
     record_audit as security_record_audit,
     record_login as security_record_login,
 )
+from .domains.vault.services import (
+    VaultError,
+    delete_secret as vault_delete_secret,
+    read_secret as vault_read_secret,
+    write_secret as vault_write_secret,
+)
 from .serializers import (
     AuditLogSerializer,
     BlocklistSerializer,
@@ -108,6 +120,9 @@ from .serializers import (
     RackSerializer,
     ResidentIntakeLinkSerializer,
     ResidentStaffSerializer,
+    SecretAccessRequestSerializer,
+    SecretAuditEventSerializer,
+    SecretRecordSerializer,
     SubnetSerializer,
     UserSerializer,
     normalize_resident_device_payload,
@@ -118,7 +133,13 @@ logger = logging.getLogger('django')
 
 LOGIN_LOCK_THRESHOLD = 5
 LOGIN_LOCK_MINUTES = 30
-APP_VERSION = os.environ.get('APP_VERSION', 'ipam-20260622.3')
+APP_VERSION = os.environ.get('APP_VERSION', 'ipam-20260622.4')
+
+
+class VaultServiceUnavailable(APIException):
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    default_detail = '密码库暂时不可用。'
+    default_code = 'vault_unavailable'
 
 
 def get_client_ip(request):
@@ -1578,6 +1599,275 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
 
     def list(self, request, *args, **kwargs):
         return OptionalPaginationMixin.list(self, request, *args, **kwargs)
+
+
+def record_secret_audit(request, secret, action, result='success', reason=''):
+    return SecretAuditEvent.objects.create(
+        secret=secret,
+        user=request.user if request.user.is_authenticated else None,
+        secret_name=secret.name if secret else '',
+        action=action,
+        result=result,
+        reason=reason,
+        ip_address=get_client_ip(request),
+    )
+
+
+class SecretRecordViewSet(OptionalPaginationMixin, BaseViewSet):
+    audit_module = 'secret_record'
+    permission_classes = [SecretRecordPermission]
+    queryset = SecretRecord.objects.select_related(
+        'datacenter',
+        'rack',
+        'rack__datacenter',
+        'rack_device',
+        'rack_device__rack',
+        'rack_device__rack__datacenter',
+        'ip_address',
+        'created_by',
+    ).all()
+    serializer_class = SecretRecordSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name', 'username_hint', 'owner_team', 'notes']
+
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        instance = serializer.save(created_by=self.request.user)
+        payload = instance._pending_secret_payload
+        try:
+            vault_write_secret(
+                instance.vault_path,
+                payload['username'],
+                payload['secret_value'],
+                {'record_id': instance.pk, 'name': instance.name},
+            )
+        except VaultError as exc:
+            raise VaultServiceUnavailable(str(exc)) from exc
+        instance.last_rotated_at = timezone.now()
+        instance.save(update_fields=['last_rotated_at', 'updated_at'])
+        record_secret_audit(self.request, instance, 'create', reason='创建密码台账')
+        record_audit(self.request, self.audit_module, 'create', instance, '创建密码台账（密文存储于 OpenBao）')
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        payload = getattr(instance, '_pending_secret_payload', None)
+        if payload:
+            try:
+                vault_write_secret(
+                    instance.vault_path,
+                    payload['username'],
+                    payload['secret_value'],
+                    {'record_id': instance.pk, 'name': instance.name},
+                )
+            except VaultError as exc:
+                raise VaultServiceUnavailable(str(exc)) from exc
+            instance.last_rotated_at = timezone.now()
+            instance.save(update_fields=['last_rotated_at', 'updated_at'])
+        record_secret_audit(
+            self.request,
+            instance,
+            'rotate' if payload else 'update',
+            reason='轮换密码' if payload else '更新密码台账',
+        )
+        record_audit(self.request, self.audit_module, 'update', instance, '更新密码台账')
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)
+
+    def perform_destroy(self, instance):
+        try:
+            vault_delete_secret(instance.vault_path)
+        except VaultError as exc:
+            raise VaultServiceUnavailable(str(exc)) from exc
+        record_secret_audit(self.request, instance, 'delete', reason='删除密码台账及 OpenBao 密文')
+        record_audit(self.request, self.audit_module, 'delete', instance, '删除密码台账及 OpenBao 密文')
+        instance.delete()
+
+    @action(detail=True, methods=['post'], permission_classes=[SecretActionPermission], url_path='request-access')
+    def request_access(self, request, pk=None):
+        secret = self.get_object()
+        role = get_user_role(request.user)
+        if role not in ('admin', 'dc_operator', 'ip_manager'):
+            record_secret_audit(request, secret, 'request', 'denied', '当前角色无取用权限')
+            raise PermissionDenied('当前角色不能申请取用密码。')
+        reason = str(request.data.get('reason') or '').strip()
+        if not reason:
+            return Response({'detail': '请填写取用原因。'}, status=status.HTTP_400_BAD_REQUEST)
+        pending = SecretAccessRequest.objects.filter(
+            secret=secret,
+            requester=request.user,
+            status='pending',
+        ).first()
+        if pending:
+            return Response(SecretAccessRequestSerializer(pending).data, status=status.HTTP_200_OK)
+        access_request = SecretAccessRequest.objects.create(
+            secret=secret,
+            requester=request.user,
+            reason=reason,
+        )
+        record_secret_audit(request, secret, 'request', reason=reason)
+        return Response(SecretAccessRequestSerializer(access_request).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], permission_classes=[SecretActionPermission])
+    def reveal(self, request, pk=None):
+        secret = self.get_object()
+        reason = str(request.data.get('reason') or '').strip()
+        current_password = request.data.get('current_password') or ''
+        if not reason:
+            return Response({'detail': '请填写本次查看原因。'}, status=status.HTTP_400_BAD_REQUEST)
+        if not current_password or not request.user.check_password(current_password):
+            record_secret_audit(request, secret, 'reveal', 'denied', f'二次验证失败：{reason}')
+            raise PermissionDenied('当前登录密码验证失败。')
+
+        role = get_user_role(request.user)
+        if role not in ('admin', 'dc_operator', 'ip_manager'):
+            record_secret_audit(request, secret, 'reveal', 'denied', f'角色无权限：{reason}')
+            raise PermissionDenied('当前角色不能查看密码。')
+        if secret.status != 'active':
+            record_secret_audit(request, secret, 'reveal', 'denied', f'条目已停用：{reason}')
+            raise PermissionDenied('该密码条目已停用。')
+
+        approved_request = None
+        if role != 'admin':
+            now = timezone.now()
+            SecretAccessRequest.objects.filter(
+                secret=secret,
+                requester=request.user,
+                status='approved',
+                approved_expires_at__lte=now,
+            ).update(status='expired')
+            approved_request = SecretAccessRequest.objects.filter(
+                secret=secret,
+                requester=request.user,
+                status='approved',
+                approved_expires_at__gt=now,
+            ).order_by('-reviewed_at').first()
+            if not approved_request:
+                record_secret_audit(request, secret, 'reveal', 'denied', f'未获得有效审批：{reason}')
+                raise PermissionDenied('请先提交取用申请并等待管理员批准。')
+
+        try:
+            payload = vault_read_secret(secret.vault_path)
+        except VaultError as exc:
+            record_secret_audit(request, secret, 'reveal', 'error', f'OpenBao 读取失败：{reason}')
+            raise VaultServiceUnavailable(str(exc)) from exc
+        if not payload.get('secret_value'):
+            record_secret_audit(request, secret, 'reveal', 'error', f'OpenBao 返回空凭据：{reason}')
+            raise VaultServiceUnavailable('OpenBao 中的凭据内容为空。')
+
+        if approved_request:
+            approved_request.status = 'used'
+            approved_request.used_at = timezone.now()
+            approved_request.save(update_fields=['status', 'used_at'])
+        record_secret_audit(request, secret, 'reveal', reason=reason)
+        response = Response(
+            {
+                'username': payload.get('username', ''),
+                'secret_value': payload['secret_value'],
+                'expires_in': 30,
+            }
+        )
+        response['Cache-Control'] = 'no-store, private, max-age=0'
+        response['Pragma'] = 'no-cache'
+        return response
+
+    @action(detail=True, methods=['post'], permission_classes=[SecretActionPermission])
+    def rotate(self, request, pk=None):
+        secret = self.get_object()
+        if get_user_role(request.user) != 'admin':
+            raise PermissionDenied('仅超级管理员可以轮换密码。')
+        current_password = request.data.get('current_password') or ''
+        secret_value = request.data.get('secret_value') or ''
+        username = request.data.get('secret_username')
+        reason = str(request.data.get('reason') or '管理员轮换密码').strip()
+        if not request.user.check_password(current_password):
+            record_secret_audit(request, secret, 'rotate', 'denied', '二次验证失败')
+            raise PermissionDenied('当前登录密码验证失败。')
+        if not secret_value:
+            return Response({'detail': '新密码或密钥不能为空。'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            vault_write_secret(
+                secret.vault_path,
+                username if username is not None else secret.username_hint,
+                secret_value,
+                {'record_id': secret.pk, 'name': secret.name},
+            )
+        except VaultError as exc:
+            record_secret_audit(request, secret, 'rotate', 'error', reason)
+            raise VaultServiceUnavailable(str(exc)) from exc
+        if username is not None:
+            secret.username_hint = username
+        secret.last_rotated_at = timezone.now()
+        secret.save(update_fields=['username_hint', 'last_rotated_at', 'updated_at'])
+        record_secret_audit(request, secret, 'rotate', reason=reason)
+        return Response(SecretRecordSerializer(secret, context={'request': request}).data)
+
+
+class SecretAccessRequestViewSet(OptionalPaginationMixin, viewsets.ReadOnlyModelViewSet):
+    authentication_classes = (SessionAuthentication, BasicAuthentication)
+    permission_classes = [SecretActionPermission]
+    serializer_class = SecretAccessRequestSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['secret__name', 'requester__username', 'reason', 'review_comment']
+
+    def get_queryset(self):
+        queryset = SecretAccessRequest.objects.select_related(
+            'secret', 'requester', 'reviewed_by'
+        ).all()
+        if get_user_role(self.request.user) in ('admin', 'auditor'):
+            return queryset
+        return queryset.filter(requester=self.request.user)
+
+    def _review(self, request, approved):
+        if get_user_role(request.user) != 'admin':
+            raise PermissionDenied('仅超级管理员可以审批密码取用申请。')
+        access_request = self.get_object()
+        if access_request.status != 'pending':
+            return Response({'detail': '该申请已经处理。'}, status=status.HTTP_400_BAD_REQUEST)
+        access_request.status = 'approved' if approved else 'rejected'
+        access_request.reviewed_by = request.user
+        access_request.reviewed_at = timezone.now()
+        access_request.review_comment = str(request.data.get('review_comment') or '').strip()
+        if approved:
+            try:
+                requested_minutes = int(request.data.get('valid_minutes') or 30)
+            except (TypeError, ValueError):
+                requested_minutes = 30
+            minutes = max(5, min(requested_minutes, 240))
+            access_request.approved_expires_at = timezone.now() + timedelta(minutes=minutes)
+        access_request.save()
+        record_secret_audit(
+            request,
+            access_request.secret,
+            'approve' if approved else 'reject',
+            reason=access_request.review_comment,
+        )
+        return Response(self.get_serializer(access_request).data)
+
+    @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        return self._review(request, True)
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        return self._review(request, False)
+
+
+class SecretAuditEventViewSet(OptionalPaginationMixin, viewsets.ReadOnlyModelViewSet):
+    authentication_classes = (SessionAuthentication, BasicAuthentication)
+    permission_classes = [SecretAuditPermission]
+    queryset = SecretAuditEvent.objects.select_related('secret', 'user').all()
+    serializer_class = SecretAuditEventSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['secret_name', 'user__username', 'action', 'result', 'reason', 'ip_address']
 
 
 class BlocklistViewSet(OptionalPaginationMixin, BaseViewSet):

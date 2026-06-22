@@ -637,3 +637,157 @@ class AuditLog(models.Model):
         verbose_name_plural = '操作审计'
         db_table = 'ops_audit_log'
         ordering = ['-created_at']
+
+
+def generate_secret_vault_path():
+    return f'ipam/{secrets.token_urlsafe(24)}'
+
+
+class SecretRecord(models.Model):
+    CREDENTIAL_TYPE_CHOICES = [
+        ('ssh', 'SSH'),
+        ('database', '数据库'),
+        ('web', 'Web 后台'),
+        ('api_key', 'API Key'),
+        ('device', '设备账号'),
+        ('other', '其他'),
+    ]
+    TARGET_TYPE_CHOICES = [
+        ('datacenter', '机房'),
+        ('rack', '机柜'),
+        ('device', '设备'),
+        ('ip', 'IP 地址'),
+        ('general', '通用'),
+    ]
+    ENVIRONMENT_CHOICES = [
+        ('production', '生产'),
+        ('test', '测试'),
+        ('development', '开发'),
+        ('other', '其他'),
+    ]
+    SENSITIVITY_CHOICES = [
+        ('internal', '内部'),
+        ('confidential', '机密'),
+        ('restricted', '严格受限'),
+    ]
+    STATUS_CHOICES = [('active', '有效'), ('disabled', '停用')]
+
+    name = models.CharField('名称', max_length=160)
+    credential_type = models.CharField('凭据类型', max_length=24, choices=CREDENTIAL_TYPE_CHOICES, default='ssh')
+    target_type = models.CharField('关联对象类型', max_length=24, choices=TARGET_TYPE_CHOICES, default='general')
+    datacenter = models.ForeignKey(
+        Datacenter, on_delete=models.SET_NULL, related_name='secret_records', null=True, blank=True
+    )
+    rack = models.ForeignKey(
+        Rack, on_delete=models.SET_NULL, related_name='secret_records', null=True, blank=True
+    )
+    rack_device = models.ForeignKey(
+        RackDevice, on_delete=models.SET_NULL, related_name='secret_records', null=True, blank=True
+    )
+    ip_address = models.ForeignKey(
+        IPAddress, on_delete=models.SET_NULL, related_name='secret_records', null=True, blank=True
+    )
+    username_hint = models.CharField('账号提示', max_length=160, blank=True)
+    vault_path = models.CharField(
+        'OpenBao 路径', max_length=255, unique=True, default=generate_secret_vault_path, editable=False
+    )
+    owner_team = models.CharField('责任团队', max_length=120, blank=True)
+    environment = models.CharField('环境', max_length=24, choices=ENVIRONMENT_CHOICES, default='production')
+    sensitivity = models.CharField(
+        '敏感级别', max_length=24, choices=SENSITIVITY_CHOICES, default='confidential'
+    )
+    expires_at = models.DateTimeField('凭据到期时间', null=True, blank=True)
+    rotation_days = models.PositiveIntegerField('轮换周期（天）', default=90)
+    last_rotated_at = models.DateTimeField('最近轮换时间', null=True, blank=True)
+    status = models.CharField('状态', max_length=20, choices=STATUS_CHOICES, default='active')
+    notes = models.TextField('备注', blank=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name='created_secret_records',
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = '密码台账'
+        verbose_name_plural = '密码台账'
+        db_table = 'security_secret_record'
+        ordering = ['name', 'id']
+
+
+class SecretAccessRequest(models.Model):
+    STATUS_CHOICES = [
+        ('pending', '待审批'),
+        ('approved', '已批准'),
+        ('rejected', '已驳回'),
+        ('used', '已使用'),
+        ('expired', '已过期'),
+    ]
+
+    secret = models.ForeignKey(SecretRecord, on_delete=models.CASCADE, related_name='access_requests')
+    requester = models.ForeignKey(User, on_delete=models.CASCADE, related_name='secret_access_requests')
+    reason = models.TextField('取用原因')
+    status = models.CharField('状态', max_length=20, choices=STATUS_CHOICES, default='pending')
+    reviewed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name='reviewed_secret_access_requests',
+        null=True,
+        blank=True,
+    )
+    reviewed_at = models.DateTimeField('审批时间', null=True, blank=True)
+    review_comment = models.TextField('审批意见', blank=True)
+    approved_expires_at = models.DateTimeField('授权到期时间', null=True, blank=True)
+    used_at = models.DateTimeField('使用时间', null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f'{self.secret.name} - {self.requester.username} - {self.status}'
+
+    class Meta:
+        verbose_name = '密码取用申请'
+        verbose_name_plural = '密码取用申请'
+        db_table = 'security_secret_access_request'
+        ordering = ['-created_at']
+
+
+class SecretAuditEvent(models.Model):
+    ACTION_CHOICES = [
+        ('create', '创建'),
+        ('update', '更新'),
+        ('delete', '删除'),
+        ('request', '申请'),
+        ('approve', '批准'),
+        ('reject', '驳回'),
+        ('reveal', '查看'),
+        ('rotate', '轮换'),
+    ]
+    RESULT_CHOICES = [('success', '成功'), ('denied', '拒绝'), ('error', '错误')]
+
+    secret = models.ForeignKey(
+        SecretRecord, on_delete=models.SET_NULL, related_name='audit_events', null=True, blank=True
+    )
+    user = models.ForeignKey(
+        User, on_delete=models.SET_NULL, related_name='secret_audit_events', null=True, blank=True
+    )
+    secret_name = models.CharField('密码条目名称', max_length=160, blank=True)
+    action = models.CharField('动作', max_length=20, choices=ACTION_CHOICES)
+    result = models.CharField('结果', max_length=20, choices=RESULT_CHOICES, default='success')
+    reason = models.TextField('原因 / 说明', blank=True)
+    ip_address = models.CharField('来源 IP', max_length=64, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f'{self.action}:{self.secret_name}:{self.result}'
+
+    class Meta:
+        verbose_name = '密码审计'
+        verbose_name_plural = '密码审计'
+        db_table = 'security_secret_audit'
+        ordering = ['-created_at']

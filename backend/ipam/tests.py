@@ -28,9 +28,13 @@ from .models import (
     ResidentDevice,
     ResidentIntakeLink,
     ResidentStaff,
+    SecretAccessRequest,
+    SecretAuditEvent,
+    SecretRecord,
     Subnet,
     UserProfile,
 )
+from .domains.vault.services import VaultUnavailable
 
 
 def make_csv_upload(name, content):
@@ -208,6 +212,127 @@ class AuthAndCrudSmokeTests(BaseApiTestCase):
         delete_rack_response = client.delete(f'/api/racks/{rack_id}/')
         self.assertEqual(delete_rack_response.status_code, 204)
         self.assertFalse(Rack.objects.filter(id=rack_id).exists())
+
+
+class SecretVaultApiTests(BaseApiTestCase):
+    secret_payload = {
+        'name': 'Core Switch SSH',
+        'credential_type': 'ssh',
+        'target_type': 'general',
+        'secret_username': 'netadmin',
+        'secret_value': 'NeverStoreThisInMysql!',
+        'owner_team': 'Network Ops',
+        'environment': 'production',
+        'sensitivity': 'restricted',
+        'rotation_days': 30,
+        'status': 'active',
+        'notes': 'Production switch account',
+    }
+
+    @patch('ipam.views.vault_write_secret')
+    def test_admin_can_create_metadata_without_returning_or_storing_secret(self, write_secret):
+        client = self.make_authenticated_client(self.admin)
+        response = client.post('/api/secrets/', self.secret_payload, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        self.assertNotIn('secret_value', response.data)
+        self.assertNotIn('secret_username', response.data)
+        self.assertNotIn('vault_path', response.data)
+        record = SecretRecord.objects.get(pk=response.data['id'])
+        self.assertFalse(hasattr(record, 'secret_value'))
+        self.assertEqual(record.username_hint, 'netadmin')
+        write_secret.assert_called_once()
+        self.assertEqual(write_secret.call_args.args[2], 'NeverStoreThisInMysql!')
+        self.assertFalse(
+            SecretAuditEvent.objects.filter(reason__contains='NeverStoreThisInMysql!').exists()
+        )
+
+    @patch('ipam.views.vault_write_secret', side_effect=VaultUnavailable('offline'))
+    def test_create_rolls_back_when_openbao_is_unavailable(self, _write_secret):
+        client = self.make_authenticated_client(self.admin)
+        response = client.post('/api/secrets/', self.secret_payload, format='json')
+
+        self.assertEqual(response.status_code, 503)
+        self.assertFalse(SecretRecord.objects.exists())
+
+    @patch('ipam.views.vault_read_secret')
+    def test_operator_request_approval_and_one_time_reveal(self, read_secret):
+        read_secret.return_value = {'username': 'netadmin', 'secret_value': 'vault-secret'}
+        record = SecretRecord.objects.create(
+            name='Firewall Admin',
+            credential_type='device',
+            target_type='general',
+            owner_team='Security',
+            created_by=self.admin,
+        )
+        operator_client = self.make_authenticated_client(self.dc_operator)
+        request_response = operator_client.post(
+            f'/api/secrets/{record.id}/request-access/',
+            {'reason': '处理生产故障'},
+            format='json',
+        )
+        self.assertEqual(request_response.status_code, 201)
+
+        access_request = SecretAccessRequest.objects.get(pk=request_response.data['id'])
+        admin_client = self.make_authenticated_client(self.admin)
+        approve_response = admin_client.post(
+            f'/api/secret-access-requests/{access_request.id}/approve/',
+            {'review_comment': '批准 30 分钟', 'valid_minutes': 30},
+            format='json',
+        )
+        self.assertEqual(approve_response.status_code, 200)
+
+        reveal_response = operator_client.post(
+            f'/api/secrets/{record.id}/reveal/',
+            {'reason': '处理生产故障', 'current_password': self.password},
+            format='json',
+        )
+        self.assertEqual(reveal_response.status_code, 200)
+        self.assertEqual(reveal_response.data['secret_value'], 'vault-secret')
+        self.assertIn('no-store', reveal_response['Cache-Control'])
+        access_request.refresh_from_db()
+        self.assertEqual(access_request.status, 'used')
+
+        second_reveal = operator_client.post(
+            f'/api/secrets/{record.id}/reveal/',
+            {'reason': '再次查看', 'current_password': self.password},
+            format='json',
+        )
+        self.assertEqual(second_reveal.status_code, 403)
+
+    @patch('ipam.views.vault_read_secret')
+    def test_auditor_and_wrong_password_are_denied_and_audited(self, read_secret):
+        read_secret.return_value = {'username': 'root', 'secret_value': 'secret'}
+        record = SecretRecord.objects.create(
+            name='Database Root',
+            credential_type='database',
+            target_type='general',
+            created_by=self.admin,
+        )
+        auditor_response = self.make_authenticated_client(self.auditor).post(
+            f'/api/secrets/{record.id}/reveal/',
+            {'reason': '审计检查', 'current_password': self.password},
+            format='json',
+        )
+        self.assertEqual(auditor_response.status_code, 403)
+
+        admin_response = self.make_authenticated_client(self.admin).post(
+            f'/api/secrets/{record.id}/reveal/',
+            {'reason': '维护', 'current_password': 'wrong-password'},
+            format='json',
+        )
+        self.assertEqual(admin_response.status_code, 403)
+        guest_response = self.make_authenticated_client(self.guest).post(
+            f'/api/secrets/{record.id}/reveal/',
+            {'reason': '不应允许', 'current_password': self.password},
+            format='json',
+        )
+        self.assertEqual(guest_response.status_code, 403)
+        self.assertEqual(
+            SecretAuditEvent.objects.filter(secret=record, action='reveal', result='denied').count(),
+            2,
+        )
+        read_secret.assert_not_called()
 
     def test_structured_asset_metadata_round_trip(self):
         dc_client = self.make_authenticated_client(self.dc_operator)

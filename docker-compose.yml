@@ -41,6 +41,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      openbao:
+        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=3)"]
       interval: 30s
@@ -55,7 +57,28 @@ services:
         max-size: "200m"
         max-file: "3"
 
-  # --- 3. 反向代理网关 (Nginx) ---
+  # --- 3. 密码库 (OpenBao，仅允许内部 Docker 网络访问) ---
+  openbao:
+    image: openbao/openbao:2.5.5
+    container_name: ipam_openbao
+    restart: always
+    cap_add:
+      - IPC_LOCK
+    command: server -config=/openbao/config/openbao.hcl
+    environment:
+      BAO_ADDR: http://127.0.0.1:8200
+    volumes:
+      - ./config/openbao.hcl:/openbao/config/openbao.hcl:ro
+      - ./data/openbao:/openbao/file
+    networks:
+      - ipam_net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  # --- 4. 反向代理网关 (Nginx) ---
   nginx:
     image: nginx:alpine
     container_name: ipam_gateway
@@ -80,7 +103,7 @@ services:
         max-size: "200m"
         max-file: "3"
 
-  # --- 4. 自动备份服务 (Auto Backup) ---
+  # --- 5. 自动备份服务 (Auto Backup) ---
   backup:
     image: mysql:8.0
     container_name: ipam_backup_worker

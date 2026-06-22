@@ -1,5 +1,6 @@
 import ipaddress
 import re
+from datetime import timedelta
 
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -20,6 +21,9 @@ from .models import (
     ResidentDevice,
     ResidentIntakeLink,
     ResidentStaff,
+    SecretAccessRequest,
+    SecretAuditEvent,
+    SecretRecord,
     Subnet,
     UserProfile,
 )
@@ -432,6 +436,133 @@ class BlocklistSerializer(serializers.ModelSerializer):
 class AuditLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = AuditLog
+        fields = '__all__'
+
+
+class SecretRecordSerializer(serializers.ModelSerializer):
+    secret_username = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    secret_value = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=False,
+        trim_whitespace=False,
+        style={'input_type': 'password'},
+    )
+    target_display = serializers.SerializerMethodField()
+    created_by_name = serializers.CharField(source='created_by.username', read_only=True)
+    lifecycle_status = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SecretRecord
+        fields = '__all__'
+        read_only_fields = [
+            'vault_path',
+            'username_hint',
+            'created_by',
+            'created_at',
+            'updated_at',
+            'last_rotated_at',
+        ]
+
+    def validate(self, attrs):
+        instance = self.instance
+        secret_value = attrs.get('secret_value')
+        secret_username = attrs.get('secret_username')
+        if instance is None and not secret_value:
+            raise serializers.ValidationError({'secret_value': ['首次创建必须填写密码或密钥。']})
+        if instance is not None and secret_username is not None and secret_value is None:
+            raise serializers.ValidationError({'secret_value': ['修改账号时必须同时填写新的密码或密钥。']})
+
+        target_type = attrs.get('target_type', instance.target_type if instance else 'general')
+        target_fields = {
+            'datacenter': 'datacenter',
+            'rack': 'rack',
+            'device': 'rack_device',
+            'ip': 'ip_address',
+        }
+        required_field = target_fields.get(target_type)
+        if required_field and not attrs.get(required_field, getattr(instance, required_field, None) if instance else None):
+            raise serializers.ValidationError({required_field: ['请选择关联对象。']})
+
+        for field_name in target_fields.values():
+            if field_name != required_field:
+                attrs[field_name] = None
+        return attrs
+
+    def create(self, validated_data):
+        username = validated_data.pop('secret_username', '')
+        secret_value = validated_data.pop('secret_value')
+        if username:
+            validated_data['username_hint'] = username
+        instance = super().create(validated_data)
+        instance._pending_secret_payload = {'username': username, 'secret_value': secret_value}
+        return instance
+
+    def update(self, instance, validated_data):
+        username = validated_data.pop('secret_username', None)
+        secret_value = validated_data.pop('secret_value', None)
+        if username is not None:
+            validated_data['username_hint'] = username
+        instance = super().update(instance, validated_data)
+        if secret_value is not None:
+            instance._pending_secret_payload = {
+                'username': username if username is not None else instance.username_hint,
+                'secret_value': secret_value,
+            }
+        return instance
+
+    def get_target_display(self, obj):
+        if obj.target_type == 'datacenter' and obj.datacenter:
+            return obj.datacenter.name
+        if obj.target_type == 'rack' and obj.rack:
+            return f'{obj.rack.datacenter.name} / {obj.rack.code}'
+        if obj.target_type == 'device' and obj.rack_device:
+            return f'{obj.rack_device.rack.datacenter.name} / {obj.rack_device.rack.code} / {obj.rack_device.name}'
+        if obj.target_type == 'ip' and obj.ip_address:
+            return obj.ip_address.ip_address
+        return '通用凭据'
+
+    def get_lifecycle_status(self, obj):
+        if obj.status == 'disabled':
+            return 'disabled'
+        if obj.expires_at and obj.expires_at <= timezone.now():
+            return 'expired'
+        if obj.expires_at and obj.expires_at <= timezone.now() + timedelta(days=14):
+            return 'expiring'
+        return 'active'
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data.pop('vault_path', None)
+        return data
+
+
+class SecretAccessRequestSerializer(serializers.ModelSerializer):
+    secret_name = serializers.CharField(source='secret.name', read_only=True)
+    requester_name = serializers.CharField(source='requester.username', read_only=True)
+    reviewed_by_name = serializers.CharField(source='reviewed_by.username', read_only=True)
+
+    class Meta:
+        model = SecretAccessRequest
+        fields = '__all__'
+        read_only_fields = [
+            'secret',
+            'requester',
+            'status',
+            'reviewed_by',
+            'reviewed_at',
+            'review_comment',
+            'approved_expires_at',
+            'used_at',
+            'created_at',
+        ]
+
+
+class SecretAuditEventSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(source='user.username', read_only=True)
+
+    class Meta:
+        model = SecretAuditEvent
         fields = '__all__'
 
 

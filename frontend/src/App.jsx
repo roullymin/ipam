@@ -2,7 +2,7 @@
 import {
   Server, ShieldCheck, Search, RefreshCw, Folder, Network,
   ChevronRight, ChevronDown, Edit2, Trash2,
-  X, Save, Plus, Upload, Download, Lock,
+  X, Save, Plus, Upload, Download, Lock, KeyRound,
   MapPin, Box, Shield, Activity, Users, Database, Settings,
   AlertTriangle, CheckCircle2, Grid as GridIcon, List as ListIcon, Loader2, 
   ArrowLeftRight,
@@ -77,10 +77,10 @@ const DEFAULT_OPTIONS = {
 };
 
 const ROLE_DEFINITIONS = {
-  admin: { label: '\u8d85\u7ea7\u7ba1\u7406\u5458', permissions: ['dashboard', 'list', 'dcim', 'changes', 'resident', 'security', 'backup', 'users'] },
-  dc_operator: { label: '\u673a\u623f\u8fd0\u7ef4', permissions: ['dashboard', 'dcim', 'changes', 'resident'] },
-  ip_manager: { label: 'IP \u7ba1\u7406\u5458', permissions: ['dashboard', 'list'] },
-  auditor: { label: '\u5ba1\u8ba1\u5458', permissions: ['dashboard', 'changes', 'security', 'resident'] },
+  admin: { label: '\u8d85\u7ea7\u7ba1\u7406\u5458', permissions: ['dashboard', 'list', 'dcim', 'changes', 'resident', 'vault', 'security', 'backup', 'users'] },
+  dc_operator: { label: '\u673a\u623f\u8fd0\u7ef4', permissions: ['dashboard', 'dcim', 'changes', 'resident', 'vault'] },
+  ip_manager: { label: 'IP \u7ba1\u7406\u5458', permissions: ['dashboard', 'list', 'vault'] },
+  auditor: { label: '\u5ba1\u8ba1\u5458', permissions: ['dashboard', 'changes', 'security', 'resident', 'vault'] },
   guest: { label: '\u8bbf\u5ba2', permissions: ['dashboard', 'list', 'dcim'] },
 };
 
@@ -90,6 +90,7 @@ const TAB_CONFIG = {
   dcim: { icon: Box, label: BRAND.navigation.dcim },
   changes: { icon: ArrowLeftRight, label: BRAND.navigation.changes || '申请中心' },
   resident: { icon: Users, label: BRAND.navigation.resident },
+  vault: { icon: KeyRound, label: '密码本' },
   security: { icon: Shield, label: BRAND.navigation.security },
   backup: { icon: Database, label: BRAND.navigation.backup },
   users: { icon: Users, label: BRAND.navigation.users }
@@ -1528,6 +1529,7 @@ function MainApp() {
         <div className="flex-1 overflow-hidden relative">
           <AppScreenRouter
             activeTab={activeTab}
+            currentRole={currentRole}
             dashboardProps={screenProps.dashboardProps}
             ipamProps={screenProps.ipamProps}
             dcimProps={screenProps.dcimProps}
