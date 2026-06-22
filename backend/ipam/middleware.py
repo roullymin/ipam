@@ -1,5 +1,6 @@
 import logging
 
+from django.conf import settings
 from django.db import DatabaseError
 from django.http import JsonResponse
 
@@ -15,6 +16,9 @@ class SecurityMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
+        if not getattr(settings, 'SECURITY_BLOCKLIST_ENABLED', False):
+            return self.get_response(request)
+
         if request.path == '/api/health/' and request.META.get('REMOTE_ADDR') in {'127.0.0.1', '::1'}:
             return self.get_response(request)
 

@@ -35,12 +35,9 @@ As long as the server still uses the same `data/mysql` directory, MySQL data wil
 
 ## Current code-change policy
 
-The local hardening changes made in this workspace are intentionally non-destructive:
-
-- no new Django migrations
-- no model field changes
-- no database rename
-- no volume path change for MySQL
+The release preserves the existing database name and MySQL volume path. It includes
+an additive Django migration for structured IP/DCIM metadata, so a verified backup is
+required before the first start.
 
 ## Recommended deployment flow
 
@@ -71,6 +68,48 @@ Before deploying this refactor, update the production `.env`:
 - leave `ALLOW_PERMANENT_RESIDENT_INTAKE=False` unless a permanent public form is explicitly required
 - leave `PUBLIC_DCIM_OVERVIEW_ENABLED=False` unless a public DCIM board is explicitly required
 - when enabling the public DCIM board, set a long `PUBLIC_DCIM_ACCESS_TOKEN`
+
+Generate a production key without displaying the existing key:
+
+```bash
+docker compose build backend
+docker compose run --rm --no-deps backend \
+  python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+```
+
+Copy the generated value into `DJANGO_SECRET_KEY` in `.env`. Changing the Django
+secret invalidates old browser sessions, but it does not change usernames, password
+hashes, or business data.
+
+## Login recovery after upgrading from an older environment
+
+Older deployments may have a short `DJANGO_SECRET_KEY`. If
+`DJANGO_ENFORCE_SECURE_SETTINGS=True` is enabled with a key shorter than 50
+characters, the backend intentionally refuses to start and the login page cannot call
+`/api/login/`.
+
+Recovery:
+
+1. Generate a new key with the command above.
+2. Replace only `DJANGO_SECRET_KEY` in the server `.env`.
+3. Keep the existing MySQL passwords and `data/mysql` directory unchanged.
+4. Restart and inspect the services:
+
+```bash
+docker compose up -d --build --remove-orphans
+docker compose ps
+docker compose logs --tail=200 backend db nginx
+curl -k https://127.0.0.1/api/health/
+```
+
+For emergency diagnosis only, `DJANGO_ENFORCE_SECURE_SETTINGS=False` can be used
+temporarily. Generate a proper key and re-enable the setting before returning the
+system to normal operation.
+
+The IP blocklist is controlled by `SECURITY_BLOCKLIST_ENABLED`. Existing installations
+that do not define this variable keep the middleware disabled until production
+hardening is explicitly enabled, which prevents a legacy entry from locking
+administrators out during an upgrade.
 
 The MySQL port is no longer published to the host. Database administration should be
 performed through `docker compose exec db ...` or an explicitly secured temporary port

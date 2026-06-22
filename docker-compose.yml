@@ -99,7 +99,7 @@ services:
         if [ "$$current_hour" == "03" ]; then
           echo "Starting daily backup...";
           MYSQL_PWD="$$MYSQL_PASSWORD" mysqldump -h db -u "$$MYSQL_USER" \
-            --single-transaction --quick --routines --triggers "$$MYSQL_DATABASE" \
+            --single-transaction --quick --routines --triggers --no-tablespaces "$$MYSQL_DATABASE" \
             | gzip > /backups/db_backup_$$(date +%Y%m%d_%H%M).sql.gz;
           echo "Backup created. Cleaning up old files...";
           find /backups -type f -mtime +30 -name "*.gz" -delete;

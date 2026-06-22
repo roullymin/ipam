@@ -1084,11 +1084,17 @@ class BackupApiTests(BaseApiTestCase):
 
 
 class AccessControlAndPaginationTests(BaseApiTestCase):
-    @override_settings(TRUST_PROXY_HEADERS=False)
+    @override_settings(TRUST_PROXY_HEADERS=False, SECURITY_BLOCKLIST_ENABLED=True)
     def test_blocklist_middleware_rejects_blocked_address(self):
         Blocklist.objects.create(ip_address='127.0.0.1', reason='test block')
         response = self.client.get('/api/csrf/', REMOTE_ADDR='127.0.0.1')
         self.assertEqual(response.status_code, 403)
+
+    @override_settings(TRUST_PROXY_HEADERS=False, SECURITY_BLOCKLIST_ENABLED=False)
+    def test_disabled_blocklist_does_not_lock_out_upgrade(self):
+        Blocklist.objects.create(ip_address='127.0.0.1', reason='legacy block')
+        response = self.client.get('/api/csrf/', REMOTE_ADDR='127.0.0.1')
+        self.assertEqual(response.status_code, 200)
 
     def test_guest_cannot_import_ip_assets(self):
         client = self.make_authenticated_client(self.guest)
