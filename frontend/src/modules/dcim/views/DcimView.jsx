@@ -1,6 +1,7 @@
 ﻿import React from 'react';
 import {
   AlignJustify,
+  AlertTriangle,
   Calculator,
   Code,
   Columns,
@@ -12,6 +13,7 @@ import {
   MapPin,
   Maximize,
   Plus,
+  RefreshCw,
   Server,
   Upload,
   Zap,
@@ -211,6 +213,10 @@ export default function DcimView(props) {
     handleDeleteRack,
     setEditingDevice,
     rackDevices,
+    dataErrors = {},
+    isDataLoading = false,
+    systemCounts = null,
+    onRefresh,
   } = props;
 
   const datacenterList = asArray(datacenters);
@@ -218,6 +224,17 @@ export default function DcimView(props) {
   const allDevices = asArray(rackDevices);
   const currentDatacenter =
     datacenterList.find((item) => String(item.id) === String(activeLocation)) || null;
+  const dcimErrors = Object.values(dataErrors).filter(Boolean);
+  const databaseDatacenterCount = safeInt(systemCounts?.datacenters, 0);
+  const hasCountMismatch =
+    dcimErrors.length === 0 &&
+    datacenterList.length === 0 &&
+    databaseDatacenterCount > 0;
+  const reportsEmptyDatabase =
+    dcimErrors.length === 0 &&
+    datacenterList.length === 0 &&
+    systemCounts &&
+    databaseDatacenterCount === 0;
 
   const currentDevices = currentDatacenter
     ? allDevices.filter((item) => rackList.some((rack) => String(rack.id) === String(item.rack)))
@@ -339,6 +356,47 @@ export default function DcimView(props) {
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col gap-5">
+        {dcimErrors.length > 0 || hasCountMismatch || reportsEmptyDatabase ? (
+          <div
+            className={`flex flex-wrap items-center justify-between gap-4 rounded-[24px] border px-5 py-4 shadow-sm ${
+              reportsEmptyDatabase
+                ? 'border-amber-200 bg-amber-50 text-amber-950'
+                : 'border-rose-200 bg-rose-50 text-rose-950'
+            }`}
+          >
+            <div className="flex min-w-0 items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0" />
+              <div>
+                <div className="font-black">
+                  {dcimErrors.length > 0
+                    ? '机房数据接口读取失败'
+                    : hasCountMismatch
+                      ? '数据库计数与机房列表不一致'
+                      : '当前数据库报告机房数量为 0'}
+                </div>
+                <div className="mt-1 text-sm leading-6 opacity-80">
+                  {dcimErrors.length > 0
+                    ? dcimErrors
+                        .map((error) => `${error.url}：HTTP ${error.status || '连接失败'}，${error.message}`)
+                        .join('；')
+                    : hasCountMismatch
+                      ? `系统总览报告 ${databaseDatacenterCount} 个机房，但列表接口未返回数据，请检查接口日志和权限。`
+                      : '这通常表示升级时使用了新的 data/mysql 目录。请先核对 Docker 挂载，暂时不要新增机房或覆盖数据库。'}
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={isDataLoading}
+              className="inline-flex items-center gap-2 rounded-2xl border border-current/15 bg-white/80 px-4 py-2 text-sm font-bold shadow-sm disabled:opacity-60"
+            >
+              <RefreshCw className={`h-4 w-4 ${isDataLoading ? 'animate-spin' : ''}`} />
+              重新读取
+            </button>
+          </div>
+        ) : null}
+
         <div className="overflow-hidden rounded-[32px] border border-slate-200/80 bg-white/86 shadow-[0_24px_52px_rgba(15,23,42,0.08)] backdrop-blur">
           <div className="grid gap-5 p-5 2xl:grid-cols-[minmax(0,1.08fr)_minmax(460px,0.92fr)]">
             <div className="rounded-[28px] border border-slate-100 bg-[linear-gradient(135deg,#f8fdff_0%,#eef9ff_44%,#eefaf5_100%)] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.95)]">

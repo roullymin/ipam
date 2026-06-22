@@ -38,6 +38,7 @@
 - Confirm the public DCIM endpoint is closed unless explicitly enabled.
 - Review backend, nginx, and db logs.
 - Confirm `/api/health/` returns HTTP 200 before testing login.
+- Run `python manage.py dcim_status` and record the active database path and DCIM counts.
 
 ## Safety rules
 

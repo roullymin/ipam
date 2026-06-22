@@ -111,6 +111,78 @@ that do not define this variable keep the middleware disabled until production
 hardening is explicitly enabled, which prevents a legacy entry from locking
 administrators out during an upgrade.
 
+## DCIM data appears empty after an update
+
+Migration `0014_structured_asset_metadata` does not delete datacenters, racks, or rack
+devices. First identify whether the API failed or Docker mounted a different MySQL
+directory:
+
+```bash
+docker compose exec backend python manage.py dcim_status
+docker inspect ipam_db --format '{{range .Mounts}}{{println .Source "->" .Destination}}{{end}}'
+docker compose logs --tail=200 backend db
+```
+
+- If the command reports non-zero DCIM counts, do not restore data. Update the
+  frontend and inspect the visible API error banner.
+- If the command reports zero counts, compare the MySQL mount source with the old
+  project directory. Do not create replacement racks until the correct data source is
+  confirmed.
+- If migration `0014` is missing, run `docker compose exec backend python manage.py
+  migrate --noinput` and repeat the status command.
+
+The `ipam_bak.tar.gz` archive contains non-empty `dcim_datacenter`, `dcim_rack`, and
+`dcim_rack_device` InnoDB files. To recover only DCIM rows without replacing the
+current database, start the archived MySQL directory in an isolated temporary
+container and produce a data-only dump:
+
+```bash
+mkdir -p /srv/ipam-recovery
+tar -xzf /path/to/ipam_bak.tar.gz -C /srv/ipam-recovery \
+  ipam_bak/data/mysql ipam_bak/.env
+cp -a /srv/ipam-recovery/ipam_bak/data/mysql /srv/ipam-recovery/mysql-work
+chown -R 999:999 /srv/ipam-recovery/mysql-work
+
+set -a
+. /srv/ipam-recovery/ipam_bak/.env
+set +a
+
+docker rm -f ipam_recovery_db 2>/dev/null || true
+docker run -d --name ipam_recovery_db \
+  -v /srv/ipam-recovery/mysql-work:/var/lib/mysql \
+  mysql:8.0 --default-authentication-plugin=mysql_native_password
+
+until docker exec -e MYSQL_PWD="$MYSQL_PASSWORD" ipam_recovery_db \
+  mysqladmin ping -u "$MYSQL_USER" --silent; do sleep 3; done
+
+docker exec -e MYSQL_PWD="$MYSQL_PASSWORD" ipam_recovery_db \
+  mysqldump -u "$MYSQL_USER" --single-transaction --no-tablespaces \
+  --no-create-info "$MYSQL_DATABASE" \
+  dcim_datacenter dcim_rack dcim_rack_device \
+  > /srv/ipam-recovery/dcim-data.sql
+```
+
+Only when `dcim_status` confirms the current three DCIM counts are all zero, import
+the dump and backfill the structured fields:
+
+```bash
+docker compose exec -T db sh -lc \
+  'MYSQL_PWD="$MYSQL_PASSWORD" mysqldump -u "$MYSQL_USER" \
+  --single-transaction --no-tablespaces "$MYSQL_DATABASE"' \
+  > /srv/ipam-recovery/current-before-dcim-restore.sql
+
+docker compose exec -T db sh -lc \
+  'MYSQL_PWD="$MYSQL_PASSWORD" mysql -u "$MYSQL_USER" "$MYSQL_DATABASE"' \
+  < /srv/ipam-recovery/dcim-data.sql
+
+docker compose exec backend python manage.py backfill_structured_asset_metadata
+docker compose exec backend python manage.py dcim_status
+docker rm -f ipam_recovery_db
+```
+
+If any current DCIM count is non-zero, stop before importing because primary-key
+conflicts or partial duplication require a merge plan rather than a direct restore.
+
 The MySQL port is no longer published to the host. Database administration should be
 performed through `docker compose exec db ...` or an explicitly secured temporary port
 mapping.

@@ -426,6 +426,7 @@ function MainApp() {
     racks,
     rackDevices,
     isDataLoading,
+    dataErrors,
     refreshData,
   } = useAppDataLoader({
     activeTab,
@@ -1165,6 +1166,8 @@ function MainApp() {
     consumeChangeRequestSearchSeed: () => setChangeRequestSearchSeed(null),
     systemOverview,
     systemOverviewRefreshedAt,
+    dataErrors,
+    isDataLoading,
     handleJumpToDc,
     navigateToShellTarget,
     setActiveTab,

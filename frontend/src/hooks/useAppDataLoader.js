@@ -10,6 +10,21 @@ const unwrapListResponse = async (response, fallback = []) => {
   return fallback;
 };
 
+const readResponseError = async (response, url) => {
+  const source = typeof response.clone === 'function' ? response.clone() : response;
+  const data = await source.json().catch(() => ({}));
+  return {
+    status: response.status || 0,
+    url,
+    message:
+      data?.detail ||
+      data?.message ||
+      data?.error ||
+      response.statusText ||
+      '请求失败',
+  };
+};
+
 const parseDevices = (items = [], safeInt) =>
   items.map((device) => (
     {
@@ -44,13 +59,14 @@ export function useAppDataLoader({
   const [racks, setRacks] = useState([]);
   const [rackDevices, setRackDevices] = useState([]);
   const [isDataLoading, setIsDataLoading] = useState(false);
+  const [dataErrors, setDataErrors] = useState({});
 
   const refreshData = useCallback(
     async (targetTab = activeTab) => {
       setIsDataLoading(true);
       try {
         const requests = [];
-        const addRequest = (key, url) => requests.push([key, safeFetch(url)]);
+        const addRequest = (key, url) => requests.push([key, safeFetch(url), url]);
 
         if (targetTab === 'dashboard') {
           addRequest('ips', '/api/ips/');
@@ -95,6 +111,22 @@ export function useAppDataLoader({
         const responses = Object.fromEntries(
           await Promise.all(requests.map(async ([key, promise]) => [key, await promise]))
         );
+        const requestUrls = Object.fromEntries(requests.map(([key, , url]) => [key, url]));
+        const requestedKeys = requests.map(([key]) => key);
+        const nextErrors = {};
+        await Promise.all(
+          requestedKeys.map(async (key) => {
+            const response = responses[key];
+            if (response && !response.ok) {
+              nextErrors[key] = await readResponseError(response, requestUrls[key]);
+            }
+          }),
+        );
+        setDataErrors((previous) => {
+          const updated = { ...previous };
+          requestedKeys.forEach((key) => delete updated[key]);
+          return { ...updated, ...nextErrors };
+        });
 
         if (responses.sections?.ok) {
           setSections(await unwrapListResponse(responses.sections));
@@ -186,6 +218,7 @@ export function useAppDataLoader({
     racks,
     rackDevices,
     isDataLoading,
+    dataErrors,
     refreshData,
   };
 }
