@@ -8,8 +8,6 @@ const readRoute = () => {
       activeTab: DEFAULT_TAB,
       isResidentIntakeMode: false,
       isChangeRequestIntakeMode: false,
-      isDcOverviewMode: false,
-      isDcElevationMode: false,
     };
   }
 
@@ -18,8 +16,6 @@ const readRoute = () => {
     activeTab: params.get('view') || DEFAULT_TAB,
     isResidentIntakeMode: params.get('resident-intake') === '1',
     isChangeRequestIntakeMode: params.get('change-request-intake') === '1',
-    isDcOverviewMode: params.get('dc-overview') === '1',
-    isDcElevationMode: params.get('dc-elevation') === '1',
   };
 };
 
@@ -55,13 +51,9 @@ export function useAppEntryMode() {
   const {
     isResidentIntakeMode,
     isChangeRequestIntakeMode,
-    isDcOverviewMode,
-    isDcElevationMode,
   } = useAppRouter();
   return {
     isResidentIntakeMode,
     isChangeRequestIntakeMode,
-    isDcOverviewMode,
-    isDcElevationMode,
   };
 }

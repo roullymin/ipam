@@ -48,8 +48,6 @@ import { useIpamDerivedData, useIpamViewActions, useIpamViewState } from './modu
 const DatacenterChangeIntakePage = React.lazy(
   () => import('./modules/changeRequests/views/DatacenterChangeIntakePage'),
 );
-const DcimElevationPage = React.lazy(() => import('./modules/dcim/views/DcimElevationPage'));
-const DcimOverviewPage = React.lazy(() => import('./modules/dcim/views/DcimOverviewPage'));
 const ResidentIntakePage = React.lazy(() => import('./modules/resident/views/ResidentIntakePage'));
 
 // ============================================================================
@@ -184,8 +182,6 @@ function MainApp() {
     setActiveTab,
     isResidentIntakeMode,
     isChangeRequestIntakeMode,
-    isDcOverviewMode,
-    isDcElevationMode,
   } = useAppRouter();
 
   useEffect(() => {
@@ -384,10 +380,6 @@ function MainApp() {
   } = useIpamViewState();
 
   const {
-    dcimViewMode,
-    setDcimViewMode,
-    elevationLayout,
-    setElevationLayout,
     activeLocation,
     setActiveLocation,
     selectedRack,
@@ -398,16 +390,6 @@ function MainApp() {
     setCurrentDcForm,
     editingDevice,
     setEditingDevice,
-    viewState,
-    elevationScrollRef,
-    elevationContentRef,
-    handleZoomIn,
-    handleZoomOut,
-    handleZoomReset,
-    handleElevationMouseDown,
-    handleElevationMouseLeave,
-    handleElevationMouseUp,
-    handleElevationMouseMove,
     handleJumpToDc,
   } = useDcimViewState();
 
@@ -942,19 +924,11 @@ function MainApp() {
     handleConfirmImport,
     handleImportClick,
     handleDownloadTemplate,
-    handleExportHtml,
     handleExportExcel,
-    handleExportImage,
     closeImportWizard,
   } = useImportExportHandlers({
-      activeLocation,
-      alert,
-      currentRacks,
-      rackDevices,
-      datacenterPowerStats,
-      datacenters,
-      extractResponseMessage,
-    getRackCalculatedPower,
+    alert,
+    extractResponseMessage,
     refreshData,
   });
 
@@ -1212,13 +1186,7 @@ function MainApp() {
     setCurrentDcForm,
     setIsDcModalOpen,
     handleDeleteDatacenter,
-    dcimViewMode,
-    setDcimViewMode,
-    elevationLayout,
-    setElevationLayout,
     handleExportExcel,
-    handleExportHtml,
-    handleExportImage,
     setCurrentRackForm,
     setIsRackModalOpen,
     datacenterPowerStats,
@@ -1228,16 +1196,6 @@ function MainApp() {
     setSelectedRack,
     handleDeleteRack,
     setEditingDevice,
-    handleZoomIn,
-    handleZoomOut,
-    handleZoomReset,
-    elevationScrollRef,
-    elevationContentRef,
-    handleElevationMouseDown,
-    handleElevationMouseLeave,
-    handleElevationMouseUp,
-    handleElevationMouseMove,
-    viewState,
     refreshData,
     auditLogs,
     blocklist,
@@ -1521,14 +1479,6 @@ function MainApp() {
       正在加载公开页面...
     </div>
   );
-
-  if (isDcElevationMode) {
-    return <React.Suspense fallback={publicScreenFallback}><DcimElevationPage /></React.Suspense>;
-  }
-
-  if (isDcOverviewMode) {
-    return <React.Suspense fallback={publicScreenFallback}><DcimOverviewPage /></React.Suspense>;
-  }
 
   if (isChangeRequestIntakeMode) {
     return <React.Suspense fallback={publicScreenFallback}><DatacenterChangeIntakePage /></React.Suspense>;
