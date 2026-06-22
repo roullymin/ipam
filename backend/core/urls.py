@@ -25,6 +25,7 @@ urlpatterns = [
     path('api/', include(router.urls)),
 
     path('api/csrf/', views.api_csrf),
+    path('api/health/', views.api_health),
     path('api/version/', views.api_version),
     path('api/system/overview/', views.system_overview),
     path('api/me/', views.api_me),

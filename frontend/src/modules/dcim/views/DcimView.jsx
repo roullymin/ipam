@@ -104,22 +104,10 @@ const resolveActualPower = (value) => {
   );
 };
 
-const extractRackMeta = (rack) => {
-  const raw = rack?.description || '';
-  const match = raw.match(/__PDU_META__:(\{.*\})/m);
-  try {
-    const meta = match ? JSON.parse(match[1]) : {};
-    return {
-      actualPower: safeInt(meta.power ?? rack?.pdu_power ?? rack?.actual_power ?? 0),
-      pduCount: safeInt(meta.count ?? rack?.pdu_count ?? 0),
-    };
-  } catch {
-    return {
-      actualPower: safeInt(rack?.pdu_power ?? rack?.actual_power ?? 0),
-      pduCount: safeInt(rack?.pdu_count ?? 0),
-    };
-  }
-};
+const extractRackMeta = (rack) => ({
+  actualPower: safeInt(rack?.pdu_power ?? rack?.actual_power ?? 0),
+  pduCount: safeInt(rack?.pdu_count ?? 0),
+});
 
 function ActionButton({ icon: Icon, label, onClick, primary = false, busy = false }) {
   return (
@@ -550,4 +538,3 @@ export default function DcimView(props) {
     </div>
   );
 }
-

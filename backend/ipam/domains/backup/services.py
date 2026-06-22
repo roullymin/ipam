@@ -4,24 +4,46 @@ import subprocess
 from datetime import datetime
 
 
-def create_manual_backup(*, base_dir, database_settings, get_backup_dir, makedirs=os.makedirs, gzip_open=gzip.open, run=subprocess.run, getsize=os.path.getsize):
+def create_manual_backup(
+    *,
+    base_dir,
+    database_settings,
+    get_backup_dir,
+    makedirs=os.makedirs,
+    gzip_open=gzip.open,
+    run=subprocess.run,
+    getsize=os.path.getsize,
+    remove=os.remove,
+):
     backup_dir = get_backup_dir(base_dir)
     makedirs(backup_dir, exist_ok=True)
 
-    filename = f"manual_{datetime.now().strftime('%Y%m%d%H%M')}.sql.gz"
+    filename = f"manual_{datetime.now().strftime('%Y%m%d%H%M%S')}.sql.gz"
     file_path = os.path.join(backup_dir, filename)
     command = [
         'mysqldump',
         '-h', str(database_settings.get('HOST') or '127.0.0.1'),
         '-u', str(database_settings.get('USER') or ''),
-        f"-p{database_settings.get('PASSWORD') or ''}",
+        '--single-transaction',
+        '--quick',
+        '--routines',
+        '--triggers',
         str(database_settings.get('NAME') or ''),
     ]
+    process_env = {**os.environ, 'MYSQL_PWD': str(database_settings.get('PASSWORD') or '')}
 
     with gzip_open(file_path, 'wb') as backup_stream:
-        result = run(command, stdout=backup_stream, stderr=subprocess.PIPE, check=False)
+        result = run(
+            command,
+            stdout=backup_stream,
+            stderr=subprocess.PIPE,
+            check=False,
+            env=process_env,
+        )
 
     if result.returncode != 0:
+        if os.path.exists(file_path):
+            remove(file_path)
         error_message = result.stderr.decode('utf-8', errors='ignore').strip() or 'mysqldump failed'
         raise RuntimeError(error_message)
 

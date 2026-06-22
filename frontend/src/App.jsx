@@ -38,14 +38,19 @@ import { BRAND } from './lib/brand';
 import { useAuthSession } from './hooks/useAuthSession';
 import { useAppDataLoader } from './hooks/useAppDataLoader';
 import { useImportExportHandlers } from './hooks/useImportExportHandlers';
-import { useAppEntryMode } from './hooks/useAppEntryMode';
+import { useAppRouter } from './hooks/useAppEntryMode';
 import { useAppScreenProps } from './hooks/useAppScreenProps';
 import { useSystemOverview } from './hooks/useSystemOverview';
 import { useUserManagementHandlers } from './hooks/useUserManagementHandlers';
-import { DatacenterChangeIntakePage } from './modules/changeRequests';
-import { DcimElevationPage, DcimOverviewPage, useDcimDerivedData, useDcimViewState } from './modules/dcim';
+import { useDcimDerivedData, useDcimViewState } from './modules/dcim';
 import { useIpamDerivedData, useIpamViewActions, useIpamViewState } from './modules/ipam';
-import { ResidentIntakePage } from './modules/resident';
+
+const DatacenterChangeIntakePage = React.lazy(
+  () => import('./modules/changeRequests/views/DatacenterChangeIntakePage'),
+);
+const DcimElevationPage = React.lazy(() => import('./modules/dcim/views/DcimElevationPage'));
+const DcimOverviewPage = React.lazy(() => import('./modules/dcim/views/DcimOverviewPage'));
+const ResidentIntakePage = React.lazy(() => import('./modules/resident/views/ResidentIntakePage'));
 
 // ============================================================================
 // 1. Base constants and configuration
@@ -168,7 +173,6 @@ function MainApp() {
     completeLogin,
     updateCurrentUserInfo,
   } = useAuthSession();
-  const [activeTab, setActiveTab] = useState('dashboard');
   const [debugLogs, setDebugLogs] = useState([]);
   const [isDebugOpen, setIsDebugOpen] = useState(false);
   const [isSystemStatusOpen, setIsSystemStatusOpen] = useState(false);
@@ -176,11 +180,13 @@ function MainApp() {
   const currentPermissions = ROLE_DEFINITIONS[currentRole]?.permissions || [];
   const currentUserDisplay = currentUserInfo?.display_name || currentUserInfo?.username || currentUser;
   const {
+    activeTab,
+    setActiveTab,
     isResidentIntakeMode,
     isChangeRequestIntakeMode,
     isDcOverviewMode,
     isDcElevationMode,
-  } = useAppEntryMode();
+  } = useAppRouter();
 
   useEffect(() => {
     if (currentUserInfo?.must_change_password) {
@@ -192,7 +198,7 @@ function MainApp() {
     if (isLoggedIn && !currentPermissions.includes(activeTab)) {
       const firstAllowed = Object.keys(TAB_CONFIG).find(key => currentPermissions.includes(key));
       if (firstAllowed) {
-        setActiveTab(firstAllowed);
+        setActiveTab(firstAllowed, { replace: true });
       }
     }
   }, [activeTab, currentPermissions, isLoggedIn]);
@@ -1071,23 +1077,15 @@ function MainApp() {
 
     const url = editingIP ? `/api/ips/${editingIP.id}/` : '/api/ips/';
     const method = editingIP ? 'PUT' : 'POST';
-    const cleanDesc = (ipFormData.description || '')
-      .replace(/__TAG__:(.*)$/m, '')
-      .replace(/__LOCKED__:(true|false)/m, '')
-      .trim();
-
-    let hiddenMeta = '';
-    if (ipFormData.tag) hiddenMeta += `\n__TAG__:${ipFormData.tag}`;
-    if (ipFormData.is_locked) hiddenMeta += '\n__LOCKED__:true';
-
     const payload = {
       ...ipFormData,
       subnet: selectedSubnetId,
       nat_type: ipFormData.nat_type || 'none',
       status: ipFormData.is_locked ? 'online' : (ipFormData.status || 'online'),
-      description: cleanDesc + hiddenMeta,
+      description: (ipFormData.description || '').trim(),
+      tag: ipFormData.tag || '',
+      is_locked: Boolean(ipFormData.is_locked),
     };
-    delete payload.is_locked;
 
     try {
       const response = await safeFetch(url, {
@@ -1376,21 +1374,13 @@ function MainApp() {
   const handleSaveRack = async (formData) => {
     const url = formData.id ? `/api/racks/${formData.id}/` : '/api/racks/';
     const method = formData.id ? 'PUT' : 'POST';
-    const pduMeta = {
-      count: safeInt(formData.pdu_count, 2),
-      power: safeInt(formData.pdu_power, 0),
-    };
-    const cleanDesc = (formData.description || '').replace(/__PDU_META__:({.*})$/m, '').trim();
-    const description = cleanDesc
-      ? `${cleanDesc}\n__PDU_META__:${JSON.stringify(pduMeta)}`
-      : `__PDU_META__:${JSON.stringify(pduMeta)}`;
     const payload = {
       ...formData,
       datacenter: activeLocation,
-      description,
+      description: (formData.description || '').trim(),
+      pdu_count: safeInt(formData.pdu_count, 2),
+      pdu_power: safeInt(formData.pdu_power, 0),
     };
-    delete payload.pdu_count;
-    delete payload.pdu_power;
     delete payload.pdu_a_power;
     delete payload.pdu_b_power;
 
@@ -1523,24 +1513,30 @@ function MainApp() {
     }
   }
 
-  if (isAuthChecking) {
-      return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500 text-sm">正在检查登录状态...</div>;
+  const publicScreenFallback = (
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-500">
+      正在加载公开页面...
+    </div>
+  );
+
+  if (isDcElevationMode) {
+    return <React.Suspense fallback={publicScreenFallback}><DcimElevationPage /></React.Suspense>;
   }
 
-    if (isDcElevationMode) {
-      return <DcimElevationPage />;
-    }
-
-    if (isDcOverviewMode) {
-      return <DcimOverviewPage />;
-    }
+  if (isDcOverviewMode) {
+    return <React.Suspense fallback={publicScreenFallback}><DcimOverviewPage /></React.Suspense>;
+  }
 
   if (isChangeRequestIntakeMode) {
-      return <DatacenterChangeIntakePage />;
+    return <React.Suspense fallback={publicScreenFallback}><DatacenterChangeIntakePage /></React.Suspense>;
   }
 
   if (isResidentIntakeMode) {
-      return <ResidentIntakePage />;
+    return <React.Suspense fallback={publicScreenFallback}><ResidentIntakePage /></React.Suspense>;
+  }
+
+  if (isAuthChecking) {
+    return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500 text-sm">正在检查登录状态...</div>;
   }
 
   if (!isLoggedIn) return <LoginScreen onLogin={completeLogin} />;
@@ -1583,6 +1579,7 @@ function MainApp() {
             ipamProps={screenProps.ipamProps}
             dcimProps={screenProps.dcimProps}
             residentProps={screenProps.residentProps}
+            changesProps={screenProps.changesProps}
             securityProps={screenProps.securityProps}
             backupProps={screenProps.backupProps}
             usersProps={screenProps.usersProps}
@@ -1720,6 +1717,3 @@ export default function AppWrapper() {
     </ErrorBoundary>
   );
 }
-
-
-

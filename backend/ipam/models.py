@@ -51,6 +51,8 @@ class Rack(models.Model):
     name = models.CharField('机柜名称', max_length=100, blank=True)
     height = models.IntegerField('高度 (U)', default=42)
     power_limit = models.IntegerField('额定功率 (W)', default=0)
+    pdu_count = models.PositiveSmallIntegerField('PDU 数量', default=2)
+    pdu_power = models.PositiveIntegerField('PDU 实测功率 (W)', default=0)
     description = models.TextField('备注', blank=True)
 
     def __str__(self):
@@ -60,6 +62,10 @@ class Rack(models.Model):
         verbose_name = '机柜'
         verbose_name_plural = '机柜'
         db_table = 'dcim_rack'
+        constraints = [
+            models.CheckConstraint(condition=models.Q(height__gte=1), name='rack_height_gte_1'),
+            models.CheckConstraint(condition=models.Q(power_limit__gte=0), name='rack_power_limit_gte_0'),
+        ]
 
 
 class RackDevice(models.Model):
@@ -69,10 +75,12 @@ class RackDevice(models.Model):
     u_height = models.IntegerField('占用高度 (U)', default=1)
     device_type = models.CharField('设备类型', max_length=50, default='server')
     brand = models.CharField('品牌', max_length=100, blank=True)
+    model = models.CharField('型号', max_length=100, blank=True)
     mgmt_ip = models.CharField('管理 IP', max_length=100, blank=True, null=True)
     project = models.CharField('项目名称', max_length=100, blank=True)
     contact = models.CharField('负责人', max_length=100, blank=True)
     power_usage = models.IntegerField('额定功率 (W)', default=0, blank=True, null=True)
+    typical_power = models.PositiveIntegerField('典型功率 (W)', default=0)
     specs = models.TextField('配置信息', blank=True)
     sn = models.CharField('序列号 (S/N)', max_length=100, blank=True, null=True)
     asset_tag = models.CharField('固定资产编号', max_length=100, blank=True)
@@ -91,6 +99,14 @@ class RackDevice(models.Model):
         verbose_name = '机柜设备'
         verbose_name_plural = '机柜设备'
         db_table = 'dcim_rack_device'
+        constraints = [
+            models.CheckConstraint(condition=models.Q(position__gte=1), name='rack_device_position_gte_1'),
+            models.CheckConstraint(condition=models.Q(u_height__gte=1), name='rack_device_height_gte_1'),
+            models.CheckConstraint(
+                condition=models.Q(power_usage__isnull=True) | models.Q(power_usage__gte=0),
+                name='rack_device_power_usage_gte_0',
+            ),
+        ]
 
 
 class NetworkSection(models.Model):
@@ -149,6 +165,8 @@ class IPAddress(models.Model):
     device_name = models.CharField('设备名称', max_length=100, blank=True)
     device_type = models.CharField('设备类型', max_length=50, blank=True)
     owner = models.CharField('负责人 / 部门', max_length=100, blank=True)
+    tag = models.CharField('标签', max_length=64, blank=True, db_index=True)
+    is_locked = models.BooleanField('锁定地址', default=False)
     description = models.TextField('备注', blank=True)
     last_online = models.DateTimeField('最后在线时间', null=True, blank=True)
     nat_type = models.CharField('NAT 类型', max_length=20, choices=NAT_TYPE_CHOICES, default='none')

@@ -13,10 +13,12 @@ import pandas as pd
 from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from .models import (
+    Blocklist,
     Datacenter,
     DatacenterChangeRequest,
     IPAddress,
@@ -75,7 +77,7 @@ class BaseApiTestCase(APITestCase):
 
 class AuthAndCrudSmokeTests(BaseApiTestCase):
     def test_version_endpoint_returns_backend_metadata(self):
-        response = self.client.get('/api/version/')
+        response = self.make_authenticated_client(self.admin).get('/api/version/')
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['status'], 'success')
@@ -207,6 +209,68 @@ class AuthAndCrudSmokeTests(BaseApiTestCase):
         self.assertEqual(delete_rack_response.status_code, 204)
         self.assertFalse(Rack.objects.filter(id=rack_id).exists())
 
+    def test_structured_asset_metadata_round_trip(self):
+        dc_client = self.make_authenticated_client(self.dc_operator)
+        ip_client = self.make_authenticated_client(self.ip_manager)
+        datacenter = Datacenter.objects.create(name='Metadata DC')
+        rack_response = dc_client.post(
+            '/api/racks/',
+            {
+                'datacenter': datacenter.id,
+                'code': 'META-01',
+                'name': 'Metadata Rack',
+                'height': 42,
+                'power_limit': 5000,
+                'pdu_count': 2,
+                'pdu_power': 1200,
+                'description': 'Clean rack description',
+            },
+            format='json',
+        )
+        self.assertEqual(rack_response.status_code, 201)
+        self.assertEqual(rack_response.data['pdu_power'], 1200)
+        self.assertNotIn('__PDU_META__', rack_response.data['description'])
+
+        section = NetworkSection.objects.create(name='Metadata Network')
+        subnet = Subnet.objects.create(section=section, name='Metadata Subnet', cidr='10.88.0.0/24')
+        ip_response = ip_client.post(
+            '/api/ips/',
+            {
+                'subnet': subnet.id,
+                'ip_address': '10.88.0.10',
+                'status': 'offline',
+                'tag': 'critical',
+                'is_locked': True,
+                'description': 'Clean IP description',
+            },
+            format='json',
+        )
+        self.assertEqual(ip_response.status_code, 201)
+        self.assertEqual(ip_response.data['tag'], 'critical')
+        self.assertTrue(ip_response.data['is_locked'])
+        self.assertEqual(ip_response.data['status'], 'online')
+        self.assertNotIn('__TAG__', ip_response.data['description'])
+
+    def test_rack_device_overlap_is_rejected(self):
+        client = self.make_authenticated_client(self.dc_operator)
+        datacenter = Datacenter.objects.create(name='Overlap DC')
+        rack = Rack.objects.create(datacenter=datacenter, code='OVERLAP-01', height=42)
+        RackDevice.objects.create(rack=rack, name='Existing', position=20, u_height=4)
+
+        response = client.post(
+            '/api/rack-devices/',
+            {
+                'rack': rack.id,
+                'name': 'Overlapping',
+                'position': 18,
+                'u_height': 2,
+                'device_type': 'server',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('position', response.data)
+
 
 class ImportExcelTests(BaseApiTestCase):
     def setUp(self):
@@ -274,6 +338,10 @@ class ImportExcelTests(BaseApiTestCase):
 
 
 class PublicDcimOverviewTests(BaseApiTestCase):
+    @override_settings(
+        PUBLIC_DCIM_OVERVIEW_ENABLED=True,
+        PUBLIC_DCIM_ACCESS_TOKEN='test-public-dcim-token',
+    )
     def test_public_dcim_overview_uses_device_power_and_pdu_fallbacks(self):
         datacenter = Datacenter.objects.create(name='13F 机房', location='1301')
         rack_with_pdu = Rack.objects.create(
@@ -282,7 +350,9 @@ class PublicDcimOverviewTests(BaseApiTestCase):
             name='1号机柜',
             height=42,
             power_limit=5000,
-            description='主机柜\n__PDU_META__:{"count": 2, "power": 1800}',
+            pdu_count=2,
+            pdu_power=1800,
+            description='主机柜',
         )
         RackDevice.objects.create(rack=rack_with_pdu, name='核心交换机', position=20, u_height=2, power_usage=300)
         RackDevice.objects.create(rack=rack_with_pdu, name='服务器01', position=16, u_height=4, power_usage=450)
@@ -296,7 +366,9 @@ class PublicDcimOverviewTests(BaseApiTestCase):
         )
         RackDevice.objects.create(rack=rack_without_pdu, name='服务器02', position=10, u_height=2, power_usage=600)
 
-        response = self.client.get('/api/public/dcim-overview/')
+        response = self.client.get(
+            '/api/public/dcim-overview/?access_token=test-public-dcim-token'
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['summary']['planned_power'], 1350)
@@ -307,6 +379,10 @@ class PublicDcimOverviewTests(BaseApiTestCase):
         self.assertEqual(rack_rows['R-01']['actual_power'], 1800)
         self.assertEqual(rack_rows['R-02']['planned_power'], 600)
         self.assertEqual(rack_rows['R-02']['actual_power'], 600)
+
+    def test_public_dcim_overview_is_closed_by_default(self):
+        response = self.client.get('/api/public/dcim-overview/')
+        self.assertEqual(response.status_code, 403)
 
 
 class DatacenterChangeRequestTests(BaseApiTestCase):
@@ -591,6 +667,35 @@ class DatacenterChangeRequestTests(BaseApiTestCase):
         self.assertEqual(change_request.review_comment, '批准实施')
         self.assertTrue(change_request.reviewer_name)
 
+    def test_creator_cannot_approve_own_change_request(self):
+        change_request = DatacenterChangeRequest.objects.create(
+            request_type='rack_in',
+            status='submitted',
+            title='Self approval must fail',
+            applicant_name='DC Operator',
+            created_by=self.dc_operator,
+        )
+        response = self.client.post(
+            f'/api/datacenter-change-requests/{change_request.id}/approve/',
+            {},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_invalid_change_request_transition_is_rejected(self):
+        change_request = DatacenterChangeRequest.objects.create(
+            request_type='rack_in',
+            status='draft',
+            title='Draft cannot be approved',
+            applicant_name='Tester',
+        )
+        response = self.client.post(
+            f'/api/datacenter-change-requests/{change_request.id}/approve/',
+            {},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 400)
+
     def test_can_submit_draft_change_request(self):
         change_request = DatacenterChangeRequest.objects.create(
             request_type='rack_in',
@@ -751,6 +856,7 @@ class DatacenterChangeRequestTests(BaseApiTestCase):
             title='测试公开链接',
             applicant_name='王五',
             applicant_phone='13700000000',
+            approval_code='INTERNAL-ONLY',
         )
 
         response = self.client.get(f'/api/public/change-requests/{change_request.public_token}/')
@@ -759,6 +865,11 @@ class DatacenterChangeRequestTests(BaseApiTestCase):
         self.assertEqual(response.data['status'], 'success')
         self.assertEqual(response.data['request']['request_code'], change_request.request_code)
         self.assertEqual(response.data['request']['title'], '测试公开链接')
+        self.assertNotIn('approval_code', response.data['request'])
+        public_device = response.data['topology'][0]['racks'][0]['devices'][0]
+        self.assertEqual(public_device['name'], '已占用设备')
+        self.assertEqual(public_device['mgmt_ip'], '')
+        self.assertEqual(public_device['contact'], '')
 
     def test_public_change_request_entry_returns_fixed_link(self):
         response = self.client.get('/api/public/change-requests/')
@@ -973,6 +1084,12 @@ class BackupApiTests(BaseApiTestCase):
 
 
 class AccessControlAndPaginationTests(BaseApiTestCase):
+    @override_settings(TRUST_PROXY_HEADERS=False)
+    def test_blocklist_middleware_rejects_blocked_address(self):
+        Blocklist.objects.create(ip_address='127.0.0.1', reason='test block')
+        response = self.client.get('/api/csrf/', REMOTE_ADDR='127.0.0.1')
+        self.assertEqual(response.status_code, 403)
+
     def test_guest_cannot_import_ip_assets(self):
         client = self.make_authenticated_client(self.guest)
         upload = make_csv_upload('import.csv', 'IP地址,设备名称\n10.30.40.10,test\n')
@@ -1217,15 +1334,12 @@ class ResidentIntakeTests(BaseApiTestCase):
     def setUp(self):
         self.client = self.make_authenticated_client(self.dc_operator)
 
-    def test_public_resident_intake_without_token_returns_fixed_entry(self):
+    def test_public_resident_intake_without_token_requires_managed_link(self):
         response = self.client.get('/api/resident-intake/')
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['link']['token'], '')
-        self.assertTrue(response.data['link']['is_permanent'])
-        self.assertIn('/?resident-intake=1', response.data['link']['intake_url'])
+        self.assertEqual(response.status_code, 403)
 
-    def test_public_resident_intake_without_token_allows_submission(self):
+    def test_public_resident_intake_without_token_rejects_submission(self):
         response = self.client.post(
             '/api/resident-intake/',
             {
@@ -1247,14 +1361,7 @@ class ResidentIntakeTests(BaseApiTestCase):
             format='json',
         )
 
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data['created'], 1)
-        self.assertEqual(response.data['updated'], 0)
-        self.assertTrue(response.data['link']['is_permanent'])
-        resident = ResidentStaff.objects.get()
-        self.assertEqual(resident.company, 'Example Co')
-        self.assertEqual(resident.approval_status, 'pending')
-        self.assertEqual(resident.intake_source, 'qr')
+        self.assertEqual(response.status_code, 403)
 
     def test_public_resident_intake_updates_existing_record_and_formats_mac(self):
         resident = ResidentStaff.objects.create(
@@ -1315,6 +1422,7 @@ class ResidentIntakeTests(BaseApiTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['created'], 0)
         self.assertEqual(response.data['updated'], 1)
+        self.assertTrue(response.data['export_token'])
         self.assertEqual(ResidentStaff.objects.count(), 1)
 
         resident.refresh_from_db()
@@ -1329,6 +1437,24 @@ class ResidentIntakeTests(BaseApiTestCase):
         self.assertEqual(device.wired_mac, '782b-4645-c9a0')
         self.assertEqual(device.wireless_mac, '201e-885d-e995')
         self.assertEqual(response.data['residents'][0]['devices'][0]['wired_mac'], '782b-4645-c9a0')
+
+        forbidden_export = self.client.post(
+            '/api/resident-intake/export-pdf/',
+            {'registration_codes': response.data['registration_codes']},
+            format='json',
+        )
+        self.assertEqual(forbidden_export.status_code, 403)
+
+        export_response = self.client.post(
+            '/api/resident-intake/export-pdf/',
+            {
+                'registration_codes': response.data['registration_codes'],
+                'export_token': response.data['export_token'],
+            },
+            format='json',
+        )
+        self.assertEqual(export_response.status_code, 200)
+        self.assertEqual(export_response['Content-Type'], 'application/pdf')
 
     def test_public_resident_intake_rejects_expired_link(self):
         intake_link = ResidentIntakeLink.objects.create(
@@ -1398,3 +1524,4 @@ class EncodingAuditCommandTests(BaseApiTestCase):
         call_command('repair_encoding_issues', '--restore', str(snapshot_path), stdout=restore_stdout)
         device.refresh_from_db()
         self.assertEqual(device.name, garbled_device_name)
+    Blocklist,

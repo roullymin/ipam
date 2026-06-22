@@ -60,6 +60,43 @@ Check these items:
 - `docker-compose.yml` still points to `./data/mysql:/var/lib/mysql`
 - no accidental cleanup command is used against `data/`
 
+## Required environment changes
+
+Before deploying this refactor, update the production `.env`:
+
+- set `DJANGO_SECRET_KEY` to a random value of at least 50 characters
+- set `DJANGO_ENFORCE_SECURE_SETTINGS=True`
+- keep `DJANGO_SECURE_COOKIES=True` when HTTPS is enabled
+- keep `DJANGO_TRUST_PROXY_HEADERS=True` behind the bundled Nginx proxy
+- leave `ALLOW_PERMANENT_RESIDENT_INTAKE=False` unless a permanent public form is explicitly required
+- leave `PUBLIC_DCIM_OVERVIEW_ENABLED=False` unless a public DCIM board is explicitly required
+- when enabling the public DCIM board, set a long `PUBLIC_DCIM_ACCESS_TOKEN`
+
+The MySQL port is no longer published to the host. Database administration should be
+performed through `docker compose exec db ...` or an explicitly secured temporary port
+mapping.
+
+## Migration added by this refactor
+
+Migration `0014_structured_asset_metadata` moves historical hidden metadata into real
+columns:
+
+- IP tag and lock state
+- rack PDU count and measured power
+- device model and typical power
+
+The backend container now runs `migrate` and `collectstatic` before Gunicorn starts.
+Create a database backup before the first deployment and verify these fields after the
+container becomes healthy.
+
+## Public-link behavior
+
+- Resident intake requires a managed, expiring token by default.
+- Resident PDF exports require a short-lived signed export token.
+- Public DCIM pages require both feature enablement and an access token.
+- Public change-request topology no longer exposes management IPs, contacts, serial
+  numbers, asset tags, or real occupied-device names.
+
 ## Recommended future split
 
 For long-term maintenance, separate this project into:

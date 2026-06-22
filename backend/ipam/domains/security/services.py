@@ -1,8 +1,31 @@
+import ipaddress
+
+from django.conf import settings
+
+
+def _normalize_ip(value):
+    candidate = str(value or '').strip()
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return ''
+
+
 def get_client_ip(request):
-    forwarded = request.META.get('HTTP_X_FORWARDED_FOR') if request else None
-    if forwarded:
-        return forwarded.split(',')[0].strip()
-    return request.META.get('REMOTE_ADDR', 'unknown') if request else 'unknown'
+    if not request:
+        return 'unknown'
+
+    if getattr(settings, 'TRUST_PROXY_HEADERS', False):
+        real_ip = _normalize_ip(request.META.get('HTTP_X_REAL_IP'))
+        if real_ip:
+            return real_ip
+        forwarded = request.META.get('HTTP_X_FORWARDED_FOR')
+        if forwarded:
+            forwarded_ip = _normalize_ip(forwarded.split(',')[0])
+            if forwarded_ip:
+                return forwarded_ip
+
+    return _normalize_ip(request.META.get('REMOTE_ADDR')) or 'unknown'
 
 
 def get_actor_name(user, get_profile):

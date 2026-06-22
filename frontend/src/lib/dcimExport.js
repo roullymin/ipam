@@ -13,16 +13,8 @@ const escapeHtml = (value) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
-const extractRackActualPower = (rack) => {
-  const raw = rack?.description || '';
-  const match = raw.match(/__PDU_META__:(\{.*\})/m);
-  try {
-    const meta = match ? JSON.parse(match[1]) : {};
-    return safeInt(meta.power ?? rack?.pdu_power ?? rack?.actual_power ?? 0);
-  } catch {
-    return safeInt(rack?.pdu_power ?? rack?.actual_power ?? 0);
-  }
-};
+const extractRackActualPower = (rack) =>
+  safeInt(rack?.pdu_power ?? rack?.actual_power ?? 0);
 
 const getRowStart = (totalUnits, unit) => totalUnits - unit + 1;
 

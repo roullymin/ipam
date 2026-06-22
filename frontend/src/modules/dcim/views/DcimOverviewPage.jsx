@@ -149,7 +149,13 @@ export default function DcimOverviewPage() {
 
     const load = async () => {
       setLoading(true);
-      const response = await safeFetch('/api/public/dcim-overview/');
+      const accessToken =
+        typeof window !== 'undefined'
+          ? new URLSearchParams(window.location.search).get('access_token') || ''
+          : '';
+      const response = await safeFetch(
+        `/api/public/dcim-overview/?access_token=${encodeURIComponent(accessToken)}`,
+      );
       const data = response.ok ? await response.json().catch(() => null) : null;
       if (active) {
         setPayload(data);

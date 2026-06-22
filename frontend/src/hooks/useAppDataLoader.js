@@ -10,89 +10,16 @@ const unwrapListResponse = async (response, fallback = []) => {
   return fallback;
 };
 
-const parseIps = (items = []) =>
-  items.map((ip) => {
-    const tagRegex = /__TAG__:(.*)$/m;
-    const lockRegex = /__LOCKED__:(true|false)/m;
-    let tag = ip.tag || '';
-    let description = ip.description || '';
-    let isLocked = false;
-
-    const lockMatch = description.match(lockRegex);
-    if (lockMatch) {
-      isLocked = lockMatch[1] === 'true';
-      description = description.replace(lockRegex, '').trim();
-    }
-
-    const tagMatch = description.match(tagRegex);
-    if (tagMatch) {
-      tag = tagMatch[1];
-      description = description.replace(tagRegex, '').trim();
-    }
-
-    return {
-      ...ip,
-      description,
-      tag,
-      is_locked: isLocked,
-      status: isLocked ? 'online' : ip.status,
-    };
-  });
-
-const parseRacks = (items = [], safeInt) =>
-  items.map((rack) => {
-    const pduMetaRegex = /__PDU_META__:({.*})$/m;
-    let description = rack.description || '';
-    let pduCount = 2;
-    let pduPower = 0;
-
-    const match = description.match(pduMetaRegex);
-    if (match) {
-      try {
-        const meta = JSON.parse(match[1]);
-        pduCount = safeInt(meta.count, 2);
-        pduPower = safeInt(meta.power, 0);
-      } catch (error) {
-        console.warn('Failed to parse rack PDU metadata', error);
-      }
-      description = description.replace(pduMetaRegex, '').trim();
-    }
-
-    return {
-      ...rack,
-      description,
-      pdu_count: pduCount,
-      pdu_power: pduPower,
-    };
-  });
-
 const parseDevices = (items = [], safeInt) =>
-  items.map((device) => {
-    const metaRegex = /__META__:({.*})$/;
-    const cleanDevice = {
+  items.map((device) => (
+    {
       ...device,
       position: safeInt(device.position, 1),
       u_height: safeInt(device.u_height, 1),
       power_usage: safeInt(device.power_usage, 0),
       typical_power: safeInt(device.typical_power, 0),
-    };
-
-    if (cleanDevice.specs && metaRegex.test(cleanDevice.specs)) {
-      try {
-        const match = cleanDevice.specs.match(metaRegex);
-        const meta = JSON.parse(match[1]);
-        return {
-          ...cleanDevice,
-          ...meta,
-          specs: cleanDevice.specs.replace(metaRegex, '').trim(),
-        };
-      } catch (error) {
-        console.warn('Failed to parse device metadata', error);
-      }
     }
-
-    return cleanDevice;
-  });
+  ));
 
 export function useAppDataLoader({
   activeTab,
@@ -182,7 +109,7 @@ export function useAppDataLoader({
         }
 
         if (responses.ips?.ok) {
-          setIps(parseIps(await unwrapListResponse(responses.ips)));
+          setIps(await unwrapListResponse(responses.ips));
         }
 
         if (responses.users?.ok) {
@@ -223,7 +150,7 @@ export function useAppDataLoader({
         }
 
         if (responses.racks?.ok) {
-          setRacks(parseRacks(await unwrapListResponse(responses.racks), safeInt));
+          setRacks(await unwrapListResponse(responses.racks));
         }
 
         if (responses.rackDevices?.ok) {

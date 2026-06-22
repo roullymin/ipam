@@ -1,3 +1,4 @@
+import ipaddress
 import re
 
 from django.contrib.auth.models import User
@@ -178,6 +179,35 @@ def validate_assistance_request_payload(attrs, instance=None):
 
 
 class RackDeviceSerializer(serializers.ModelSerializer):
+    def validate(self, attrs):
+        instance = self.instance
+        rack = attrs.get('rack') or (instance.rack if instance else None)
+        position = attrs.get('position', instance.position if instance else 1)
+        u_height = attrs.get('u_height', instance.u_height if instance else 1)
+
+        if not rack:
+            raise serializers.ValidationError({'rack': ['必须选择所属机柜。']})
+        if position < 1 or u_height < 1:
+            raise serializers.ValidationError({'position': ['U 位和占用高度必须大于 0。']})
+
+        range_start = position - u_height + 1
+        if position > rack.height or range_start < 1:
+            raise serializers.ValidationError(
+                {'position': [f'设备占用范围必须位于机柜 1U 至 {rack.height}U 之间。']}
+            )
+
+        occupied = RackDevice.objects.filter(rack=rack)
+        if instance:
+            occupied = occupied.exclude(pk=instance.pk)
+        for device in occupied.only('id', 'name', 'position', 'u_height'):
+            other_start = device.position - max(device.u_height, 1) + 1
+            if range_start <= device.position and position >= other_start:
+                raise serializers.ValidationError(
+                    {'position': [f'该 U 位范围与设备“{device.name}”重叠。']}
+                )
+
+        return attrs
+
     class Meta:
         model = RackDevice
         fields = '__all__'
@@ -189,6 +219,18 @@ class RackSerializer(serializers.ModelSerializer):
     class Meta:
         model = Rack
         fields = '__all__'
+
+    def validate(self, attrs):
+        instance = self.instance
+        datacenter = attrs.get('datacenter') or (instance.datacenter if instance else None)
+        code = str(attrs.get('code', instance.code if instance else '') or '').strip()
+        if datacenter and code:
+            duplicates = Rack.objects.filter(datacenter=datacenter, code__iexact=code)
+            if instance:
+                duplicates = duplicates.exclude(pk=instance.pk)
+            if duplicates.exists():
+                raise serializers.ValidationError({'code': ['同一机房内的机柜编号不能重复。']})
+        return attrs
 
     def get_load(self, obj):
         if not obj.height:
@@ -230,6 +272,25 @@ class IPAddressSerializer(serializers.ModelSerializer):
     class Meta:
         model = IPAddress
         fields = '__all__'
+
+    def validate(self, attrs):
+        instance = self.instance
+        address_value = attrs.get('ip_address', instance.ip_address if instance else None)
+        subnet = attrs.get('subnet', instance.subnet if instance else None)
+        is_locked = attrs.get('is_locked', instance.is_locked if instance else False)
+
+        if subnet and address_value:
+            try:
+                network = ipaddress.ip_network(subnet.cidr, strict=False)
+                address = ipaddress.ip_address(address_value)
+            except ValueError:
+                raise serializers.ValidationError({'ip_address': ['IP 地址或所属网段格式无效。']})
+            if address not in network:
+                raise serializers.ValidationError({'ip_address': [f'该地址不属于网段 {subnet.cidr}。']})
+
+        if is_locked:
+            attrs['status'] = 'online'
+        return attrs
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -741,7 +802,6 @@ class DatacenterChangeRequestPublicSerializer(serializers.ModelSerializer):
             'request_code',
             'request_type',
             'status',
-            'approval_code',
             'title',
             'applicant_name',
             'applicant_phone',

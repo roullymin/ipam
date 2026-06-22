@@ -1,13 +1,21 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 
-import { DatacenterChangeRequestView } from '../../modules/changeRequests';
-import { DashboardView } from '../../modules/dashboard';
-import { DcimView } from '../../modules/dcim';
-import { IpamView } from '../../modules/ipam';
-import { ResidentManagementView } from '../../modules/resident';
-import { BackupView } from '../../modules/backup';
-import { SecurityCenterView } from '../../modules/security';
-import { UserManagementView } from '../../modules/users';
+const DashboardView = lazy(() => import('../../modules/dashboard/views/DashboardView'));
+const IpamView = lazy(() => import('../../modules/ipam/views/IpamView'));
+const DcimView = lazy(() => import('../../modules/dcim/views/DcimView'));
+const DatacenterChangeRequestView = lazy(
+  () => import('../../modules/changeRequests/views/DatacenterChangeRequestView'),
+);
+const ResidentManagementView = lazy(
+  () => import('../../modules/resident/views/ResidentManagementView'),
+);
+const BackupView = lazy(() => import('../../modules/backup/views/BackupView'));
+const SecurityCenterView = lazy(
+  () => import('../../modules/security/views/SecurityCenterView'),
+);
+const UserManagementView = lazy(
+  () => import('../../modules/users/views/UserManagementView'),
+);
 
 export default function AppScreenRouter(props) {
   const {
@@ -22,37 +30,25 @@ export default function AppScreenRouter(props) {
     usersProps,
   } = props;
 
-  if (activeTab === 'dashboard') {
-    return <DashboardView {...dashboardProps} />;
-  }
+  let screen = null;
+  if (activeTab === 'dashboard') screen = <DashboardView {...dashboardProps} />;
+  if (activeTab === 'list') screen = <IpamView {...ipamProps} />;
+  if (activeTab === 'dcim') screen = <DcimView {...dcimProps} />;
+  if (activeTab === 'changes') screen = <DatacenterChangeRequestView {...changesProps} />;
+  if (activeTab === 'security') screen = <SecurityCenterView {...securityProps} />;
+  if (activeTab === 'resident') screen = <ResidentManagementView {...residentProps} />;
+  if (activeTab === 'backup') screen = <BackupView {...backupProps} />;
+  if (activeTab === 'users') screen = <UserManagementView {...usersProps} />;
 
-  if (activeTab === 'list') {
-    return <IpamView {...ipamProps} />;
-  }
-
-  if (activeTab === 'dcim') {
-    return <DcimView {...dcimProps} />;
-  }
-
-  if (activeTab === 'changes') {
-    return <DatacenterChangeRequestView {...changesProps} />;
-  }
-
-  if (activeTab === 'security') {
-    return <SecurityCenterView {...securityProps} />;
-  }
-
-  if (activeTab === 'resident') {
-    return <ResidentManagementView {...residentProps} />;
-  }
-
-  if (activeTab === 'backup') {
-    return <BackupView {...backupProps} />;
-  }
-
-  if (activeTab === 'users') {
-    return <UserManagementView {...usersProps} />;
-  }
-
-  return null;
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-full items-center justify-center text-sm text-slate-500">
+          正在加载页面...
+        </div>
+      }
+    >
+      {screen}
+    </Suspense>
+  );
 }

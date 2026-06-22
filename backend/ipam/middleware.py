@@ -1,22 +1,32 @@
-from django.http import HttpResponseForbidden
+import logging
+
+from django.db import DatabaseError
+from django.http import JsonResponse
+
+from .domains.security.services import get_client_ip
 from .models import Blocklist
+
+
+logger = logging.getLogger('django.security')
+
 
 class SecurityMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
-        # 1. 获取客户端 IP
-        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-        if x_forwarded_for:
-            ip = x_forwarded_for.split(',')[0]
-        else:
-            ip = request.META.get('REMOTE_ADDR')
+        if request.path == '/api/health/' and request.META.get('REMOTE_ADDR') in {'127.0.0.1', '::1'}:
+            return self.get_response(request)
 
-        # 2. 检查是否在黑名单中 (使用 exists() 高效查询)
-        if Blocklist.objects.filter(ip_address=ip).exists():
-            return HttpResponseForbidden(f"403 Forbidden - Your IP ({ip}) has been blocked by security policy.")
+        ip = get_client_ip(request)
+        try:
+            is_blocked = ip not in {'', 'unknown'} and Blocklist.objects.filter(ip_address=ip).exists()
+        except DatabaseError:
+            # Database startup and migrations must not be blocked by the blocklist lookup.
+            logger.warning('Blocklist lookup unavailable; request allowed.', exc_info=True)
+            is_blocked = False
 
-        # 3. 放行
-        response = self.get_response(request)
-        return response
+        if is_blocked:
+            return JsonResponse({'detail': '该来源地址已被安全策略阻止。'}, status=403)
+
+        return self.get_response(request)

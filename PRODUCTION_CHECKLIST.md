@@ -6,6 +6,9 @@
 - Confirm the real `.env` file exists on the server.
 - Confirm backups are available.
 - Confirm you are updating code only, not replacing runtime data.
+- Confirm `DJANGO_SECRET_KEY` is a long random production value.
+- Confirm `DJANGO_ENFORCE_SECURE_SETTINGS=True`.
+- Confirm public intake and DCIM feature flags match the intended exposure.
 
 ## Files to update
 
@@ -27,6 +30,10 @@
 - Confirm datacenter, rack, and device data still appears.
 - Confirm backup list loads.
 - Confirm import and export pages open normally.
+- Confirm migration `0014_structured_asset_metadata` is applied.
+- Confirm IP tags/locks, rack PDU values, and device model/typical power remain correct.
+- Confirm an expired or missing resident intake token is rejected.
+- Confirm the public DCIM endpoint is closed unless explicitly enabled.
 - Review backend, nginx, and db logs.
 
 ## Safety rules
