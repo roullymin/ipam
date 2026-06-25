@@ -256,7 +256,7 @@ class SecretVaultApiTests(BaseApiTestCase):
         self.assertFalse(SecretRecord.objects.exists())
 
     @patch('ipam.views.vault_read_secret')
-    def test_operator_request_approval_and_one_time_reveal(self, read_secret):
+    def test_operator_can_directly_reveal_secret(self, read_secret):
         read_secret.return_value = {'username': 'netadmin', 'secret_value': 'vault-secret'}
         record = SecretRecord.objects.create(
             name='Firewall Admin',
@@ -266,42 +266,26 @@ class SecretVaultApiTests(BaseApiTestCase):
             created_by=self.admin,
         )
         operator_client = self.make_authenticated_client(self.dc_operator)
-        request_response = operator_client.post(
-            f'/api/secrets/{record.id}/request-access/',
-            {'reason': '处理生产故障'},
-            format='json',
-        )
-        self.assertEqual(request_response.status_code, 201)
-
-        access_request = SecretAccessRequest.objects.get(pk=request_response.data['id'])
-        admin_client = self.make_authenticated_client(self.admin)
-        approve_response = admin_client.post(
-            f'/api/secret-access-requests/{access_request.id}/approve/',
-            {'review_comment': '批准 30 分钟', 'valid_minutes': 30},
-            format='json',
-        )
-        self.assertEqual(approve_response.status_code, 200)
-
         reveal_response = operator_client.post(
             f'/api/secrets/{record.id}/reveal/',
-            {'reason': '处理生产故障', 'current_password': self.password},
+            {},
             format='json',
         )
         self.assertEqual(reveal_response.status_code, 200)
         self.assertEqual(reveal_response.data['secret_value'], 'vault-secret')
         self.assertIn('no-store', reveal_response['Cache-Control'])
-        access_request.refresh_from_db()
-        self.assertEqual(access_request.status, 'used')
+        self.assertFalse(SecretAccessRequest.objects.exists())
 
         second_reveal = operator_client.post(
             f'/api/secrets/{record.id}/reveal/',
-            {'reason': '再次查看', 'current_password': self.password},
+            {},
             format='json',
         )
-        self.assertEqual(second_reveal.status_code, 403)
+        self.assertEqual(second_reveal.status_code, 200)
+        self.assertEqual(read_secret.call_count, 2)
 
     @patch('ipam.views.vault_read_secret')
-    def test_auditor_and_wrong_password_are_denied_and_audited(self, read_secret):
+    def test_auditor_and_guest_are_denied_but_admin_can_directly_reveal(self, read_secret):
         read_secret.return_value = {'username': 'root', 'secret_value': 'secret'}
         record = SecretRecord.objects.create(
             name='Database Root',
@@ -318,10 +302,11 @@ class SecretVaultApiTests(BaseApiTestCase):
 
         admin_response = self.make_authenticated_client(self.admin).post(
             f'/api/secrets/{record.id}/reveal/',
-            {'reason': '维护', 'current_password': 'wrong-password'},
+            {},
             format='json',
         )
-        self.assertEqual(admin_response.status_code, 403)
+        self.assertEqual(admin_response.status_code, 200)
+        self.assertEqual(admin_response.data['secret_value'], 'secret')
         guest_response = self.make_authenticated_client(self.guest).post(
             f'/api/secrets/{record.id}/reveal/',
             {'reason': '不应允许', 'current_password': self.password},
@@ -330,9 +315,9 @@ class SecretVaultApiTests(BaseApiTestCase):
         self.assertEqual(guest_response.status_code, 403)
         self.assertEqual(
             SecretAuditEvent.objects.filter(secret=record, action='reveal', result='denied').count(),
-            2,
+            1,
         )
-        read_secret.assert_not_called()
+        read_secret.assert_called_once()
 
     def test_structured_asset_metadata_round_trip(self):
         dc_client = self.make_authenticated_client(self.dc_operator)

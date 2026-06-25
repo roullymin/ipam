@@ -133,7 +133,7 @@ logger = logging.getLogger('django')
 
 LOGIN_LOCK_THRESHOLD = 5
 LOGIN_LOCK_MINUTES = 30
-APP_VERSION = os.environ.get('APP_VERSION', 'ipam-20260622.8')
+APP_VERSION = os.environ.get('APP_VERSION', 'ipam-20260622.9')
 
 
 class VaultServiceUnavailable(APIException):
@@ -1719,13 +1719,7 @@ class SecretRecordViewSet(OptionalPaginationMixin, BaseViewSet):
     @action(detail=True, methods=['post'], permission_classes=[SecretActionPermission])
     def reveal(self, request, pk=None):
         secret = self.get_object()
-        reason = str(request.data.get('reason') or '').strip()
-        current_password = request.data.get('current_password') or ''
-        if not reason:
-            return Response({'detail': '请填写本次查看原因。'}, status=status.HTTP_400_BAD_REQUEST)
-        if not current_password or not request.user.check_password(current_password):
-            record_secret_audit(request, secret, 'reveal', 'denied', f'二次验证失败：{reason}')
-            raise PermissionDenied('当前登录密码验证失败。')
+        reason = str(request.data.get('reason') or '直接查看密码记录').strip()
 
         role = get_user_role(request.user)
         if role not in ('admin', 'dc_operator', 'ip_manager'):
@@ -1734,25 +1728,6 @@ class SecretRecordViewSet(OptionalPaginationMixin, BaseViewSet):
         if secret.status != 'active':
             record_secret_audit(request, secret, 'reveal', 'denied', f'条目已停用：{reason}')
             raise PermissionDenied('该密码条目已停用。')
-
-        approved_request = None
-        if role != 'admin':
-            now = timezone.now()
-            SecretAccessRequest.objects.filter(
-                secret=secret,
-                requester=request.user,
-                status='approved',
-                approved_expires_at__lte=now,
-            ).update(status='expired')
-            approved_request = SecretAccessRequest.objects.filter(
-                secret=secret,
-                requester=request.user,
-                status='approved',
-                approved_expires_at__gt=now,
-            ).order_by('-reviewed_at').first()
-            if not approved_request:
-                record_secret_audit(request, secret, 'reveal', 'denied', f'未获得有效审批：{reason}')
-                raise PermissionDenied('请先提交取用申请并等待管理员批准。')
 
         try:
             payload = vault_read_secret(secret.vault_path)
@@ -1763,16 +1738,12 @@ class SecretRecordViewSet(OptionalPaginationMixin, BaseViewSet):
             record_secret_audit(request, secret, 'reveal', 'error', f'OpenBao 返回空凭据：{reason}')
             raise VaultServiceUnavailable('OpenBao 中的凭据内容为空。')
 
-        if approved_request:
-            approved_request.status = 'used'
-            approved_request.used_at = timezone.now()
-            approved_request.save(update_fields=['status', 'used_at'])
         record_secret_audit(request, secret, 'reveal', reason=reason)
         response = Response(
             {
                 'username': payload.get('username', ''),
                 'secret_value': payload['secret_value'],
-                'expires_in': 30,
+                'expires_in': 60,
             }
         )
         response['Cache-Control'] = 'no-store, private, max-age=0'

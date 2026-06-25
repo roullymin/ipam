@@ -124,20 +124,17 @@ export default function VaultView({ currentRole }) {
 
   const isAdmin = currentRole === 'admin';
   const canReveal = ['admin', 'dc_operator', 'ip_manager'].includes(currentRole);
-  const canAudit = ['admin', 'auditor'].includes(currentRole);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setError('');
     const resources = [
       ['secrets', '/api/secrets/'],
-      ['requests', '/api/secret-access-requests/'],
       ['datacenters', '/api/datacenters/'],
       ['racks', '/api/racks/'],
       ['devices', '/api/rack-devices/'],
       ['ips', '/api/ips/'],
     ];
-    if (canAudit) resources.push(['audits', '/api/secret-audit-events/']);
     const results = await Promise.all(resources.map(async ([key, url]) => {
       const response = await safeFetch(url);
       return [key, response, response.ok ? unwrap(await response.json().catch(() => [])) : []];
@@ -146,8 +143,8 @@ export default function VaultView({ currentRole }) {
     const secretResponse = results.find(([key]) => key === 'secrets')?.[1];
     if (!secretResponse?.ok) setError(await readError(secretResponse, '密码台账加载失败。'));
     setSecrets(mapped.secrets || []);
-    setRequests(mapped.requests || []);
-    setAudits(mapped.audits || []);
+    setRequests([]);
+    setAudits([]);
     setAssets({
       datacenters: mapped.datacenters || [],
       racks: mapped.racks || [],
@@ -155,13 +152,16 @@ export default function VaultView({ currentRole }) {
       ips: mapped.ips || [],
     });
     setLoading(false);
-  }, [canAudit]);
+  }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
 
   useEffect(() => {
     if (!countdown) {
-      if (revealResult) setRevealResult(null);
+      if (revealResult) {
+        setRevealResult(null);
+        setAccessTarget(null);
+      }
       return undefined;
     }
     const timer = window.setTimeout(() => setCountdown((value) => value - 1), 1000);
@@ -239,6 +239,30 @@ export default function VaultView({ currentRole }) {
     await loadData();
   };
 
+  const revealRecord = async (item) => {
+    if (!item || busy) return;
+    setBusy(true);
+    setError('');
+    setRevealResult(null);
+    setCountdown(0);
+    const response = await safeFetch(`/api/secrets/${item.id}/reveal/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: '直接查看密码记录' }),
+    });
+    if (!response.ok) {
+      setAccessTarget(null);
+      setError(await readError(response, '查看失败。'));
+      setBusy(false);
+      return;
+    }
+    const payload = await response.json();
+    setAccessTarget(item);
+    setRevealResult(payload);
+    setCountdown(payload.expires_in || 60);
+    setBusy(false);
+  };
+
   const submitAccess = async (mode) => {
     if (!accessTarget) return;
     setBusy(true);
@@ -305,7 +329,7 @@ export default function VaultView({ currentRole }) {
             <div>
               <div className="mb-2 flex items-center gap-2 text-cyan-300"><ShieldCheck size={18} /><span className="text-sm font-semibold">OpenBao 密文托管</span></div>
               <h2 className="text-2xl font-black">密码本与特权凭据台账</h2>
-              <p className="mt-2 max-w-3xl text-sm text-slate-300">像 Excel 一样管理台账，但密码不进入数据库。取用经过二次验证、审批和全程审计。</p>
+              <p className="mt-2 max-w-3xl text-sm text-slate-300">像 Excel 一样管理账号、设备和密码记录；密文仍托管在 OpenBao，点击眼睛即可直接查看。</p>
             </div>
             <div className="flex gap-3">
               <button onClick={loadData} className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-semibold hover:bg-white/15"><RefreshCw size={16} />刷新</button>
@@ -319,9 +343,9 @@ export default function VaultView({ currentRole }) {
         <section className="grid gap-4 md:grid-cols-4">
           {[
             ['台账总数', secrets.length, KeyRound, 'text-cyan-700 bg-cyan-50'],
-            ['待审批', requests.filter((item) => item.status === 'pending').length, FileKey, 'text-amber-700 bg-amber-50'],
+            ['有效记录', secrets.filter((item) => item.lifecycle_status === 'active').length, ShieldCheck, 'text-emerald-700 bg-emerald-50'],
             ['即将到期', secrets.filter((item) => item.lifecycle_status === 'expiring').length, AlertTriangle, 'text-orange-700 bg-orange-50'],
-            ['已停用/过期', secrets.filter((item) => ['disabled', 'expired'].includes(item.lifecycle_status)).length, ShieldCheck, 'text-rose-700 bg-rose-50'],
+            ['停用/过期', secrets.filter((item) => ['disabled', 'expired'].includes(item.lifecycle_status)).length, ShieldCheck, 'text-rose-700 bg-rose-50'],
           ].map(([title, value, Icon, tone]) => (
             <div key={title} className="rounded-2xl border border-white bg-white p-4 shadow-sm">
               <div className={`mb-3 inline-flex rounded-xl p-2.5 ${tone}`}><Icon size={19} /></div>
@@ -333,7 +357,7 @@ export default function VaultView({ currentRole }) {
 
         <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-5 pt-4">
-            {[['ledger', '密码台账'], ['requests', '取用审批'], ...(canAudit ? [['audits', '审计记录']] : [])].map(([key, label]) => (
+            {[['ledger', '密码台账']].map(([key, label]) => (
               <button key={key} onClick={() => setActiveSheet(key)} className={`border-b-2 px-4 py-3 text-sm font-bold ${activeSheet === key ? 'border-cyan-500 text-cyan-700' : 'border-transparent text-slate-500'}`}>{label}</button>
             ))}
             {activeSheet === 'ledger' && (
@@ -368,7 +392,7 @@ export default function VaultView({ currentRole }) {
                       <td className="border-b border-r border-slate-100 px-3 py-3"><StatusPill value={item.lifecycle_status} /></td>
                       <td className="border-b border-slate-100 px-3 py-3">
                         <div className="flex gap-1">
-                          {canReveal && <button onClick={() => { setAccessTarget(item); setAccessForm({ reason: '', current_password: '' }); setRevealResult(null); }} className="rounded-lg p-2 text-cyan-700 hover:bg-cyan-50" title="查看 / 申请"><Eye size={16} /></button>}
+                          {canReveal && <button onClick={() => revealRecord(item)} className="rounded-lg p-2 text-cyan-700 hover:bg-cyan-50" title="查看密码"><Eye size={16} /></button>}
                           {isAdmin && <button onClick={() => openEdit(item)} className="rounded-lg px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100">编辑</button>}
                           {isAdmin && <button onClick={() => deleteRecord(item)} className="rounded-lg p-2 text-rose-600 hover:bg-rose-50" title="删除"><Trash2 size={16} /></button>}
                         </div>
@@ -440,26 +464,14 @@ export default function VaultView({ currentRole }) {
         </Modal>
       )}
 
-      {accessTarget && (
-        <Modal title={`取用：${accessTarget.name}`} onClose={() => { setAccessTarget(null); setRevealResult(null); setCountdown(0); }} width="max-w-lg">
-          {revealResult ? (
-            <div className="space-y-4">
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">敏感内容将在 {countdown} 秒后从页面内存中清除，请勿截图或转发。</div>
-              <div><div className="mb-1 text-xs font-bold text-slate-500">账号</div><div className="rounded-xl bg-slate-100 p-3 font-mono">{revealResult.username || '-'}</div></div>
-              <div><div className="mb-1 text-xs font-bold text-slate-500">密码 / 密钥</div><div className="break-all rounded-xl bg-slate-950 p-4 font-mono text-cyan-300">{revealResult.secret_value}</div></div>
-              <button onClick={copySecret} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-600 px-4 py-3 font-bold text-white"><Clipboard size={17} />复制到剪贴板</button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {!isAdmin && <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-700">非管理员需先提交取用申请。批准后授权有效 30 分钟，成功查看一次即失效。</div>}
-              <label className="block space-y-1.5 text-sm font-semibold text-slate-700">用途 / 原因<textarea value={accessForm.reason} onChange={(event) => setAccessForm({ ...accessForm, reason: event.target.value })} className="min-h-24 w-full rounded-xl border border-slate-200 px-3 py-2.5" /></label>
-              <label className="block space-y-1.5 text-sm font-semibold text-slate-700">当前登录密码<input type="password" value={accessForm.current_password} onChange={(event) => setAccessForm({ ...accessForm, current_password: event.target.value })} className="w-full rounded-xl border border-slate-200 px-3 py-2.5" autoComplete="current-password" /></label>
-              <div className="grid grid-cols-2 gap-3">
-                {!isAdmin && <button disabled={busy || !accessForm.reason} onClick={() => submitAccess('request')} className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 font-bold text-cyan-700 disabled:opacity-50">提交申请</button>}
-                <button disabled={busy || !accessForm.reason || !accessForm.current_password} onClick={() => submitAccess('reveal')} className={`${isAdmin ? 'col-span-2' : ''} inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-3 font-bold text-white disabled:opacity-50`}><Eye size={17} />二次验证并查看</button>
-              </div>
-            </div>
-          )}
+      {accessTarget && revealResult && (
+        <Modal title={`查看密码：${accessTarget.name}`} onClose={() => { setAccessTarget(null); setRevealResult(null); setCountdown(0); }} width="max-w-lg">
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">敏感内容将在 {countdown} 秒后从页面内存中清除。</div>
+            <div><div className="mb-1 text-xs font-bold text-slate-500">账号</div><div className="rounded-xl bg-slate-100 p-3 font-mono">{revealResult.username || '-'}</div></div>
+            <div><div className="mb-1 text-xs font-bold text-slate-500">密码 / 密钥</div><div className="break-all rounded-xl bg-slate-950 p-4 font-mono text-cyan-300">{revealResult.secret_value}</div></div>
+            <button onClick={copySecret} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-600 px-4 py-3 font-bold text-white"><Clipboard size={17} />复制到剪贴板</button>
+          </div>
         </Modal>
       )}
     </div>
