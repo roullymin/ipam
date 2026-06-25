@@ -155,6 +155,7 @@ export function useAppScreenProps({
         setCurrentRackForm,
         setIsRackModalOpen,
         datacenterPowerStats,
+        racks,
         currentRacks,
         getRackCalculatedPower,
         selectedRack,
