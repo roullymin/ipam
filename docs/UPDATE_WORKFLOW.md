@@ -80,7 +80,7 @@ docker compose restart backend
 ```bash
 cd /opt/ipam/ipam
 git pull origin codex/ipam-20260622
-cp .env .env.before-ipam-20260622.4
+cp .env .env.before-ipam-20260622.5
 # 按 docs/PASSWORD_VAULT.md 初始化 OpenBao，并更新 .env
 docker compose up -d --build
 docker compose exec backend python manage.py showmigrations ipam

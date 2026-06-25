@@ -1,3 +1,4 @@
+import inspect
 import secrets
 from datetime import timedelta
 
@@ -24,6 +25,17 @@ USER_ROLE_CHOICES = [
     ('auditor', '审计员'),
     ('guest', '访客'),
 ]
+
+
+_CHECK_CONSTRAINT_KWARG = (
+    'condition'
+    if 'condition' in inspect.signature(models.CheckConstraint).parameters
+    else 'check'
+)
+
+
+def check_constraint(condition, name):
+    return models.CheckConstraint(**{_CHECK_CONSTRAINT_KWARG: condition}, name=name)
 
 
 class Datacenter(models.Model):
@@ -63,8 +75,8 @@ class Rack(models.Model):
         verbose_name_plural = '机柜'
         db_table = 'dcim_rack'
         constraints = [
-            models.CheckConstraint(condition=models.Q(height__gte=1), name='rack_height_gte_1'),
-            models.CheckConstraint(condition=models.Q(power_limit__gte=0), name='rack_power_limit_gte_0'),
+            check_constraint(models.Q(height__gte=1), name='rack_height_gte_1'),
+            check_constraint(models.Q(power_limit__gte=0), name='rack_power_limit_gte_0'),
         ]
 
 
@@ -100,10 +112,10 @@ class RackDevice(models.Model):
         verbose_name_plural = '机柜设备'
         db_table = 'dcim_rack_device'
         constraints = [
-            models.CheckConstraint(condition=models.Q(position__gte=1), name='rack_device_position_gte_1'),
-            models.CheckConstraint(condition=models.Q(u_height__gte=1), name='rack_device_height_gte_1'),
-            models.CheckConstraint(
-                condition=models.Q(power_usage__isnull=True) | models.Q(power_usage__gte=0),
+            check_constraint(models.Q(position__gte=1), name='rack_device_position_gte_1'),
+            check_constraint(models.Q(u_height__gte=1), name='rack_device_height_gte_1'),
+            check_constraint(
+                models.Q(power_usage__isnull=True) | models.Q(power_usage__gte=0),
                 name='rack_device_power_usage_gte_0',
             ),
         ]

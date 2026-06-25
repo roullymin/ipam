@@ -133,7 +133,7 @@ logger = logging.getLogger('django')
 
 LOGIN_LOCK_THRESHOLD = 5
 LOGIN_LOCK_MINUTES = 30
-APP_VERSION = os.environ.get('APP_VERSION', 'ipam-20260622.4')
+APP_VERSION = os.environ.get('APP_VERSION', 'ipam-20260622.5')
 
 
 class VaultServiceUnavailable(APIException):

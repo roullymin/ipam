@@ -1,4 +1,5 @@
 import json
+import inspect
 import re
 
 from django.db import migrations, models
@@ -8,6 +9,17 @@ TAG_PATTERN = re.compile(r'__TAG__:(.*)$', re.MULTILINE)
 LOCK_PATTERN = re.compile(r'__LOCKED__:(true|false)', re.MULTILINE)
 PDU_PATTERN = re.compile(r'__PDU_META__:({.*})$', re.MULTILINE)
 DEVICE_PATTERN = re.compile(r'__META__:({.*})$', re.MULTILINE)
+
+
+_CHECK_CONSTRAINT_KWARG = (
+    'condition'
+    if 'condition' in inspect.signature(models.CheckConstraint).parameters
+    else 'check'
+)
+
+
+def check_constraint(condition, name):
+    return models.CheckConstraint(**{_CHECK_CONSTRAINT_KWARG: condition}, name=name)
 
 
 def migrate_hidden_metadata(apps, schema_editor):
@@ -135,36 +147,36 @@ class Migration(migrations.Migration):
         migrations.RunPython(migrate_hidden_metadata, restore_hidden_metadata),
         migrations.AddConstraint(
             model_name='rack',
-            constraint=models.CheckConstraint(
-                condition=models.Q(height__gte=1),
+            constraint=check_constraint(
+                models.Q(height__gte=1),
                 name='rack_height_gte_1',
             ),
         ),
         migrations.AddConstraint(
             model_name='rack',
-            constraint=models.CheckConstraint(
-                condition=models.Q(power_limit__gte=0),
+            constraint=check_constraint(
+                models.Q(power_limit__gte=0),
                 name='rack_power_limit_gte_0',
             ),
         ),
         migrations.AddConstraint(
             model_name='rackdevice',
-            constraint=models.CheckConstraint(
-                condition=models.Q(position__gte=1),
+            constraint=check_constraint(
+                models.Q(position__gte=1),
                 name='rack_device_position_gte_1',
             ),
         ),
         migrations.AddConstraint(
             model_name='rackdevice',
-            constraint=models.CheckConstraint(
-                condition=models.Q(u_height__gte=1),
+            constraint=check_constraint(
+                models.Q(u_height__gte=1),
                 name='rack_device_height_gte_1',
             ),
         ),
         migrations.AddConstraint(
             model_name='rackdevice',
-            constraint=models.CheckConstraint(
-                condition=models.Q(power_usage__isnull=True) | models.Q(power_usage__gte=0),
+            constraint=check_constraint(
+                models.Q(power_usage__isnull=True) | models.Q(power_usage__gte=0),
                 name='rack_device_power_usage_gte_0',
             ),
         ),
