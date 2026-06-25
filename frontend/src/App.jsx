@@ -1496,10 +1496,7 @@ function MainApp() {
   if (!isLoggedIn) return <LoginScreen onLogin={completeLogin} />;
 
   return (
-    <div className="app-shell flex h-screen text-slate-800 font-sans overflow-hidden"
-         onMouseUp={handleElevationMouseUp}
-         onMouseLeave={handleElevationMouseLeave}
-         onMouseMove={handleElevationMouseMove}>
+    <div className="app-shell flex h-screen text-slate-800 font-sans overflow-hidden">
       <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".xlsx, .xls, .csv" className="hidden" />
         <AppSidebar
           activeTab={activeTab}
