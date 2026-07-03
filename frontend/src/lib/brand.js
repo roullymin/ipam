@@ -9,6 +9,7 @@ export const BRAND = {
   loginDescription:
     '面向运维团队统一管理 IP 地址、机房设备、驻场人员、安全审计与备份恢复，减少跨系统切换和状态失真。',
   navigation: {
+    assets: '资产中心',
     dashboard: '总览态势',
     list: '网络地址',
     dcim: '机房设备',

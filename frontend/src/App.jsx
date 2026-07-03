@@ -77,15 +77,16 @@ const DEFAULT_OPTIONS = {
 };
 
 const ROLE_DEFINITIONS = {
-  admin: { label: '\u8d85\u7ea7\u7ba1\u7406\u5458', permissions: ['dashboard', 'list', 'dcim', 'changes', 'resident', 'vault', 'security', 'backup', 'users'] },
-  dc_operator: { label: '\u673a\u623f\u8fd0\u7ef4', permissions: ['dashboard', 'dcim', 'changes', 'resident', 'vault'] },
-  ip_manager: { label: 'IP \u7ba1\u7406\u5458', permissions: ['dashboard', 'list', 'vault'] },
-  auditor: { label: '\u5ba1\u8ba1\u5458', permissions: ['dashboard', 'changes', 'security', 'resident', 'vault'] },
-  guest: { label: '\u8bbf\u5ba2', permissions: ['dashboard', 'list', 'dcim'] },
+  admin: { label: '\u8d85\u7ea7\u7ba1\u7406\u5458', permissions: ['dashboard', 'assets', 'list', 'dcim', 'changes', 'resident', 'vault', 'security', 'backup', 'users'] },
+  dc_operator: { label: '\u673a\u623f\u8fd0\u7ef4', permissions: ['dashboard', 'assets', 'dcim', 'changes', 'resident', 'vault'] },
+  ip_manager: { label: 'IP \u7ba1\u7406\u5458', permissions: ['dashboard', 'assets', 'list', 'vault'] },
+  auditor: { label: '\u5ba1\u8ba1\u5458', permissions: ['dashboard', 'assets', 'changes', 'security', 'resident', 'vault'] },
+  guest: { label: '\u8bbf\u5ba2', permissions: ['dashboard', 'assets', 'list', 'dcim'] },
 };
 
 const TAB_CONFIG = {
   dashboard: { icon: LayoutDashboard, label: BRAND.navigation.dashboard },
+  assets: { icon: HardDrive, label: BRAND.navigation.assets || '资产中心' },
   list: { icon: Server, label: BRAND.navigation.list },
   dcim: { icon: Box, label: BRAND.navigation.dcim },
   changes: { icon: ArrowLeftRight, label: BRAND.navigation.changes || '申请中心' },
@@ -400,6 +401,7 @@ function MainApp() {
     ips,
     backups,
     backupSummary,
+    secrets,
     users,
     residentStaff,
     loginLogs,
@@ -1133,6 +1135,7 @@ function MainApp() {
     racks,
     rackDevices,
     ips,
+    secrets,
     loginLogs,
     residentStaff,
     residentSearchSeed,
@@ -1528,6 +1531,7 @@ function MainApp() {
             activeTab={activeTab}
             currentRole={currentRole}
             dashboardProps={screenProps.dashboardProps}
+            assetProps={screenProps.assetProps}
             ipamProps={screenProps.ipamProps}
             dcimProps={screenProps.dcimProps}
             residentProps={screenProps.residentProps}

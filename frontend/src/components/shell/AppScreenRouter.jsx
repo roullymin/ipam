@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from 'react';
 
 const DashboardView = lazy(() => import('../../modules/dashboard/views/DashboardView'));
+const AssetCenterView = lazy(() => import('../../modules/assets/views/AssetCenterView'));
 const IpamView = lazy(() => import('../../modules/ipam/views/IpamView'));
 const DcimView = lazy(() => import('../../modules/dcim/views/DcimView'));
 const DatacenterChangeRequestView = lazy(
@@ -23,6 +24,7 @@ export default function AppScreenRouter(props) {
     activeTab,
     currentRole,
     dashboardProps,
+    assetProps,
     ipamProps,
     dcimProps,
     residentProps,
@@ -34,6 +36,7 @@ export default function AppScreenRouter(props) {
 
   let screen = null;
   if (activeTab === 'dashboard') screen = <DashboardView {...dashboardProps} />;
+  if (activeTab === 'assets') screen = <AssetCenterView {...assetProps} />;
   if (activeTab === 'list') screen = <IpamView {...ipamProps} />;
   if (activeTab === 'dcim') screen = <DcimView {...dcimProps} />;
   if (activeTab === 'changes') screen = <DatacenterChangeRequestView {...changesProps} />;

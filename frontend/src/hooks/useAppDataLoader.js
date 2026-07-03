@@ -50,6 +50,7 @@ export function useAppDataLoader({
   const [ips, setIps] = useState([]);
   const [backups, setBackups] = useState([]);
   const [backupSummary, setBackupSummary] = useState(null);
+  const [secrets, setSecrets] = useState([]);
   const [users, setUsers] = useState([]);
   const [residentStaff, setResidentStaff] = useState([]);
   const [loginLogs, setLoginLogs] = useState([]);
@@ -75,6 +76,14 @@ export function useAppDataLoader({
           addRequest('datacenters', '/api/datacenters/');
           addRequest('racks', '/api/racks/');
           addRequest('rackDevices', '/api/rack-devices/');
+        }
+
+        if (targetTab === 'assets') {
+          addRequest('datacenters', '/api/datacenters/');
+          addRequest('racks', '/api/racks/');
+          addRequest('rackDevices', '/api/rack-devices/');
+          addRequest('ips', '/api/ips/');
+          addRequest('secrets', '/api/secrets/');
         }
 
         if (targetTab === 'list') {
@@ -161,6 +170,10 @@ export function useAppDataLoader({
           setBackupSummary(summary || null);
         }
 
+        if (responses.secrets?.ok) {
+          setSecrets(await unwrapListResponse(responses.secrets));
+        }
+
         if (responses.loginLogs?.ok) {
           setLoginLogs(await unwrapListResponse(responses.loginLogs));
         }
@@ -209,6 +222,7 @@ export function useAppDataLoader({
     ips,
     backups,
     backupSummary,
+    secrets,
     users,
     residentStaff,
     loginLogs,
