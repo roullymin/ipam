@@ -75,12 +75,12 @@ docker compose restart nginx
 docker compose restart backend
 ```
 
-如果本次包含密码本 / OpenBao（`ipam-20260622.4` 起），不要只重启旧容器：
+如果本次包含密码本 / OpenBao，不要只重启旧容器：
 
 ```bash
 cd /opt/ipam/ipam
-git pull origin codex/ipam-20260622
-cp .env .env.before-ipam-20260622.5
+git pull origin codex/ipam-20260703
+cp .env .env.before-ipam-20260703.1
 # 按 docs/PASSWORD_VAULT.md 初始化 OpenBao，并更新 .env
 docker compose up -d --build
 docker compose exec backend python manage.py showmigrations ipam

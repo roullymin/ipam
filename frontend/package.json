@@ -2,7 +2,7 @@
   "name": "ipam-frontend",
   "private": true,
   "version": "1.0.0",
-  "displayVersion": "ipam-20260622.9",
+  "displayVersion": "ipam-20260703.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
