@@ -232,6 +232,41 @@ The OpenBao data directory is `./data/openbao`. Preserve and back it up together
 - Public change-request topology no longer exposes management IPs, contacts, serial
   numbers, asset tags, or real occupied-device names.
 
+## Network Configuration Backups
+
+The asset center can read the old Python backup files and also write new built-in
+backup versions. The supported filename formats are:
+
+```text
+/backup/{switch|router|firewall}/{management_ip}_{YYYYMMDD}.txt.gz
+/backup/{switch|router|firewall}/{management_ip}_{YYYYMMDD_HHMMSS}.txt.gz
+```
+
+Set these values in `.env` before restarting the backend:
+
+```env
+CONFIG_BACKUP_HOST_DIR=/backup
+CONFIG_BACKUP_DIR=/backup
+```
+
+`CONFIG_BACKUP_HOST_DIR` is the host path that stores configuration backup files.
+It can point to the old Python backup directory during migration.
+`CONFIG_BACKUP_DIR` is the writable path mounted inside the backend container.
+The asset-center summary API scans metadata such as filename, size, and modified
+time; it does not expose configuration file contents.
+
+Manual built-in backup run:
+
+```bash
+docker compose exec backend python manage.py run_config_backups --all --continue-on-error
+```
+
+Example weekly schedule on the server:
+
+```cron
+0 3 * * 0 cd /opt/ipam && docker compose exec -T backend python manage.py run_config_backups --all --continue-on-error >> /var/log/ipam_config_backup.log 2>&1
+```
+
 ## Recommended future split
 
 For long-term maintenance, separate this project into:

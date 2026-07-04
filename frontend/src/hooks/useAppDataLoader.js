@@ -50,6 +50,7 @@ export function useAppDataLoader({
   const [ips, setIps] = useState([]);
   const [backups, setBackups] = useState([]);
   const [backupSummary, setBackupSummary] = useState(null);
+  const [configBackups, setConfigBackups] = useState(null);
   const [secrets, setSecrets] = useState([]);
   const [users, setUsers] = useState([]);
   const [residentStaff, setResidentStaff] = useState([]);
@@ -84,6 +85,7 @@ export function useAppDataLoader({
           addRequest('rackDevices', '/api/rack-devices/');
           addRequest('ips', '/api/ips/');
           addRequest('secrets', '/api/secrets/');
+          addRequest('configBackups', '/api/config-backups/summary/');
         }
 
         if (targetTab === 'list') {
@@ -170,6 +172,11 @@ export function useAppDataLoader({
           setBackupSummary(summary || null);
         }
 
+        if (responses.configBackups?.ok) {
+          const summary = await responses.configBackups.json().catch(() => null);
+          setConfigBackups(summary || null);
+        }
+
         if (responses.secrets?.ok) {
           setSecrets(await unwrapListResponse(responses.secrets));
         }
@@ -222,6 +229,7 @@ export function useAppDataLoader({
     ips,
     backups,
     backupSummary,
+    configBackups,
     secrets,
     users,
     residentStaff,

@@ -22,6 +22,8 @@ import {
   Terminal,
 } from 'lucide-react';
 
+import { safeFetch } from '../../../lib/api';
+
 const asArray = (value) => {
   if (Array.isArray(value)) return value;
   if (!value) return [];
@@ -228,6 +230,14 @@ const RISK_LABELS = {
   automation: '未纳管',
 };
 
+const CONFIG_BACKUP_STATUS_LABELS = {
+  not_run: '未执行',
+  running: '执行中',
+  success: '成功',
+  failed: '失败',
+  disabled: '已停用',
+};
+
 function Pill({ children, tone = 'bg-slate-100 text-slate-700 ring-slate-200' }) {
   return (
     <span className={`inline-flex whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-semibold ring-1 ring-inset ${tone}`}>
@@ -261,11 +271,13 @@ function EmptyState() {
   );
 }
 
-function buildAssets({ datacenters, racks, rackDevices, ips, secrets, secretsLoaded }) {
+function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBackups, secretsLoaded }) {
   const datacenterMap = new Map(asArray(datacenters).map((item) => [String(item.id), item]));
   const rackMap = new Map(asArray(racks).map((item) => [String(item.id), item]));
   const ipList = asArray(ips);
   const secretList = asArray(secrets);
+  const configBackupMap = new Map(Object.entries(configBackups?.devices || {}));
+  const configBackupTargetMap = new Map(Object.entries(configBackups?.targets || {}));
   const usedIpIds = new Set();
   const usedDeviceKeys = new Set();
 
@@ -303,6 +315,54 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, secretsLoa
     return { status, count: related.length, items: related };
   };
 
+  const getConfigBackupState = (managementIp) => {
+    const ipKey = String(managementIp || '').trim();
+    const entry = configBackupMap.get(ipKey);
+    const target = configBackupTargetMap.get(ipKey) || entry?.target || null;
+    if (!entry) {
+      return {
+        status: 'pending',
+        label: target ? '待执行' : '待接入',
+        versionCount: 0,
+        latestVersion: '-',
+        lastBackupAt: null,
+        lastResult: target?.last_error || (configBackups?.directory_exists === false ? '备份目录不可用' : '未采集'),
+        versions: [],
+        target,
+        targetId: target?.id || null,
+        targetEnabled: target?.enabled ?? false,
+        targetStatus: target?.last_status || 'not_run',
+        targetStatusLabel: CONFIG_BACKUP_STATUS_LABELS[target?.last_status || 'not_run'] || target?.last_status || '未执行',
+        targetCredentialName: target?.credential_name || '',
+        targetError: target?.last_error || '',
+      };
+    }
+    const latest = entry.latest || entry.versions?.[0] || null;
+    const latestTime = latest?.time_iso || latest?.finished_at || latest?.started_at || latest?.time || latest?.created_at || null;
+    const latestStatusLabel = latest?.status_label
+      || CONFIG_BACKUP_STATUS_LABELS[latest?.status]
+      || CONFIG_BACKUP_STATUS_LABELS[target?.last_status]
+      || '成功';
+    return {
+      status: entry.version_count > 0 ? 'ready' : 'pending',
+      label: entry.version_count > 0 ? '已接入' : '待接入',
+      versionCount: entry.version_count || 0,
+      latestVersion: latest?.filename || latest?.name || '-',
+      lastBackupAt: latestTime,
+      lastResult: latestStatusLabel,
+      versions: entry.versions || [],
+      storagePath: latest?.relative_path || '',
+      deviceType: entry.device_type || '',
+      target,
+      targetId: target?.id || null,
+      targetEnabled: target?.enabled ?? false,
+      targetStatus: target?.last_status || 'not_run',
+      targetStatusLabel: CONFIG_BACKUP_STATUS_LABELS[target?.last_status || 'not_run'] || target?.last_status || '未执行',
+      targetCredentialName: target?.credential_name || '',
+      targetError: target?.last_error || '',
+    };
+  };
+
   const deviceAssets = asArray(rackDevices).map((device) => {
     usedDeviceKeys.add(normalize(device.name));
     const rack = rackMap.get(String(device.rack));
@@ -311,10 +371,13 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, secretsLoa
     const assetIpIds = new Set(relatedIps.map((ip) => String(ip.id)));
     const credential = getSecretState(assetIpIds, device.id);
     const status = device.status || 'unknown';
+    const managementIp = device.mgmt_ip || relatedIps[0]?.ip_address || '';
+    const backup = getConfigBackupState(managementIp);
     const riskCodes = [];
     if (['offline', 'unknown'].includes(status)) riskCodes.push('offline');
     if (credential.status === 'missing') riskCodes.push('credential');
-    riskCodes.push('backup', 'automation');
+    if (backup.versionCount === 0 && backup.status !== 'ready') riskCodes.push('backup');
+    riskCodes.push('automation');
 
     return {
       id: `device-${device.id}`,
@@ -328,7 +391,7 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, secretsLoa
       osVersion: device.os_version || '',
       serialNumber: device.sn || '',
       assetTag: device.asset_tag || '',
-      managementIp: device.mgmt_ip || relatedIps[0]?.ip_address || '',
+      managementIp,
       status,
       datacenterName: datacenter?.name || '',
       rackCode: rack?.code || '',
@@ -341,14 +404,7 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, secretsLoa
       specs: device.specs || '',
       relatedIps,
       credential,
-      backup: {
-        status: 'pending',
-        label: '待接入',
-        versionCount: 0,
-        latestVersion: '-',
-        lastBackupAt: null,
-        lastResult: '未采集',
-      },
+      backup,
       automation: {
         managed: false,
         label: '未纳管',
@@ -367,10 +423,12 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, secretsLoa
       const assetIpIds = new Set([String(ip.id)]);
       const credential = getSecretState(assetIpIds, null);
       const status = ip.status || 'unknown';
+      const backup = getConfigBackupState(ip.ip_address);
       const riskCodes = [];
       if (['offline', 'unknown'].includes(status)) riskCodes.push('offline');
       if (credential.status === 'missing') riskCodes.push('credential');
-      riskCodes.push('backup', 'automation');
+      if (backup.versionCount === 0 && backup.status !== 'ready') riskCodes.push('backup');
+      riskCodes.push('automation');
 
       return {
         id: `ip-${ip.id}`,
@@ -397,14 +455,7 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, secretsLoa
         specs: ip.description || '',
         relatedIps: [ip],
         credential,
-        backup: {
-          status: 'pending',
-          label: '待接入',
-          versionCount: 0,
-          latestVersion: '-',
-          lastBackupAt: null,
-          lastResult: '未采集',
-        },
+        backup,
         automation: {
           managed: false,
           label: '未纳管',
@@ -946,7 +997,7 @@ function buildInventoryPreview(asset) {
   ].join('\n');
 }
 
-function AssetDetail({ asset }) {
+function AssetDetail({ asset, onProvisionBackup, onRunBackup, backupActionAssetId }) {
   const [activeTab, setActiveTab] = useState('basic');
 
   if (!asset) {
@@ -962,6 +1013,7 @@ function AssetDetail({ asset }) {
   const readinessPercent = Math.round((readyCount / readiness.length) * 100);
   const inventoryGroups = getInventoryGroups(asset);
   const backupVersions = Array.isArray(asset.backup.versions) ? asset.backup.versions : [];
+  const backupBusy = backupActionAssetId === asset.id;
 
   return (
     <div className="space-y-3">
@@ -1040,6 +1092,39 @@ function AssetDetail({ asset }) {
 
       {activeTab === 'backup' ? (
       <DetailBlock icon={Database} title="配置备份">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+          <div>
+            <div className="text-xs font-black text-slate-700">系统内置备份</div>
+            <div className="mt-0.5 text-xs text-slate-500">
+              {asset.backup.targetId
+                ? `目标 #${asset.backup.targetId} / ${asset.backup.targetEnabled ? '已启用' : '已停用'} / ${asset.backup.targetCredentialName || '未绑定凭据'}`
+                : '尚未创建备份目标'}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {!asset.backup.targetId ? (
+              <button
+                type="button"
+                onClick={() => onProvisionBackup(asset)}
+                disabled={backupBusy}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md bg-blue-600 px-2.5 text-xs font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Database className="h-3.5 w-3.5" />
+                创建目标
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onRunBackup(asset)}
+                disabled={backupBusy || !asset.backup.targetEnabled}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md bg-blue-600 px-2.5 text-xs font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${backupBusy ? 'animate-spin' : ''}`} />
+                执行备份
+              </button>
+            )}
+          </div>
+        </div>
         <div className="grid grid-cols-3 gap-2">
           <div className={`rounded-md p-2.5 ${asset.backup.versionCount ? 'bg-emerald-50' : 'bg-amber-50'}`}>
             <div className={`text-xs font-semibold ${asset.backup.versionCount ? 'text-emerald-700' : 'text-amber-700'}`}>状态</div>
@@ -1057,20 +1142,35 @@ function AssetDetail({ asset }) {
         <div className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
           最近配置版本：<span className="font-mono font-bold text-slate-700">{asset.backup.latestVersion || '-'}</span>；最近结果：{asset.backup.lastResult || '-'}。
         </div>
+        <div className="mt-3 rounded-md border border-slate-200 bg-white px-3 py-2">
+          <InfoRow label="备份类型目录" value={asset.backup.deviceType} />
+          <InfoRow label="目标状态" value={asset.backup.targetStatusLabel || asset.backup.targetStatus} />
+          <InfoRow label="最近文件路径" value={asset.backup.storagePath} mono />
+        </div>
+        {asset.backup.targetError ? (
+          <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">
+            最近失败：{asset.backup.targetError}
+          </div>
+        ) : null}
         <div className="mt-3 space-y-2">
           <div className="text-xs font-black text-slate-700">版本列表</div>
           {backupVersions.length ? (
-            backupVersions.slice(0, 5).map((version) => (
-              <div key={version.id || version.name} className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2">
-                <div className="min-w-0">
-                  <div className="truncate font-mono text-xs font-black text-slate-800">{version.name}</div>
-                  <div className="mt-1 text-xs text-slate-500">{formatTime(version.created_at || version.time)}</div>
+            backupVersions.slice(0, 5).map((version) => {
+              const versionName = version.filename || version.name || version.relative_path || '配置版本';
+              const versionTime = version.time_iso || version.finished_at || version.started_at || version.created_at || version.time;
+              const versionLabel = version.status_label || CONFIG_BACKUP_STATUS_LABELS[version.status] || (version.status === 'failed' ? '失败' : '可用');
+              return (
+                <div key={version.id || version.relative_path || versionName} className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="truncate font-mono text-xs font-black text-slate-800">{versionName}</div>
+                    <div className="mt-1 text-xs text-slate-500">{formatTime(versionTime)}</div>
+                  </div>
+                  <Pill tone={version.status === 'failed' ? 'bg-rose-50 text-rose-700 ring-rose-200' : 'bg-emerald-50 text-emerald-700 ring-emerald-200'}>
+                    {versionLabel}
+                  </Pill>
                 </div>
-                <Pill tone={version.status === 'failed' ? 'bg-rose-50 text-rose-700 ring-rose-200' : 'bg-emerald-50 text-emerald-700 ring-emerald-200'}>
-                  {version.status === 'failed' ? '失败' : '可用'}
-                </Pill>
-              </div>
-            ))
+              );
+            })
           ) : (
             <EmptyDetailNote>暂无设备配置版本，当前设备还没有进入配置采集链路。</EmptyDetailNote>
           )}
@@ -1205,6 +1305,7 @@ export default function AssetCenterView({
   rackDevices = [],
   ips = [],
   secrets = [],
+  configBackups = null,
   dataErrors = {},
   isDataLoading = false,
   onRefresh,
@@ -1219,11 +1320,12 @@ export default function AssetCenterView({
   const [visibleColumns, setVisibleColumns] = useState(DEFAULT_VISIBLE_COLUMNS);
   const [selectedAssetId, setSelectedAssetId] = useState(null);
   const [sortConfig, setSortConfig] = useState({ key: 'risk', direction: 'desc' });
+  const [backupActionAssetId, setBackupActionAssetId] = useState(null);
   const secretsLoaded = !dataErrors?.secrets;
 
   const assets = useMemo(
-    () => buildAssets({ datacenters, racks, rackDevices, ips, secrets, secretsLoaded }),
-    [datacenters, ips, rackDevices, racks, secrets, secretsLoaded],
+    () => buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBackups, secretsLoaded }),
+    [configBackups, datacenters, ips, rackDevices, racks, secrets, secretsLoaded],
   );
 
   const filteredAssets = useMemo(
@@ -1280,6 +1382,66 @@ export default function AssetCenterView({
       ...current,
       [columnId]: !current[columnId],
     }));
+  };
+
+  const refreshAssets = async () => {
+    if (typeof onRefresh === 'function') {
+      await onRefresh();
+    }
+  };
+
+  const readApiError = async (response, fallback) => {
+    const payload = await response.json().catch(() => ({}));
+    return payload?.detail || payload?.message || fallback;
+  };
+
+  const handleProvisionBackup = async (asset) => {
+    if (!asset?.managementIp) {
+      window.alert('请先为该资产补充管理 IP。');
+      return;
+    }
+    setBackupActionAssetId(asset.id);
+    try {
+      const response = await safeFetch('/api/config-backup-targets/provision/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: asset.name,
+          management_ip: asset.managementIp,
+          rack_device: asset.source === 'device' ? asset.deviceId : null,
+          ip_address: asset.relatedIps[0]?.id || null,
+          device_type: asset.type,
+          command_profile: 'huawei_vrp',
+        }),
+      });
+      if (!response.ok) {
+        window.alert(await readApiError(response, '创建配置备份目标失败。'));
+        return;
+      }
+      await refreshAssets();
+    } finally {
+      setBackupActionAssetId(null);
+    }
+  };
+
+  const handleRunBackup = async (asset) => {
+    if (!asset?.backup?.targetId) {
+      await handleProvisionBackup(asset);
+      return;
+    }
+    setBackupActionAssetId(asset.id);
+    try {
+      const response = await safeFetch(`/api/config-backup-targets/${asset.backup.targetId}/run/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!response.ok) {
+        window.alert(await readApiError(response, '执行配置备份失败。'));
+      }
+      await refreshAssets();
+    } finally {
+      setBackupActionAssetId(null);
+    }
   };
 
 
@@ -1455,7 +1617,12 @@ export default function AssetCenterView({
             onToggleColumn={handleToggleColumn}
           />
           <aside className="xl:sticky xl:top-4 xl:self-start">
-            <AssetDetail asset={selectedAsset} />
+            <AssetDetail
+              asset={selectedAsset}
+              onProvisionBackup={handleProvisionBackup}
+              onRunBackup={handleRunBackup}
+              backupActionAssetId={backupActionAssetId}
+            />
           </aside>
         </section>
       </div>

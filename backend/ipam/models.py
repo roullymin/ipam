@@ -803,3 +803,112 @@ class SecretAuditEvent(models.Model):
         verbose_name_plural = '密码审计'
         db_table = 'security_secret_audit'
         ordering = ['-created_at']
+
+
+class ConfigBackupTarget(models.Model):
+    DEVICE_TYPE_CHOICES = [
+        ('switch', '交换机'),
+        ('router', '路由器'),
+        ('firewall', '防火墙'),
+        ('other', '其他'),
+    ]
+    COMMAND_PROFILE_CHOICES = [
+        ('huawei_vrp', '华为 / H3C VRP'),
+        ('generic_show_run', '通用 show running-config'),
+    ]
+    STATUS_CHOICES = [
+        ('not_run', '未执行'),
+        ('success', '成功'),
+        ('failed', '失败'),
+        ('running', '执行中'),
+        ('disabled', '已停用'),
+    ]
+
+    name = models.CharField('备份目标名称', max_length=160)
+    rack_device = models.ForeignKey(
+        RackDevice,
+        on_delete=models.SET_NULL,
+        related_name='config_backup_targets',
+        null=True,
+        blank=True,
+        verbose_name='关联机柜设备',
+    )
+    ip_address = models.ForeignKey(
+        IPAddress,
+        on_delete=models.SET_NULL,
+        related_name='config_backup_targets',
+        null=True,
+        blank=True,
+        verbose_name='关联 IP 资产',
+    )
+    management_ip = models.GenericIPAddressField('管理 IP', unique=True)
+    device_type = models.CharField('设备类型', max_length=32, choices=DEVICE_TYPE_CHOICES, default='switch')
+    command_profile = models.CharField('命令模板', max_length=32, choices=COMMAND_PROFILE_CHOICES, default='huawei_vrp')
+    credential = models.ForeignKey(
+        SecretRecord,
+        on_delete=models.SET_NULL,
+        related_name='config_backup_targets',
+        null=True,
+        blank=True,
+        verbose_name='登录凭据',
+    )
+    enabled = models.BooleanField('启用备份', default=True)
+    retention_count = models.PositiveSmallIntegerField('保留版本数', default=12)
+    schedule_label = models.CharField('计划说明', max_length=120, blank=True, default='每周日凌晨')
+    last_status = models.CharField('最近状态', max_length=20, choices=STATUS_CHOICES, default='not_run')
+    last_error = models.TextField('最近失败原因', blank=True)
+    last_backup_at = models.DateTimeField('最近备份时间', null=True, blank=True)
+    last_duration_seconds = models.PositiveIntegerField('最近耗时（秒）', default=0)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name='created_config_backup_targets',
+        null=True,
+        blank=True,
+        verbose_name='创建人',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'{self.name} ({self.management_ip})'
+
+    class Meta:
+        verbose_name = '配置备份目标'
+        verbose_name_plural = '配置备份目标'
+        db_table = 'ops_config_backup_target'
+        ordering = ['management_ip', 'id']
+
+
+class ConfigBackupVersion(models.Model):
+    STATUS_CHOICES = [
+        ('success', '成功'),
+        ('failed', '失败'),
+    ]
+
+    target = models.ForeignKey(
+        ConfigBackupTarget,
+        on_delete=models.CASCADE,
+        related_name='versions',
+        verbose_name='备份目标',
+    )
+    status = models.CharField('状态', max_length=20, choices=STATUS_CHOICES, default='success')
+    filename = models.CharField('文件名', max_length=255, blank=True)
+    relative_path = models.CharField('相对路径', max_length=500, blank=True)
+    bytes = models.PositiveIntegerField('文件大小', default=0)
+    sha256 = models.CharField('SHA256', max_length=64, blank=True)
+    started_at = models.DateTimeField('开始时间')
+    finished_at = models.DateTimeField('完成时间', null=True, blank=True)
+    duration_seconds = models.PositiveIntegerField('耗时（秒）', default=0)
+    command_profile = models.CharField('命令模板', max_length=32, blank=True)
+    error_message = models.TextField('错误信息', blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.filename or f'{self.target.management_ip} {self.status}'
+
+    class Meta:
+        verbose_name = '配置备份版本'
+        verbose_name_plural = '配置备份版本'
+        db_table = 'ops_config_backup_version'
+        ordering = ['-started_at', '-id']

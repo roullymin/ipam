@@ -38,6 +38,7 @@ services:
       - ./data/static:/app/static
       - ./data/media:/app/media
       - ./data/backups:/app/backups # <--- 关键新增：让 Django 也能读写备份目录
+      - ${CONFIG_BACKUP_HOST_DIR:-./data/config_backups}:${CONFIG_BACKUP_DIR:-/backup}
     depends_on:
       db:
         condition: service_healthy

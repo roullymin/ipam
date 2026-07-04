@@ -39,6 +39,8 @@ from rest_framework.response import Response
 from .models import (
     AuditLog,
     Blocklist,
+    ConfigBackupTarget,
+    ConfigBackupVersion,
     DatacenterChangeFirewallRule,
     DatacenterChangeRequest,
     Datacenter,
@@ -75,6 +77,12 @@ from .domains.backup.services import create_manual_backup, resolve_backup_downlo
 from .domains.change_requests.selectors import build_change_request_topology_rows
 from .domains.change_requests.services import apply_change_request_execution
 from .domains.change_requests.workflow import transition_change_request
+from .domains.config_backup.selectors import (
+    build_config_backup_summary,
+    collect_config_backup_files,
+    get_config_backup_dir,
+)
+from .domains.config_backup.services import ConfigBackupError, run_config_backup_target
 from .domains.data_quality.services import build_encoding_report_payload
 from .domains.data_quality.selectors import get_data_quality_summary
 from .domains.dcim.selectors import build_public_dcim_payload
@@ -109,6 +117,8 @@ from .domains.vault.services import (
 from .serializers import (
     AuditLogSerializer,
     BlocklistSerializer,
+    ConfigBackupTargetSerializer,
+    ConfigBackupVersionSerializer,
     DatacenterChangeRequestPublicSerializer,
     DatacenterChangeRequestPublicSubmitSerializer,
     DatacenterChangeRequestSerializer,
@@ -1841,6 +1851,141 @@ class SecretAuditEventViewSet(OptionalPaginationMixin, viewsets.ReadOnlyModelVie
     search_fields = ['secret_name', 'user__username', 'action', 'result', 'reason', 'ip_address']
 
 
+def _find_backup_credential(rack_device=None, ip_asset=None):
+    queryset = SecretRecord.objects.filter(status='active').order_by('-updated_at', '-id')
+    if rack_device is not None:
+        credential = queryset.filter(rack_device=rack_device).first()
+        if credential is not None:
+            return credential
+        if rack_device.mgmt_ip:
+            ip_asset = ip_asset or IPAddress.objects.filter(ip_address=rack_device.mgmt_ip).first()
+    if ip_asset is not None:
+        credential = queryset.filter(ip_address=ip_asset).first()
+        if credential is not None:
+            return credential
+    return None
+
+
+def _normalize_backup_device_type(value):
+    normalized = str(value or '').strip().lower()
+    if 'firewall' in normalized or 'fw' == normalized:
+        return 'firewall'
+    if 'router' in normalized:
+        return 'router'
+    if 'switch' in normalized or normalized in {'switch_core', 'switch_access'}:
+        return 'switch'
+    return normalized if normalized in {'switch', 'router', 'firewall'} else 'switch'
+
+
+class ConfigBackupTargetViewSet(OptionalPaginationMixin, BaseViewSet):
+    audit_module = 'config_backup_target'
+    permission_classes = [DcimAccessPermission]
+    queryset = ConfigBackupTarget.objects.select_related(
+        'rack_device',
+        'rack_device__rack',
+        'rack_device__rack__datacenter',
+        'ip_address',
+        'credential',
+        'created_by',
+    ).prefetch_related('versions').all()
+    serializer_class = ConfigBackupTargetSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name', 'management_ip', 'device_type', 'rack_device__name', 'ip_address__device_name']
+
+    def perform_create(self, serializer):
+        instance = serializer.save(created_by=self.request.user)
+        record_audit(self.request, self.audit_module, 'create', instance, '新增配置备份目标')
+
+    @action(detail=False, methods=['post'])
+    def provision(self, request):
+        rack_device_id = request.data.get('rack_device') or request.data.get('rack_device_id')
+        ip_address_id = request.data.get('ip_address') or request.data.get('ip_address_id')
+        rack_device = RackDevice.objects.filter(pk=rack_device_id).first() if rack_device_id else None
+        ip_asset = IPAddress.objects.filter(pk=ip_address_id).first() if ip_address_id else None
+        management_ip = str(request.data.get('management_ip') or '').strip()
+
+        if rack_device is not None and not management_ip:
+            management_ip = str(rack_device.mgmt_ip or '').strip()
+        if ip_asset is not None and not management_ip:
+            management_ip = str(ip_asset.ip_address or '').strip()
+        if not management_ip:
+            return Response({'detail': '请先为资产设置管理 IP。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        credential_id = request.data.get('credential')
+        credential = SecretRecord.objects.filter(pk=credential_id).first() if credential_id else None
+        if credential is None:
+            credential = _find_backup_credential(rack_device=rack_device, ip_asset=ip_asset)
+
+        name = (
+            str(request.data.get('name') or '').strip()
+            or (rack_device.name if rack_device else '')
+            or (ip_asset.device_name if ip_asset else '')
+            or management_ip
+        )
+        device_type = _normalize_backup_device_type(
+            request.data.get('device_type')
+            or (rack_device.device_type if rack_device else '')
+            or (ip_asset.device_type if ip_asset else '')
+        )
+        target, created = ConfigBackupTarget.objects.update_or_create(
+            management_ip=management_ip,
+            defaults={
+                'name': name,
+                'rack_device': rack_device,
+                'ip_address': ip_asset,
+                'device_type': device_type,
+                'command_profile': request.data.get('command_profile') or 'huawei_vrp',
+                'credential': credential,
+                'enabled': True,
+                'created_by': request.user if request.user.is_authenticated else None,
+            },
+        )
+        record_audit(
+            request,
+            self.audit_module,
+            'provision',
+            target,
+            '从资产中心创建配置备份目标' if created else '从资产中心更新配置备份目标',
+        )
+        return Response(
+            self.get_serializer(target).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=['post'])
+    def run(self, request, pk=None):
+        target = self.get_object()
+        try:
+            version = run_config_backup_target(
+                target=target,
+                base_dir=settings.BASE_DIR,
+                read_secret=vault_read_secret,
+            )
+        except (ConfigBackupError, VaultError) as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        target.refresh_from_db()
+        record_audit(request, self.audit_module, 'run', target, f'执行配置备份，结果：{version.status}')
+        detail = version.error_message if version.status != 'success' else ''
+        return Response(
+            {
+                'status': version.status,
+                'detail': detail,
+                'target': self.get_serializer(target).data,
+                'version': ConfigBackupVersionSerializer(version).data,
+            },
+            status=status.HTTP_200_OK if version.status == 'success' else status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+class ConfigBackupVersionViewSet(OptionalPaginationMixin, viewsets.ReadOnlyModelViewSet):
+    authentication_classes = (SessionAuthentication, BasicAuthentication)
+    permission_classes = [DcimAccessPermission]
+    queryset = ConfigBackupVersion.objects.select_related('target', 'target__rack_device', 'target__ip_address').all()
+    serializer_class = ConfigBackupVersionSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['target__name', 'target__management_ip', 'filename', 'relative_path', 'error_message']
+
+
 class BlocklistViewSet(OptionalPaginationMixin, BaseViewSet):
     audit_module = 'blocklist'
     permission_classes = [IsAdminUser]
@@ -2867,6 +3012,54 @@ def backup_summary(request):
     backup_dir = get_backup_dir(settings.BASE_DIR)
     files = collect_backup_files(backup_dir)
     return Response(build_backup_summary(files, backup_dir))
+
+
+@api_view(['GET'])
+@authentication_classes([SessionAuthentication, BasicAuthentication])
+@permission_classes([DcimAccessPermission])
+def config_backup_summary(request):
+    backup_dir = get_config_backup_dir(settings.BASE_DIR)
+    files = collect_config_backup_files(backup_dir)
+    payload = build_config_backup_summary(files, backup_dir)
+    payload['targets'] = {}
+    targets = ConfigBackupTarget.objects.select_related(
+        'rack_device',
+        'ip_address',
+        'credential',
+        'created_by',
+    ).prefetch_related('versions').all()
+    latest_db_version = None
+    for target in targets:
+        target_payload = ConfigBackupTargetSerializer(target, context={'request': request}).data
+        ip_key = str(target.management_ip)
+        payload['targets'][ip_key] = target_payload
+        device_group = payload['devices'].setdefault(
+            ip_key,
+            {
+                'ip': ip_key,
+                'device_type': target.device_type,
+                'version_count': 0,
+                'latest': None,
+                'versions': [],
+            },
+        )
+        device_group['target'] = target_payload
+        db_versions = list(target.versions.all().order_by('-started_at', '-id')[:20])
+        if db_versions and (latest_db_version is None or db_versions[0].started_at > latest_db_version.started_at):
+            latest_db_version = db_versions[0]
+        if not device_group.get('versions') and db_versions:
+            serialized_versions = ConfigBackupVersionSerializer(db_versions, many=True).data
+            device_group['versions'] = serialized_versions
+            device_group['version_count'] = len(serialized_versions)
+            device_group['latest'] = serialized_versions[0]
+    payload['target_count'] = len(payload['targets'])
+    payload['enabled_target_count'] = sum(1 for target in targets if target.enabled)
+    payload['total_devices'] = len(payload['devices'])
+    if latest_db_version is not None and not payload.get('latest_backup_at'):
+        latest_payload = ConfigBackupVersionSerializer(latest_db_version).data
+        payload['latest_backup_at'] = latest_payload.get('time_iso') or ''
+        payload['latest_backup_name'] = latest_payload.get('filename') or ''
+    return Response(payload)
 
 
 @api_view(['GET'])

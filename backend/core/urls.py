@@ -21,6 +21,8 @@ router.register(r'datacenter-change-requests', views.DatacenterChangeRequestView
 router.register(r'secrets', views.SecretRecordViewSet)
 router.register(r'secret-access-requests', views.SecretAccessRequestViewSet, basename='secret-access-request')
 router.register(r'secret-audit-events', views.SecretAuditEventViewSet)
+router.register(r'config-backup-targets', views.ConfigBackupTargetViewSet)
+router.register(r'config-backup-versions', views.ConfigBackupVersionViewSet)
 
 
 urlpatterns = [
@@ -50,6 +52,7 @@ urlpatterns = [
     path('api/trigger-backup/', views.trigger_backup),
     path('api/list-backups/', views.list_backups),
     path('api/backup/summary/', views.backup_summary),
+    path('api/config-backups/summary/', views.config_backup_summary),
     path('api/backup/download/', views.download_backup),
     path('api/data-quality/encoding-report/', views.encoding_report),
     path('api/scan/', views.scan_subnet),

@@ -10,6 +10,8 @@ from .models import (
     AuditLog,
     DatacenterChangeFirewallRule,
     Blocklist,
+    ConfigBackupTarget,
+    ConfigBackupVersion,
     DatacenterChangeItem,
     DatacenterChangeRequest,
     Datacenter,
@@ -564,6 +566,135 @@ class SecretAuditEventSerializer(serializers.ModelSerializer):
     class Meta:
         model = SecretAuditEvent
         fields = '__all__'
+
+
+class ConfigBackupVersionSerializer(serializers.ModelSerializer):
+    target_name = serializers.CharField(source='target.name', read_only=True)
+    management_ip = serializers.CharField(source='target.management_ip', read_only=True)
+    name = serializers.CharField(source='filename', read_only=True)
+    size = serializers.SerializerMethodField()
+    time = serializers.SerializerMethodField()
+    time_iso = serializers.SerializerMethodField()
+    status_label = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ConfigBackupVersion
+        fields = [
+            'id',
+            'target',
+            'target_name',
+            'management_ip',
+            'name',
+            'filename',
+            'relative_path',
+            'bytes',
+            'size',
+            'sha256',
+            'status',
+            'status_label',
+            'started_at',
+            'finished_at',
+            'time',
+            'time_iso',
+            'duration_seconds',
+            'command_profile',
+            'error_message',
+            'created_at',
+        ]
+        read_only_fields = [
+            'target',
+            'status',
+            'filename',
+            'relative_path',
+            'bytes',
+            'sha256',
+            'started_at',
+            'finished_at',
+            'duration_seconds',
+            'command_profile',
+            'error_message',
+            'created_at',
+        ]
+
+    @staticmethod
+    def _format_bytes(size):
+        value = int(size or 0)
+        if value < 1024:
+            return f'{value} B'
+        if value < 1024 * 1024:
+            return f'{value / 1024:.1f} KB'
+        if value < 1024 * 1024 * 1024:
+            return f'{value / 1024 / 1024:.2f} MB'
+        return f'{value / 1024 / 1024 / 1024:.2f} GB'
+
+    @staticmethod
+    def _display_moment(obj):
+        return obj.finished_at or obj.started_at
+
+    def get_size(self, obj):
+        return self._format_bytes(obj.bytes)
+
+    def get_time(self, obj):
+        moment = self._display_moment(obj)
+        return timezone.localtime(moment).strftime('%Y-%m-%d %H:%M') if moment else ''
+
+    def get_time_iso(self, obj):
+        moment = self._display_moment(obj)
+        return timezone.localtime(moment).isoformat() if moment else ''
+
+    def get_status_label(self, obj):
+        return {'success': '成功', 'failed': '失败'}.get(obj.status, obj.status)
+
+
+class ConfigBackupTargetSerializer(serializers.ModelSerializer):
+    rack_device_name = serializers.CharField(source='rack_device.name', read_only=True)
+    ip_asset_display = serializers.CharField(source='ip_address.ip_address', read_only=True)
+    credential_name = serializers.CharField(source='credential.name', read_only=True)
+    credential_username_hint = serializers.CharField(source='credential.username_hint', read_only=True)
+    created_by_name = serializers.CharField(source='created_by.username', read_only=True)
+    version_count = serializers.SerializerMethodField()
+    latest_version = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ConfigBackupTarget
+        fields = '__all__'
+        read_only_fields = [
+            'last_status',
+            'last_error',
+            'last_backup_at',
+            'last_duration_seconds',
+            'created_by',
+            'created_at',
+            'updated_at',
+        ]
+
+    def validate(self, attrs):
+        instance = self.instance
+        rack_device = attrs.get('rack_device', instance.rack_device if instance else None)
+        ip_address = attrs.get('ip_address', instance.ip_address if instance else None)
+        management_ip = attrs.get('management_ip', instance.management_ip if instance else '')
+
+        if not management_ip and rack_device and rack_device.mgmt_ip:
+            attrs['management_ip'] = rack_device.mgmt_ip
+        if not management_ip and ip_address:
+            attrs['management_ip'] = ip_address.ip_address
+        if not attrs.get('management_ip', management_ip):
+            raise serializers.ValidationError({'management_ip': ['必须提供管理 IP。']})
+
+        if not attrs.get('name') and instance is None:
+            attrs['name'] = rack_device.name if rack_device else (ip_address.device_name if ip_address else attrs['management_ip'])
+
+        return attrs
+
+    def get_version_count(self, obj):
+        prefetched_versions = get_prefetched_related(obj, 'versions')
+        if prefetched_versions is not None:
+            return len(prefetched_versions)
+        return obj.versions.count()
+
+    def get_latest_version(self, obj):
+        latest = obj.versions.order_by('-started_at', '-id').first()
+        return ConfigBackupVersionSerializer(latest).data if latest else None
 
 
 class ResidentDeviceSerializer(serializers.ModelSerializer):
