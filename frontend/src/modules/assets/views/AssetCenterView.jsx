@@ -48,6 +48,15 @@ const formatTime = (value) => {
 
 const normalize = (value) => String(value || '').trim().toLowerCase();
 
+const inventoryToken = (value, fallback = 'unknown') => {
+  const token = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return token || fallback;
+};
+
 const SORT_OPTIONS = [
   { value: 'risk:desc', label: '风险最多优先' },
   { value: 'backup:asc', label: '配置未接入优先' },
@@ -857,6 +866,86 @@ function InfoRow({ label, value, mono = false }) {
   );
 }
 
+function DetailMetric({ icon: Icon, label, value, tone = 'text-blue-600', mono = false }) {
+  return (
+    <div className="rounded-md bg-slate-50 p-2.5">
+      <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+        <Icon className={`h-3.5 w-3.5 ${tone}`} />
+        {label}
+      </div>
+      <div className={`mt-1 truncate text-sm font-black text-slate-950 ${mono ? 'font-mono' : ''}`}>
+        {safeText(value)}
+      </div>
+    </div>
+  );
+}
+
+function ReadinessItem({ label, value, ready }) {
+  const Icon = ready ? CheckCircle2 : AlertTriangle;
+  return (
+    <div className={`rounded-md border px-2.5 py-2 ${ready ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+      <div className="flex items-center gap-2">
+        <Icon className={`h-3.5 w-3.5 ${ready ? 'text-emerald-600' : 'text-amber-600'}`} />
+        <span className={`text-xs font-black ${ready ? 'text-emerald-800' : 'text-amber-800'}`}>{label}</span>
+      </div>
+      <div className={`mt-1 truncate text-xs font-semibold ${ready ? 'text-emerald-700' : 'text-amber-700'}`}>
+        {safeText(value)}
+      </div>
+    </div>
+  );
+}
+
+function EmptyDetailNote({ children }) {
+  return (
+    <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-xs leading-5 text-slate-500">
+      {children}
+    </div>
+  );
+}
+
+function getAssetReadiness(asset) {
+  const hasCredential = asset.credential.status === 'active' && asset.credential.count > 0;
+  const hasBackup = asset.backup.versionCount > 0 || asset.backup.status === 'ready';
+  const hasAnsible = asset.automation.managed;
+
+  return [
+    { key: 'ip', label: '管理 IP', ready: !!asset.managementIp, value: asset.managementIp || '缺少管理地址' },
+    { key: 'credential', label: '密码凭据', ready: hasCredential, value: hasCredential ? `${asset.credential.count} 条可用` : SECRET_LABELS[asset.credential.status] },
+    { key: 'backup', label: '配置备份', ready: hasBackup, value: hasBackup ? `${asset.backup.versionCount} 个版本` : asset.backup.label },
+    { key: 'ansible', label: 'Ansible', ready: hasAnsible, value: asset.automation.label },
+  ];
+}
+
+function getInventoryGroups(asset) {
+  return [
+    asset.type ? `type_${inventoryToken(asset.type)}` : null,
+    asset.datacenterName ? `dc_${inventoryToken(asset.datacenterName)}` : null,
+    asset.rackCode ? `rack_${inventoryToken(asset.rackCode)}` : null,
+  ].filter(Boolean);
+}
+
+function getAnsibleReadiness(asset) {
+  return [
+    { key: 'host', label: '管理地址', ready: !!asset.managementIp, value: asset.managementIp || '缺少 ansible_host' },
+    { key: 'type', label: '设备类型', ready: asset.type !== 'unknown', value: asset.typeLabel || '未分类' },
+    { key: 'credential', label: '登录凭据', ready: asset.credential.status === 'active' && asset.credential.count > 0, value: asset.credential.count ? `${asset.credential.count} 条` : '未绑定' },
+    { key: 'inventory', label: 'Inventory', ready: asset.automation.managed, value: asset.automation.inventoryName || asset.name },
+  ];
+}
+
+function buildInventoryPreview(asset) {
+  const groups = getInventoryGroups(asset);
+  const hostName = inventoryToken(asset.name, inventoryToken(asset.id, 'asset'));
+  return [
+    `[${groups[0] || 'unmanaged_assets'}]`,
+    `${hostName} ansible_host=${asset.managementIp || '0.0.0.0'}`,
+    '',
+    `[${groups[0] || 'unmanaged_assets'}:vars]`,
+    `device_type=${asset.type || 'unknown'}`,
+    `credential_ref=${asset.credential.count > 0 ? `asset-${asset.id}` : 'missing'}`,
+  ].join('\n');
+}
+
 function AssetDetail({ asset }) {
   const [activeTab, setActiveTab] = useState('basic');
 
@@ -868,6 +957,12 @@ function AssetDetail({ asset }) {
     );
   }
 
+  const readiness = getAssetReadiness(asset);
+  const readyCount = readiness.filter((item) => item.ready).length;
+  const readinessPercent = Math.round((readyCount / readiness.length) * 100);
+  const inventoryGroups = getInventoryGroups(asset);
+  const backupVersions = Array.isArray(asset.backup.versions) ? asset.backup.versions : [];
+
   return (
     <div className="space-y-3">
       <section className="rounded-lg border border-slate-200 bg-white p-4">
@@ -878,21 +973,25 @@ function AssetDetail({ asset }) {
             <div className="mt-2 flex flex-wrap gap-2">
               <Pill tone="bg-blue-50 text-blue-700 ring-blue-200">{asset.typeLabel}</Pill>
               <Pill tone={STATUS_TONES[asset.status] || STATUS_TONES.unknown}>{STATUS_LABELS[asset.status] || asset.status}</Pill>
+              <Pill tone={readinessPercent >= 75 ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-amber-50 text-amber-700 ring-amber-200'}>
+                档案 {readinessPercent}%
+              </Pill>
             </div>
           </div>
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-900 text-white">
             <Server className="h-5 w-5" />
           </div>
         </div>
-        <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-          <div className="rounded-md bg-slate-50 p-3">
-            <div className="text-xs font-semibold text-slate-500">管理 IP</div>
-            <div className="mt-1 truncate font-mono font-bold text-slate-950">{safeText(asset.managementIp)}</div>
-          </div>
-          <div className="rounded-md bg-slate-50 p-3">
-            <div className="text-xs font-semibold text-slate-500">位置</div>
-            <div className="mt-1 truncate font-bold text-slate-950">{safeText([asset.datacenterName, asset.rackCode].filter(Boolean).join(' / '))}</div>
-          </div>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <DetailMetric icon={Network} label="管理 IP" value={asset.managementIp} mono />
+          <DetailMetric icon={MapPin} label="位置" value={[asset.datacenterName, asset.rackCode].filter(Boolean).join(' / ')} tone="text-emerald-600" />
+          <DetailMetric icon={Database} label="配置版本" value={`${asset.backup.versionCount} 个`} tone="text-amber-600" />
+          <DetailMetric icon={Terminal} label="纳管状态" value={asset.automation.label} tone="text-blue-600" />
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          {readiness.map((item) => (
+            <ReadinessItem key={item.key} label={item.label} value={item.value} ready={item.ready} />
+          ))}
         </div>
       </section>
 
@@ -918,22 +1017,33 @@ function AssetDetail({ asset }) {
       </section>
 
       {activeTab === 'basic' ? (
-      <DetailBlock icon={MapPin} title="身份与位置">
-        <InfoRow label="厂商" value={asset.vendor} />
-        <InfoRow label="型号" value={asset.model} />
-        <InfoRow label="系统版本" value={asset.osVersion} />
-        <InfoRow label="序列号" value={asset.serialNumber} mono />
-        <InfoRow label="资产编号" value={asset.assetTag} />
-        <InfoRow label="机柜位置" value={[asset.rackCode, asset.rackPosition].filter(Boolean).join(' / ')} />
-      </DetailBlock>
+        <>
+          <DetailBlock icon={MapPin} title="身份与位置">
+            <InfoRow label="厂商" value={asset.vendor} />
+            <InfoRow label="型号" value={asset.model} />
+            <InfoRow label="系统版本" value={asset.osVersion} />
+            <InfoRow label="序列号" value={asset.serialNumber} mono />
+            <InfoRow label="资产编号" value={asset.assetTag} />
+            <InfoRow label="机房" value={asset.datacenterName} />
+            <InfoRow label="机柜位置" value={[asset.rackCode, asset.rackPosition].filter(Boolean).join(' / ')} />
+          </DetailBlock>
+
+          <DetailBlock icon={ShieldCheck} title="运维归属">
+            <InfoRow label="项目" value={asset.project} />
+            <InfoRow label="负责人" value={asset.contact} />
+            <InfoRow label="数据来源" value={asset.source === 'device' ? '机房设备台账' : 'IP 地址台账'} />
+            <InfoRow label="额定功率" value={asset.powerUsage ? `${asset.powerUsage} W` : ''} />
+            <InfoRow label="典型功率" value={asset.typicalPower ? `${asset.typicalPower} W` : ''} />
+          </DetailBlock>
+        </>
       ) : null}
 
       {activeTab === 'backup' ? (
       <DetailBlock icon={Database} title="配置备份">
         <div className="grid grid-cols-3 gap-2">
-          <div className="rounded-md bg-amber-50 p-2.5">
-            <div className="text-xs font-semibold text-amber-700">状态</div>
-            <div className="mt-1 text-sm font-black text-amber-900">{asset.backup.label}</div>
+          <div className={`rounded-md p-2.5 ${asset.backup.versionCount ? 'bg-emerald-50' : 'bg-amber-50'}`}>
+            <div className={`text-xs font-semibold ${asset.backup.versionCount ? 'text-emerald-700' : 'text-amber-700'}`}>状态</div>
+            <div className={`mt-1 text-sm font-black ${asset.backup.versionCount ? 'text-emerald-900' : 'text-amber-900'}`}>{asset.backup.label}</div>
           </div>
           <div className="rounded-md bg-slate-50 p-2.5">
             <div className="text-xs font-semibold text-slate-500">版本</div>
@@ -947,6 +1057,24 @@ function AssetDetail({ asset }) {
         <div className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
           最近配置版本：<span className="font-mono font-bold text-slate-700">{asset.backup.latestVersion || '-'}</span>；最近结果：{asset.backup.lastResult || '-'}。
         </div>
+        <div className="mt-3 space-y-2">
+          <div className="text-xs font-black text-slate-700">版本列表</div>
+          {backupVersions.length ? (
+            backupVersions.slice(0, 5).map((version) => (
+              <div key={version.id || version.name} className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2">
+                <div className="min-w-0">
+                  <div className="truncate font-mono text-xs font-black text-slate-800">{version.name}</div>
+                  <div className="mt-1 text-xs text-slate-500">{formatTime(version.created_at || version.time)}</div>
+                </div>
+                <Pill tone={version.status === 'failed' ? 'bg-rose-50 text-rose-700 ring-rose-200' : 'bg-emerald-50 text-emerald-700 ring-emerald-200'}>
+                  {version.status === 'failed' ? '失败' : '可用'}
+                </Pill>
+              </div>
+            ))
+          ) : (
+            <EmptyDetailNote>暂无设备配置版本，当前设备还没有进入配置采集链路。</EmptyDetailNote>
+          )}
+        </div>
       </DetailBlock>
       ) : null}
 
@@ -959,14 +1087,31 @@ function AssetDetail({ asset }) {
         {asset.credential.items.length ? (
           <div className="mt-3 space-y-2">
             {asset.credential.items.slice(0, 4).map((secret) => (
-              <div key={secret.id} className="rounded-md bg-slate-50 px-3 py-2">
+              <div key={secret.id} className="rounded-md border border-slate-200 bg-white px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-sm font-bold text-slate-800">{secret.name}</span>
                   <Pill tone={SECRET_TONES[secret.lifecycle_status || secret.status || 'active']}>
                     {SECRET_LABELS[secret.lifecycle_status || secret.status || 'active'] || secret.status}
                   </Pill>
                 </div>
-                <div className="mt-1 text-xs text-slate-500">{secret.username_hint || '-'} / {secret.owner_team || '-'}</div>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                  <div className="min-w-0 rounded-md bg-slate-50 px-2 py-1.5">
+                    <div className="text-slate-400">账号提示</div>
+                    <div className="mt-0.5 truncate font-mono font-bold text-slate-700">{safeText(secret.username_hint)}</div>
+                  </div>
+                  <div className="min-w-0 rounded-md bg-slate-50 px-2 py-1.5">
+                    <div className="text-slate-400">责任团队</div>
+                    <div className="mt-0.5 truncate font-bold text-slate-700">{safeText(secret.owner_team)}</div>
+                  </div>
+                  <div className="min-w-0 rounded-md bg-slate-50 px-2 py-1.5">
+                    <div className="text-slate-400">环境 / 类型</div>
+                    <div className="mt-0.5 truncate font-bold text-slate-700">{safeText([secret.environment, secret.credential_type].filter(Boolean).join(' / '))}</div>
+                  </div>
+                  <div className="min-w-0 rounded-md bg-slate-50 px-2 py-1.5">
+                    <div className="text-slate-400">到期时间</div>
+                    <div className="mt-0.5 truncate font-bold text-slate-700">{formatTime(secret.expires_at)}</div>
+                  </div>
+                </div>
               </div>
             ))}
           </div>
@@ -983,10 +1128,16 @@ function AssetDetail({ asset }) {
       <DetailBlock icon={Terminal} title="自动化">
         <InfoRow label="Ansible" value={asset.automation.label} />
         <InfoRow label="Inventory" value={asset.automation.inventoryName} />
-        <InfoRow label="分组" value={asset.automation.groups.join(', ')} />
+        <InfoRow label="分组" value={(asset.automation.groups.length ? asset.automation.groups : inventoryGroups).join(', ')} />
         <InfoRow label="最近任务" value={asset.automation.lastJobStatus} />
-        <div className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
-          建议先用只读任务验证连通性，例如 ping、show version、show running-config，再开放批量执行。
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          {getAnsibleReadiness(asset).map((item) => (
+            <ReadinessItem key={item.key} label={item.label} value={item.value} ready={item.ready} />
+          ))}
+        </div>
+        <div className="mt-3 overflow-hidden rounded-md border border-slate-200 bg-slate-950">
+          <div className="border-b border-white/10 px-3 py-2 text-xs font-black text-slate-300">Inventory 预览</div>
+          <pre className="overflow-x-auto p-3 text-xs leading-5 text-slate-100">{buildInventoryPreview(asset)}</pre>
         </div>
       </DetailBlock>
       ) : null}
@@ -1020,8 +1171,26 @@ function AssetDetail({ asset }) {
                 由资产中心根据机房设备、IP、密码本数据聚合生成。后续可接入申请中心审批记录。
               </div>
             </div>
-            <div className="rounded-md border border-dashed border-slate-200 px-3 py-2 text-xs leading-5 text-slate-500">
-              暂无更多人工变更记录。
+            <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-bold text-slate-800">密码凭据状态</span>
+                <Pill tone={SECRET_TONES[asset.credential.status]}>{SECRET_LABELS[asset.credential.status]}</Pill>
+              </div>
+              <div className="mt-1 text-xs text-slate-500">{asset.credential.count} 条凭据与该资产关联。</div>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-bold text-slate-800">配置备份状态</span>
+                <Pill tone={backupTone(asset.backup)}>{asset.backup.label}</Pill>
+              </div>
+              <div className="mt-1 text-xs text-slate-500">最近版本：{asset.backup.latestVersion || '-'}。</div>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-bold text-slate-800">自动化纳管状态</span>
+                <Pill tone={automationTone(asset.automation)}>{asset.automation.label}</Pill>
+              </div>
+              <div className="mt-1 text-xs text-slate-500">最近任务：{asset.automation.lastJobStatus || '-'}。</div>
             </div>
           </div>
         </DetailBlock>
