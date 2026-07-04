@@ -6,7 +6,7 @@ import {
   ArrowUpDown,
   BarChart3,
   CheckCircle2,
-  Clock3,
+  ChevronDown,
   Columns3,
   ClipboardList,
   Database,
@@ -106,11 +106,11 @@ const DEFAULT_VISIBLE_COLUMNS = COLUMN_DEFINITIONS.reduce((acc, column) => {
 }, {});
 
 const DETAIL_TABS = [
-  { id: 'basic', label: '基础信息', icon: Server },
-  { id: 'backup', label: '配置备份', icon: Database },
-  { id: 'credential', label: '密码凭据', icon: KeyRound },
-  { id: 'ansible', label: 'Ansible', icon: Terminal },
-  { id: 'changes', label: '变更记录', icon: ClipboardList },
+  { id: 'basic', label: '基础信息', shortLabel: '基础', icon: Server },
+  { id: 'backup', label: '配置备份', shortLabel: '备份', icon: Database },
+  { id: 'credential', label: '密码凭据', shortLabel: '密码', icon: KeyRound },
+  { id: 'ansible', label: 'Ansible', shortLabel: 'Ansible', icon: Terminal },
+  { id: 'changes', label: '变更记录', shortLabel: '变更', icon: ClipboardList },
 ];
 
 const STATUS_SORT_WEIGHT = {
@@ -542,15 +542,15 @@ function SortHeader({ children, sortKey, sort, onSort }) {
 function StatBar({ label, count, total, meta, tone = 'bg-blue-500' }) {
   const percent = total && count ? Math.max(4, Math.round((count / total) * 100)) : 0;
   return (
-    <div className="rounded-md bg-slate-50 px-3 py-2">
+    <div className="rounded-md bg-slate-50 px-2.5 py-1.5">
       <div className="flex items-center justify-between gap-3">
-        <span className="truncate text-sm font-bold text-slate-800">{label}</span>
-        <span className="text-sm font-black text-slate-950">{count}</span>
+        <span className="truncate text-xs font-bold text-slate-800">{label}</span>
+        <span className="text-xs font-black text-slate-950">{count}</span>
       </div>
-      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white">
+      <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-white">
         <div className={`h-full rounded-full ${tone}`} style={{ width: `${percent}%` }} />
       </div>
-      {meta ? <div className="mt-1 text-xs text-slate-500">{meta}</div> : null}
+      {meta ? <div className="mt-1 truncate text-[11px] text-slate-500">{meta}</div> : null}
     </div>
   );
 }
@@ -558,8 +558,8 @@ function StatBar({ label, count, total, meta, tone = 'bg-blue-500' }) {
 function SummaryColumn({ icon: Icon, title, children }) {
   return (
     <div className="min-w-0 space-y-2">
-      <div className="mb-2 flex items-center gap-2 text-sm font-black text-slate-900">
-        <Icon className="h-4 w-4 text-blue-600" />
+      <div className="flex items-center gap-2 text-xs font-black text-slate-900">
+        <Icon className="h-3.5 w-3.5 text-blue-600" />
         {title}
       </div>
       {children}
@@ -568,18 +568,37 @@ function SummaryColumn({ icon: Icon, title, children }) {
 }
 
 function GroupSummary({ summary, total }) {
+  const leaders = [
+    { label: '机房', value: summary.datacenters[0]?.label, count: summary.datacenters[0]?.count },
+    { label: '类型', value: summary.types[0]?.label, count: summary.types[0]?.count },
+    { label: '风险', value: summary.risks[0]?.label, count: summary.risks[0]?.count },
+  ].filter((item) => item.value);
+
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-4">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div>
-          <div className="text-sm font-black text-slate-950">资产分布摘要</div>
-          <div className="mt-0.5 text-xs text-slate-500">跟随当前筛选条件实时统计，优先显示数量和风险集中区域。</div>
+    <details className="group rounded-lg border border-slate-200 bg-white shadow-sm">
+      <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 px-4 py-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-blue-50 text-blue-600">
+            <BarChart3 className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-sm font-black text-slate-950">资产分布摘要</div>
+            <div className="mt-0.5 truncate text-xs text-slate-500">默认收起，展开后查看机房、类型和风险集中区域。</div>
+          </div>
         </div>
-        <div className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">{total} 条资产</div>
-      </div>
-      <div className="grid gap-4 xl:grid-cols-3">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {leaders.map((item) => (
+            <span key={item.label} className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">
+              {item.label}：{item.value} {item.count ?? 0}
+            </span>
+          ))}
+          <span className="rounded-md bg-blue-50 px-2.5 py-1 text-xs font-black text-blue-700">{total} 条资产</span>
+          <ChevronDown className="h-4 w-4 text-slate-400 transition group-open:rotate-180" />
+        </div>
+      </summary>
+      <div className="grid gap-3 border-t border-slate-100 px-4 pb-4 pt-3 xl:grid-cols-3">
         <SummaryColumn icon={BarChart3} title="机房分布">
-          {summary.datacenters.slice(0, 5).map((item) => (
+          {summary.datacenters.slice(0, 4).map((item) => (
             <StatBar
               key={item.label}
               label={item.label}
@@ -592,7 +611,7 @@ function GroupSummary({ summary, total }) {
         </SummaryColumn>
 
         <SummaryColumn icon={HardDrive} title="类型分布">
-          {summary.types.slice(0, 5).map((item) => (
+          {summary.types.slice(0, 4).map((item) => (
             <StatBar
               key={item.label}
               label={item.label}
@@ -617,7 +636,7 @@ function GroupSummary({ summary, total }) {
           ))}
         </SummaryColumn>
       </div>
-    </section>
+    </details>
   );
 }
 
@@ -778,7 +797,7 @@ function AssetTable({ assets, selectedAssetId, onSelect, sort, onSort, sortLabel
           <ColumnVisibilityControl visibleColumns={visibleColumns} onToggleColumn={onToggleColumn} />
         </div>
       </div>
-      <div className="max-h-[calc(100vh-22rem)] overflow-auto">
+      <div className="max-h-[calc(100vh-18rem)] overflow-auto">
         <table className="w-full border-collapse text-sm" style={{ minWidth: `${Math.max(980, renderedColumns.length * 150 + 160)}px` }}>
           <thead className="sticky top-0 z-10 bg-slate-50 text-xs font-bold text-slate-500 shadow-[0_1px_0_rgba(226,232,240,1)]">
             <tr>
@@ -878,20 +897,21 @@ function AssetDetail({ asset }) {
       </section>
 
       <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-        <div className="flex overflow-x-auto border-b border-slate-200 bg-slate-50 px-2 pt-2">
-          {DETAIL_TABS.map(({ id, label, icon: Icon }) => (
+        <div className="grid grid-cols-5 gap-1 border-b border-slate-200 bg-slate-50 p-2">
+          {DETAIL_TABS.map(({ id, label, shortLabel, icon: Icon }) => (
             <button
               key={id}
               type="button"
               onClick={() => setActiveTab(id)}
-              className={`flex h-9 shrink-0 items-center gap-1.5 border-b-2 px-3 text-xs font-bold transition ${
+              title={label}
+              className={`flex h-8 min-w-0 items-center justify-center gap-1 rounded-md px-1.5 text-xs font-bold transition ${
                 activeTab === id
-                  ? 'border-blue-600 text-blue-700'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
+                  ? 'bg-white text-blue-700 shadow-sm ring-1 ring-slate-200'
+                  : 'text-slate-500 hover:bg-white/70 hover:text-slate-800'
               }`}
             >
               <Icon className="h-3.5 w-3.5" />
-              {label}
+              <span className="truncate">{shortLabel}</span>
             </button>
           ))}
         </div>
@@ -1119,8 +1139,8 @@ export default function AssetCenterView({
   }, [assets]);
 
   return (
-    <div className="h-full overflow-auto bg-slate-100 p-4 lg:p-5">
-      <div className="mx-auto max-w-[1920px] space-y-4">
+    <div className="h-full overflow-auto bg-slate-100 p-3 lg:p-4">
+      <div className="mx-auto max-w-[1920px] space-y-3">
         <section className="flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs font-bold text-blue-700">
@@ -1144,7 +1164,7 @@ export default function AssetCenterView({
           </div>
         </section>
 
-        <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+        <section className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-6">
           <IconTile icon={HardDrive} label="资产总数" value={summary.total} subtext={`${filteredAssets.length} 条可见`} tone="text-blue-600" />
           <IconTile icon={CheckCircle2} label="在线运行" value={summary.healthy} subtext={`${summary.offline} 条离线或未检测`} tone="text-emerald-600" />
           <IconTile icon={Database} label="配置备份" value={`${summary.backupRate}%`} subtext="设备配置采集" tone="text-amber-600" />
@@ -1254,7 +1274,7 @@ export default function AssetCenterView({
 
         <GroupSummary summary={groupSummary} total={filteredAssets.length} />
 
-        <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
+        <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_390px]">
           <AssetTable
             assets={sortedAssets}
             selectedAssetId={selectedAsset?.id}
