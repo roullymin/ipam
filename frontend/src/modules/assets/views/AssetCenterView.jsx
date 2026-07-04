@@ -7,6 +7,8 @@ import {
   BarChart3,
   CheckCircle2,
   Clock3,
+  Columns3,
+  ClipboardList,
   Database,
   Filter,
   HardDrive,
@@ -71,6 +73,45 @@ const SORT_LABELS = {
   type: '类型',
   updated: '更新',
 };
+
+const COLUMN_DEFINITIONS = [
+  { id: 'asset', label: '资产', sortKey: 'name', required: true, defaultVisible: true },
+  { id: 'status', label: '在线状态', sortKey: 'status', defaultVisible: true },
+  { id: 'credential', label: '密码', sortKey: 'credential', defaultVisible: true },
+  { id: 'backup', label: '配置备份', sortKey: 'backup', defaultVisible: true },
+  { id: 'automation', label: 'Ansible', sortKey: 'automation', defaultVisible: true },
+  { id: 'recent', label: '最近版本', sortKey: 'updated', defaultVisible: true },
+  { id: 'location', label: '位置', sortKey: 'location', defaultVisible: true },
+  { id: 'owner', label: '责任', sortKey: 'owner', defaultVisible: true },
+  { id: 'type', label: '类型', sortKey: 'type', defaultVisible: false },
+  { id: 'risk', label: '风险', sortKey: 'risk', defaultVisible: true },
+];
+
+const COLUMN_WIDTHS = {
+  asset: 'min-w-[260px]',
+  status: 'min-w-[120px]',
+  credential: 'min-w-[130px]',
+  backup: 'min-w-[150px]',
+  automation: 'min-w-[145px]',
+  recent: 'min-w-[150px]',
+  location: 'min-w-[160px]',
+  owner: 'min-w-[160px]',
+  type: 'min-w-[130px]',
+  risk: 'min-w-[180px]',
+};
+
+const DEFAULT_VISIBLE_COLUMNS = COLUMN_DEFINITIONS.reduce((acc, column) => {
+  acc[column.id] = column.defaultVisible !== false;
+  return acc;
+}, {});
+
+const DETAIL_TABS = [
+  { id: 'basic', label: '基础信息', icon: Server },
+  { id: 'backup', label: '配置备份', icon: Database },
+  { id: 'credential', label: '密码凭据', icon: KeyRound },
+  { id: 'ansible', label: 'Ansible', icon: Terminal },
+  { id: 'changes', label: '变更记录', icon: ClipboardList },
+];
 
 const STATUS_SORT_WEIGHT = {
   offline: 6,
@@ -291,8 +332,21 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, secretsLoa
       specs: device.specs || '',
       relatedIps,
       credential,
-      backup: { status: 'pending', label: '待接入', versionCount: 0, lastBackupAt: null },
-      automation: { managed: false, label: '未纳管', groups: [], lastJobStatus: null },
+      backup: {
+        status: 'pending',
+        label: '待接入',
+        versionCount: 0,
+        latestVersion: '-',
+        lastBackupAt: null,
+        lastResult: '未采集',
+      },
+      automation: {
+        managed: false,
+        label: '未纳管',
+        inventoryName: device.mgmt_ip || device.name || '',
+        groups: [],
+        lastJobStatus: '未执行',
+      },
       riskCodes,
       updatedAt: device.updated_at || device.created_at || '',
     };
@@ -334,8 +388,21 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, secretsLoa
         specs: ip.description || '',
         relatedIps: [ip],
         credential,
-        backup: { status: 'pending', label: '待接入', versionCount: 0, lastBackupAt: null },
-        automation: { managed: false, label: '未纳管', groups: [], lastJobStatus: null },
+        backup: {
+          status: 'pending',
+          label: '待接入',
+          versionCount: 0,
+          latestVersion: '-',
+          lastBackupAt: null,
+          lastResult: '未采集',
+        },
+        automation: {
+          managed: false,
+          label: '未纳管',
+          inventoryName: ip.ip_address || ip.device_name || '',
+          groups: [],
+          lastJobStatus: '未执行',
+        },
         riskCodes,
         updatedAt: ip.last_online || '',
       };
@@ -350,6 +417,17 @@ function filterAssets(assets, filters) {
     if (filters.status !== 'all' && asset.status !== filters.status) return false;
     if (filters.type !== 'all' && asset.type !== filters.type) return false;
     if (filters.risk !== 'all' && !asset.riskCodes.includes(filters.risk)) return false;
+    if (filters.credential !== 'all' && asset.credential.status !== filters.credential) return false;
+    if (filters.backup !== 'all') {
+      const backedUp = asset.backup.versionCount > 0 || asset.backup.status === 'ready';
+      if (filters.backup === 'ready' && !backedUp) return false;
+      if (filters.backup === 'missing' && backedUp) return false;
+      if (!['ready', 'missing'].includes(filters.backup) && asset.backup.status !== filters.backup) return false;
+    }
+    if (filters.automation !== 'all') {
+      if (filters.automation === 'managed' && !asset.automation.managed) return false;
+      if (filters.automation === 'unmanaged' && asset.automation.managed) return false;
+    }
     if (!keyword) return true;
     return [
       asset.name,
@@ -543,49 +621,174 @@ function GroupSummary({ summary, total }) {
   );
 }
 
-function AssetTable({ assets, selectedAssetId, onSelect, sort, onSort, sortLabel }) {
+function ColumnVisibilityControl({ visibleColumns, onToggleColumn }) {
+  return (
+    <details className="relative">
+      <summary className="flex h-8 cursor-pointer list-none items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-600 hover:border-blue-200 hover:text-blue-700">
+        <Columns3 className="h-3.5 w-3.5" />
+        列
+      </summary>
+      <div className="absolute right-0 z-30 mt-2 w-56 rounded-lg border border-slate-200 bg-white p-2 shadow-xl">
+        {COLUMN_DEFINITIONS.map((column) => (
+          <label key={column.id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+            <input
+              type="checkbox"
+              checked={!!visibleColumns[column.id]}
+              disabled={column.required}
+              onChange={() => onToggleColumn(column.id)}
+              className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            />
+            <span>{column.label}</span>
+            {column.required ? <span className="ml-auto text-[11px] text-slate-400">固定</span> : null}
+          </label>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+const backupTone = (backup) => {
+  if ((backup?.versionCount || 0) > 0 || backup?.status === 'ready') return 'bg-emerald-50 text-emerald-700 ring-emerald-200';
+  if (backup?.status === 'failed') return 'bg-rose-50 text-rose-700 ring-rose-200';
+  return 'bg-amber-50 text-amber-700 ring-amber-200';
+};
+
+const automationTone = (automation) => (
+  automation?.managed
+    ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+    : 'bg-slate-100 text-slate-600 ring-slate-200'
+);
+
+function renderAssetCell(asset, columnId) {
+  if (columnId === 'asset') {
+    return (
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-md bg-slate-900 text-white">
+          <HardDrive className="h-4 w-4" />
+        </div>
+        <div className="min-w-0">
+          <div className="font-bold text-slate-950">{asset.name}</div>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            <span>{asset.typeLabel}</span>
+            {asset.managementIp ? <span className="font-mono">{asset.managementIp}</span> : null}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (columnId === 'status') {
+    return <Pill tone={STATUS_TONES[asset.status] || STATUS_TONES.unknown}>{STATUS_LABELS[asset.status] || asset.status}</Pill>;
+  }
+
+  if (columnId === 'credential') {
+    return (
+      <div>
+        <Pill tone={SECRET_TONES[asset.credential.status]}>{SECRET_LABELS[asset.credential.status]}</Pill>
+        <div className="mt-1 text-xs text-slate-500">{asset.credential.count} 条凭据</div>
+      </div>
+    );
+  }
+
+  if (columnId === 'backup') {
+    return (
+      <div>
+        <Pill tone={backupTone(asset.backup)}>{asset.backup.label}</Pill>
+        <div className="mt-1 text-xs text-slate-500">{asset.backup.versionCount} 个版本</div>
+      </div>
+    );
+  }
+
+  if (columnId === 'automation') {
+    return (
+      <div>
+        <Pill tone={automationTone(asset.automation)}>{asset.automation.label}</Pill>
+        <div className="mt-1 text-xs text-slate-500">{asset.automation.inventoryName || '-'}</div>
+      </div>
+    );
+  }
+
+  if (columnId === 'recent') {
+    return (
+      <div className="text-xs text-slate-500">
+        <div className="font-bold text-slate-800">{asset.backup.latestVersion || '-'}</div>
+        <div className="mt-1">{formatTime(asset.backup.lastBackupAt || asset.updatedAt)}</div>
+      </div>
+    );
+  }
+
+  if (columnId === 'location') {
+    return (
+      <div className="text-slate-600">
+        <div className="font-semibold text-slate-800">{asset.datacenterName || '-'}</div>
+        <div className="mt-1 text-xs">{[asset.rackCode, asset.rackPosition].filter(Boolean).join(' / ') || '-'}</div>
+      </div>
+    );
+  }
+
+  if (columnId === 'owner') {
+    return (
+      <div className="text-slate-600">
+        <div className="font-semibold text-slate-800">{asset.project || '-'}</div>
+        <div className="mt-1 text-xs">{asset.contact || '-'}</div>
+      </div>
+    );
+  }
+
+  if (columnId === 'type') {
+    return (
+      <div>
+        <div className="font-semibold text-slate-800">{asset.typeLabel}</div>
+        <div className="mt-1 text-xs text-slate-500">{asset.vendor || '-'}</div>
+      </div>
+    );
+  }
+
+  if (columnId === 'risk') {
+    return (
+      <div className="flex max-w-[180px] flex-wrap gap-1.5">
+        {asset.riskCodes.length ? (
+          asset.riskCodes.slice(0, 3).map((risk) => (
+            <Pill key={risk} tone="bg-rose-50 text-rose-700 ring-rose-200">{RISK_LABELS[risk]}</Pill>
+          ))
+        ) : (
+          <Pill tone="bg-emerald-50 text-emerald-700 ring-emerald-200">正常</Pill>
+        )}
+      </div>
+    );
+  }
+
+  return '-';
+}
+
+function AssetTable({ assets, selectedAssetId, onSelect, sort, onSort, sortLabel, visibleColumns, onToggleColumn }) {
   if (assets.length === 0) return <EmptyState />;
+  const renderedColumns = COLUMN_DEFINITIONS.filter((column) => visibleColumns[column.id]);
 
   return (
     <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
       <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
         <div>
           <div className="text-sm font-black text-slate-950">资产清单</div>
-          <div className="mt-0.5 text-xs text-slate-500">点击表头可排序，点击行查看右侧资产档案。</div>
+          <div className="mt-0.5 text-xs text-slate-500">点击表头排序，点击行查看右侧资产档案；列可按当前工作场景开关。</div>
         </div>
         <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
           <span className="rounded-md bg-slate-100 px-2.5 py-1">{assets.length} 条</span>
           <span className="rounded-md bg-blue-50 px-2.5 py-1 text-blue-700">{sortLabel}</span>
+          <ColumnVisibilityControl visibleColumns={visibleColumns} onToggleColumn={onToggleColumn} />
         </div>
       </div>
       <div className="max-h-[calc(100vh-22rem)] overflow-auto">
-        <table className="min-w-[1160px] w-full border-collapse text-sm">
+        <table className="w-full border-collapse text-sm" style={{ minWidth: `${Math.max(980, renderedColumns.length * 150 + 160)}px` }}>
           <thead className="sticky top-0 z-10 bg-slate-50 text-xs font-bold text-slate-500 shadow-[0_1px_0_rgba(226,232,240,1)]">
             <tr>
-              <th className="px-4 py-3 text-left">
-                <SortHeader sortKey="name" sort={sort} onSort={onSort}>资产</SortHeader>
-              </th>
-              <th className="px-4 py-3 text-left">
-                <SortHeader sortKey="location" sort={sort} onSort={onSort}>位置</SortHeader>
-              </th>
-              <th className="px-4 py-3 text-left">
-                <SortHeader sortKey="status" sort={sort} onSort={onSort}>状态</SortHeader>
-              </th>
-              <th className="px-4 py-3 text-left">
-                <SortHeader sortKey="backup" sort={sort} onSort={onSort}>配置备份</SortHeader>
-              </th>
-              <th className="px-4 py-3 text-left">
-                <SortHeader sortKey="credential" sort={sort} onSort={onSort}>密码</SortHeader>
-              </th>
-              <th className="px-4 py-3 text-left">
-                <SortHeader sortKey="automation" sort={sort} onSort={onSort}>自动化</SortHeader>
-              </th>
-              <th className="px-4 py-3 text-left">
-                <SortHeader sortKey="owner" sort={sort} onSort={onSort}>责任</SortHeader>
-              </th>
-              <th className="px-4 py-3 text-left">
-                <SortHeader sortKey="risk" sort={sort} onSort={onSort}>风险</SortHeader>
-              </th>
+              {renderedColumns.map((column) => (
+                <th key={column.id} className={`px-4 py-3 text-left ${COLUMN_WIDTHS[column.id] || ''}`}>
+                  {column.sortKey ? (
+                    <SortHeader sortKey={column.sortKey} sort={sort} onSort={onSort}>{column.label}</SortHeader>
+                  ) : column.label}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -597,54 +800,11 @@ function AssetTable({ assets, selectedAssetId, onSelect, sort, onSort, sortLabel
                   className={`cursor-pointer align-top transition ${selected ? 'bg-blue-50/80 shadow-[inset_3px_0_0_#2563eb]' : 'hover:bg-slate-50'}`}
                   onClick={() => onSelect(asset.id)}
                 >
-                  <td className="border-b border-slate-100 px-4 py-3">
-                    <div className="flex items-start gap-3">
-                      <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-md bg-slate-900 text-white">
-                        <HardDrive className="h-4 w-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="font-bold text-slate-950">{asset.name}</div>
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                          <span>{asset.typeLabel}</span>
-                          {asset.managementIp ? <span className="font-mono">{asset.managementIp}</span> : null}
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="border-b border-slate-100 px-4 py-3 text-slate-600">
-                    <div className="font-semibold text-slate-800">{asset.datacenterName || '-'}</div>
-                    <div className="mt-1 text-xs">{[asset.rackCode, asset.rackPosition].filter(Boolean).join(' / ') || '-'}</div>
-                  </td>
-                  <td className="border-b border-slate-100 px-4 py-3">
-                    <Pill tone={STATUS_TONES[asset.status] || STATUS_TONES.unknown}>{STATUS_LABELS[asset.status] || asset.status}</Pill>
-                  </td>
-                  <td className="border-b border-slate-100 px-4 py-3">
-                    <Pill tone="bg-amber-50 text-amber-700 ring-amber-200">{asset.backup.label}</Pill>
-                    <div className="mt-1 text-xs text-slate-500">{asset.backup.versionCount} 个版本</div>
-                  </td>
-                  <td className="border-b border-slate-100 px-4 py-3">
-                    <Pill tone={SECRET_TONES[asset.credential.status]}>{SECRET_LABELS[asset.credential.status]}</Pill>
-                    <div className="mt-1 text-xs text-slate-500">{asset.credential.count} 条</div>
-                  </td>
-                  <td className="border-b border-slate-100 px-4 py-3">
-                    <Pill tone="bg-slate-100 text-slate-600 ring-slate-200">{asset.automation.label}</Pill>
-                    <div className="mt-1 text-xs text-slate-500">{asset.automation.groups.length || 0} 组</div>
-                  </td>
-                  <td className="border-b border-slate-100 px-4 py-3 text-slate-600">
-                    <div className="font-semibold text-slate-800">{asset.project || '-'}</div>
-                    <div className="mt-1 text-xs">{asset.contact || '-'}</div>
-                  </td>
-                  <td className="border-b border-slate-100 px-4 py-3">
-                    <div className="flex max-w-[180px] flex-wrap gap-1.5">
-                      {asset.riskCodes.length ? (
-                        asset.riskCodes.slice(0, 3).map((risk) => (
-                          <Pill key={risk} tone="bg-rose-50 text-rose-700 ring-rose-200">{RISK_LABELS[risk]}</Pill>
-                        ))
-                      ) : (
-                        <Pill tone="bg-emerald-50 text-emerald-700 ring-emerald-200">正常</Pill>
-                      )}
-                    </div>
-                  </td>
+                  {renderedColumns.map((column) => (
+                    <td key={column.id} className="border-b border-slate-100 px-4 py-3">
+                      {renderAssetCell(asset, column.id)}
+                    </td>
+                  ))}
                 </tr>
               );
             })}
@@ -679,6 +839,8 @@ function InfoRow({ label, value, mono = false }) {
 }
 
 function AssetDetail({ asset }) {
+  const [activeTab, setActiveTab] = useState('basic');
+
   if (!asset) {
     return (
       <div className="rounded-lg border border-dashed border-slate-300 bg-white/70 p-5 text-sm text-slate-500">
@@ -715,6 +877,27 @@ function AssetDetail({ asset }) {
         </div>
       </section>
 
+      <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+        <div className="flex overflow-x-auto border-b border-slate-200 bg-slate-50 px-2 pt-2">
+          {DETAIL_TABS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setActiveTab(id)}
+              className={`flex h-9 shrink-0 items-center gap-1.5 border-b-2 px-3 text-xs font-bold transition ${
+                activeTab === id
+                  ? 'border-blue-600 text-blue-700'
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {label}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {activeTab === 'basic' ? (
       <DetailBlock icon={MapPin} title="身份与位置">
         <InfoRow label="厂商" value={asset.vendor} />
         <InfoRow label="型号" value={asset.model} />
@@ -723,7 +906,9 @@ function AssetDetail({ asset }) {
         <InfoRow label="资产编号" value={asset.assetTag} />
         <InfoRow label="机柜位置" value={[asset.rackCode, asset.rackPosition].filter(Boolean).join(' / ')} />
       </DetailBlock>
+      ) : null}
 
+      {activeTab === 'backup' ? (
       <DetailBlock icon={Database} title="配置备份">
         <div className="grid grid-cols-3 gap-2">
           <div className="rounded-md bg-amber-50 p-2.5">
@@ -739,8 +924,13 @@ function AssetDetail({ asset }) {
             <div className="mt-1 text-sm font-black text-slate-900">{formatTime(asset.backup.lastBackupAt)}</div>
           </div>
         </div>
+        <div className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
+          最近配置版本：<span className="font-mono font-bold text-slate-700">{asset.backup.latestVersion || '-'}</span>；最近结果：{asset.backup.lastResult || '-'}。
+        </div>
       </DetailBlock>
+      ) : null}
 
+      {activeTab === 'credential' ? (
       <DetailBlock icon={KeyRound} title="密码状态">
         <div className="flex items-center justify-between gap-3">
           <Pill tone={SECRET_TONES[asset.credential.status]}>{SECRET_LABELS[asset.credential.status]}</Pill>
@@ -761,15 +951,27 @@ function AssetDetail({ asset }) {
             ))}
           </div>
         ) : null}
+        {!asset.credential.items.length ? (
+          <div className="mt-3 rounded-md bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">
+            当前资产还没有绑定可用于登录或自动化的密码凭据。
+          </div>
+        ) : null}
       </DetailBlock>
+      ) : null}
 
+      {activeTab === 'ansible' ? (
       <DetailBlock icon={Terminal} title="自动化">
         <InfoRow label="Ansible" value={asset.automation.label} />
         <InfoRow label="Inventory" value={asset.automation.inventoryName} />
         <InfoRow label="分组" value={asset.automation.groups.join(', ')} />
         <InfoRow label="最近任务" value={asset.automation.lastJobStatus} />
+        <div className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
+          建议先用只读任务验证连通性，例如 ping、show version、show running-config，再开放批量执行。
+        </div>
       </DetailBlock>
+      ) : null}
 
+      {activeTab === 'basic' ? (
       <DetailBlock icon={Network} title="关联 IP">
         {asset.relatedIps.length ? (
           <div className="space-y-2">
@@ -784,6 +986,26 @@ function AssetDetail({ asset }) {
           <div className="text-sm text-slate-500">暂无关联 IP。</div>
         )}
       </DetailBlock>
+      ) : null}
+
+      {activeTab === 'changes' ? (
+        <DetailBlock icon={ClipboardList} title="变更记录">
+          <div className="space-y-2">
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-bold text-slate-800">资产档案同步</span>
+                <span className="text-xs text-slate-500">{formatTime(asset.updatedAt)}</span>
+              </div>
+              <div className="mt-1 text-xs text-slate-500">
+                由资产中心根据机房设备、IP、密码本数据聚合生成。后续可接入申请中心审批记录。
+              </div>
+            </div>
+            <div className="rounded-md border border-dashed border-slate-200 px-3 py-2 text-xs leading-5 text-slate-500">
+              暂无更多人工变更记录。
+            </div>
+          </div>
+        </DetailBlock>
+      ) : null}
     </div>
   );
 }
@@ -802,6 +1024,10 @@ export default function AssetCenterView({
   const [status, setStatus] = useState('all');
   const [type, setType] = useState('all');
   const [risk, setRisk] = useState('all');
+  const [credentialFilter, setCredentialFilter] = useState('all');
+  const [backupFilter, setBackupFilter] = useState('all');
+  const [automationFilter, setAutomationFilter] = useState('all');
+  const [visibleColumns, setVisibleColumns] = useState(DEFAULT_VISIBLE_COLUMNS);
   const [selectedAssetId, setSelectedAssetId] = useState(null);
   const [sortConfig, setSortConfig] = useState({ key: 'risk', direction: 'desc' });
   const secretsLoaded = !dataErrors?.secrets;
@@ -812,8 +1038,16 @@ export default function AssetCenterView({
   );
 
   const filteredAssets = useMemo(
-    () => filterAssets(assets, { keyword, status, type, risk }),
-    [assets, keyword, risk, status, type],
+    () => filterAssets(assets, {
+      keyword,
+      status,
+      type,
+      risk,
+      credential: credentialFilter,
+      backup: backupFilter,
+      automation: automationFilter,
+    }),
+    [assets, automationFilter, backupFilter, credentialFilter, keyword, risk, status, type],
   );
 
   const sortedAssets = useMemo(
@@ -850,6 +1084,15 @@ export default function AssetCenterView({
     setSortConfig({ key, direction });
   };
 
+  const handleToggleColumn = (columnId) => {
+    const column = COLUMN_DEFINITIONS.find((item) => item.id === columnId);
+    if (!column || column.required) return;
+    setVisibleColumns((current) => ({
+      ...current,
+      [columnId]: !current[columnId],
+    }));
+  };
+
 
   const typeOptions = useMemo(() => {
     const entries = new Map();
@@ -861,14 +1104,16 @@ export default function AssetCenterView({
     const healthyStatuses = new Set(['active', 'online']);
     const offlineStatuses = new Set(['offline', 'unknown']);
     const credentialReady = assets.filter((asset) => asset.credential.status === 'active').length;
+    const backupReady = assets.filter((asset) => asset.backup.versionCount > 0 || asset.backup.status === 'ready').length;
+    const automationReady = assets.filter((asset) => asset.automation.managed).length;
     const riskAssets = assets.filter((asset) => asset.riskCodes.length > 0).length;
     return {
       total: assets.length,
       healthy: assets.filter((asset) => healthyStatuses.has(asset.status)).length,
       offline: assets.filter((asset) => offlineStatuses.has(asset.status)).length,
       credentialRate: assets.length ? Math.round((credentialReady / assets.length) * 100) : 0,
-      backupRate: 0,
-      automationRate: 0,
+      backupRate: assets.length ? Math.round((backupReady / assets.length) * 100) : 0,
+      automationRate: assets.length ? Math.round((automationReady / assets.length) * 100) : 0,
       riskAssets,
     };
   }, [assets]);
@@ -909,7 +1154,7 @@ export default function AssetCenterView({
         </section>
 
         <section className="sticky top-0 z-20 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-          <div className="grid gap-2 lg:grid-cols-[minmax(240px,1.4fr)_170px_170px_170px_200px_auto]">
+          <div className="grid gap-2 xl:grid-cols-[minmax(280px,1.1fr)_minmax(0,2fr)]">
             <label className="relative block">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
@@ -919,55 +1164,90 @@ export default function AssetCenterView({
                 placeholder="搜索名称、IP、序列号、项目、负责人"
               />
             </label>
-            <select
-              value={status}
-              onChange={(event) => setStatus(event.target.value)}
-              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-            >
-              <option value="all">全部状态</option>
-              <option value="active">运行中</option>
-              <option value="online">在线</option>
-              <option value="offline">离线</option>
-              <option value="maintenance">维护中</option>
-              <option value="planned">规划中</option>
-              <option value="retired">已退役</option>
-              <option value="unknown">未检测</option>
-            </select>
-            <select
-              value={type}
-              onChange={(event) => setType(event.target.value)}
-              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-            >
-              <option value="all">全部类型</option>
-              {typeOptions.map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </select>
-            <select
-              value={risk}
-              onChange={(event) => setRisk(event.target.value)}
-              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-            >
-              <option value="all">全部风险</option>
-              <option value="offline">不可达</option>
-              <option value="credential">密码未受控</option>
-              <option value="backup">配置未接入</option>
-              <option value="automation">未纳管</option>
-            </select>
-            <select
-              value={sortOptionValue}
-              onChange={handleSortOptionChange}
-              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-              title="排序方式"
-            >
-              {hasPresetSortOption ? null : <option value={sortOptionValue}>{currentSortLabel}</option>}
-              {SORT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-            <div className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-600">
-              <Filter className="h-4 w-4 text-slate-400" />
-              {filteredAssets.length}
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-[repeat(7,minmax(120px,1fr))_90px]">
+              <select
+                value={status}
+                onChange={(event) => setStatus(event.target.value)}
+                className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+              >
+                <option value="all">全部状态</option>
+                <option value="active">运行中</option>
+                <option value="online">在线</option>
+                <option value="offline">离线</option>
+                <option value="maintenance">维护中</option>
+                <option value="planned">规划中</option>
+                <option value="retired">已退役</option>
+                <option value="unknown">未检测</option>
+              </select>
+              <select
+                value={type}
+                onChange={(event) => setType(event.target.value)}
+                className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+              >
+                <option value="all">全部类型</option>
+                {typeOptions.map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+              <select
+                value={risk}
+                onChange={(event) => setRisk(event.target.value)}
+                className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+              >
+                <option value="all">全部风险</option>
+                <option value="offline">不可达</option>
+                <option value="credential">密码未受控</option>
+                <option value="backup">配置未接入</option>
+                <option value="automation">未纳管</option>
+              </select>
+              <select
+                value={credentialFilter}
+                onChange={(event) => setCredentialFilter(event.target.value)}
+                className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+              >
+                <option value="all">全部密码</option>
+                <option value="active">已受控</option>
+                <option value="missing">未绑定</option>
+                <option value="expiring">即将过期</option>
+                <option value="expired">已过期</option>
+                <option value="disabled">已停用</option>
+                <option value="unavailable">未加载</option>
+              </select>
+              <select
+                value={backupFilter}
+                onChange={(event) => setBackupFilter(event.target.value)}
+                className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+              >
+                <option value="all">全部备份</option>
+                <option value="ready">已接入</option>
+                <option value="missing">未接入</option>
+                <option value="pending">待接入</option>
+                <option value="failed">失败</option>
+              </select>
+              <select
+                value={automationFilter}
+                onChange={(event) => setAutomationFilter(event.target.value)}
+                className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+              >
+                <option value="all">全部纳管</option>
+                <option value="managed">已纳管</option>
+                <option value="unmanaged">未纳管</option>
+              </select>
+              <select
+                value={sortOptionValue}
+                onChange={handleSortOptionChange}
+                className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                title="排序方式"
+              >
+                {hasPresetSortOption ? null : <option value={sortOptionValue}>{currentSortLabel}</option>}
+                {SORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+              <div className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-600">
+                <Filter className="h-4 w-4 text-slate-400" />
+                {filteredAssets.length}
+              </div>
             </div>
           </div>
         </section>
@@ -982,6 +1262,8 @@ export default function AssetCenterView({
             sort={sortConfig}
             onSort={handleSort}
             sortLabel={sortDisplayLabel}
+            visibleColumns={visibleColumns}
+            onToggleColumn={handleToggleColumn}
           />
           <aside className="xl:sticky xl:top-4 xl:self-start">
             <AssetDetail asset={selectedAsset} />
