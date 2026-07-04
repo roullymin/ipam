@@ -78,7 +78,7 @@ export default function ResidentTable({
   approvalBadgeStyles,
 }) {
   return (
-    <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
       <table className="w-full border-collapse text-left text-sm text-slate-600">
         <thead className="border-b border-slate-100 bg-slate-50 text-[10px] uppercase text-slate-400">
           <tr>

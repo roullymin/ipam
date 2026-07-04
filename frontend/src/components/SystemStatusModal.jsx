@@ -14,7 +14,7 @@ const formatDateTime = (value) => {
 const StatCard = ({ icon: Icon, label, value, hint, tone = 'slate' }) => {
   const tones = {
     slate: 'border-slate-200 bg-slate-50',
-    cyan: 'border-cyan-200 bg-cyan-50',
+    blue: 'border-blue-200 bg-blue-50',
     amber: 'border-amber-200 bg-amber-50',
     emerald: 'border-emerald-200 bg-emerald-50',
   };
@@ -61,7 +61,7 @@ export default function SystemStatusModal({
           <button
             onClick={onRefresh}
             type="button"
-            className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:border-cyan-200 hover:text-cyan-700"
+            className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:border-blue-200 hover:text-blue-700"
           >
             <RefreshCw className={`mr-2 h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             刷新状态
@@ -88,7 +88,7 @@ export default function SystemStatusModal({
             label="基础资产"
             value={`${counts?.datacenters ?? 0} / ${counts?.racks ?? 0}`}
             hint={`机房 ${counts?.datacenters ?? 0} 个，机柜 ${counts?.racks ?? 0} 个`}
-            tone="cyan"
+            tone="blue"
           />
           <StatCard
             icon={Activity}
@@ -102,7 +102,7 @@ export default function SystemStatusModal({
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
-              <GitBranch className="h-4 w-4 text-cyan-600" />
+              <GitBranch className="h-4 w-4 text-blue-600" />
               前后端版本明细
             </div>
             <div className="mt-4 space-y-4 text-sm text-slate-600">
@@ -125,7 +125,7 @@ export default function SystemStatusModal({
 
           <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
-              <TimerReset className="h-4 w-4 text-cyan-600" />
+              <TimerReset className="h-4 w-4 text-blue-600" />
               部署后检查建议
             </div>
             <div className="mt-4 space-y-3 text-sm leading-6 text-slate-600">
@@ -142,7 +142,7 @@ export default function SystemStatusModal({
 
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
-            <Activity className="h-4 w-4 text-cyan-600" />
+            <Activity className="h-4 w-4 text-blue-600" />
             固定验收步骤
           </div>
           <div className="mt-4 grid gap-4 lg:grid-cols-2">

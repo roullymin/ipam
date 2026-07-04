@@ -4,6 +4,7 @@ import {
   ChevronRight, ChevronDown, Edit2, Trash2,
   X, Save, Plus, Upload, Download, Lock, KeyRound,
   MapPin, Box, Shield, Activity, Users, Database, Settings,
+  Gauge, Boxes, ServerCog, ClipboardList, DatabaseBackup, UserCog, Building2,
   AlertTriangle, CheckCircle2, Grid as GridIcon, List as ListIcon, Loader2, 
   ArrowLeftRight,
   Zap, Calculator, HardDrive, AlignLeft, Info,
@@ -85,16 +86,16 @@ const ROLE_DEFINITIONS = {
 };
 
 const TAB_CONFIG = {
-  dashboard: { icon: LayoutDashboard, label: BRAND.navigation.dashboard },
-  assets: { icon: HardDrive, label: BRAND.navigation.assets || '资产中心' },
-  list: { icon: Server, label: BRAND.navigation.list },
-  dcim: { icon: Box, label: BRAND.navigation.dcim },
-  changes: { icon: ArrowLeftRight, label: BRAND.navigation.changes || '申请中心' },
-  resident: { icon: Users, label: BRAND.navigation.resident },
+  dashboard: { icon: Gauge, label: BRAND.navigation.dashboard },
+  assets: { icon: Boxes, label: BRAND.navigation.assets || '资产中心' },
+  list: { icon: Network, label: BRAND.navigation.list },
+  dcim: { icon: ServerCog, label: BRAND.navigation.dcim },
+  changes: { icon: ClipboardList, label: BRAND.navigation.changes || '申请中心' },
+  resident: { icon: Building2, label: BRAND.navigation.resident },
   vault: { icon: KeyRound, label: '密码本' },
-  security: { icon: Shield, label: BRAND.navigation.security },
-  backup: { icon: Database, label: BRAND.navigation.backup },
-  users: { icon: Users, label: BRAND.navigation.users }
+  security: { icon: ShieldCheck, label: BRAND.navigation.security },
+  backup: { icon: DatabaseBackup, label: BRAND.navigation.backup },
+  users: { icon: UserCog, label: BRAND.navigation.users }
 };
 
 const HISTORY_TRACKED_FIELDS = [

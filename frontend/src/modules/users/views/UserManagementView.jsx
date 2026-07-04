@@ -19,7 +19,7 @@ const formatTime = (value) => {
 const roleToneMap = {
   admin: 'bg-blue-50 text-blue-700 border-blue-100',
   dc_operator: 'bg-emerald-50 text-emerald-700 border-emerald-100',
-  ip_manager: 'bg-cyan-50 text-cyan-700 border-cyan-100',
+  ip_manager: 'bg-blue-50 text-blue-700 border-blue-100',
   auditor: 'bg-amber-50 text-amber-700 border-amber-100',
   guest: 'bg-slate-100 text-slate-600 border-slate-200',
 };
@@ -48,8 +48,8 @@ export default function UserManagementView({
   const lockedUsers = users.filter((user) => user.locked_until).length;
 
   return (
-    <div className="custom-scrollbar h-full overflow-y-auto p-6 md:p-8">
-      <div className="mx-auto max-w-7xl space-y-6">
+    <div className="custom-scrollbar h-full overflow-y-auto bg-slate-100 p-4 lg:p-5">
+      <div className="mx-auto max-w-[1600px] space-y-4">
         <UserOverview
           users={users}
           enabledUsers={enabledUsers}

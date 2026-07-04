@@ -5,10 +5,10 @@ import DashboardPanel from './DashboardPanel';
 
 function VersionCard({ label, value, helper }) {
   return (
-    <div className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">{label}</div>
-      <div className="mt-2 text-lg font-black tracking-tight text-slate-900">{value}</div>
-      <div className="mt-2 text-sm leading-6 text-slate-500">{helper}</div>
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+      <div className="text-xs font-bold text-slate-500">{label}</div>
+      <div className="mt-2 truncate text-base font-black text-slate-900">{value}</div>
+      <div className="mt-1 text-sm leading-5 text-slate-500">{helper}</div>
     </div>
   );
 }
@@ -21,7 +21,7 @@ export default function DashboardVersionStatusPanel({
 }) {
   return (
     <DashboardPanel title="版本与部署状态" subtitle="避免每次都进弹层或 SSH 排查。">
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-2">
         <VersionCard
           label="前端版本"
           value={`${BUILD_INFO.version} · ${shortCommitLabel(BUILD_INFO.commit)}`}
@@ -43,7 +43,7 @@ export default function DashboardVersionStatusPanel({
           helper="建议先扫描、快照，再应用修复。"
         />
       </div>
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
         <div className="flex flex-wrap gap-3">
           <span>页面刷新：{formatDateTime(lastRefreshedAt)}</span>
           <span>前端分支：{BUILD_INFO.branch || '未知'}</span>
@@ -51,7 +51,7 @@ export default function DashboardVersionStatusPanel({
         </div>
         <button
           onClick={onOpenSystemStatus}
-          className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
           type="button"
         >
           打开系统状态

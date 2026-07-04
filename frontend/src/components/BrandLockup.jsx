@@ -42,7 +42,7 @@ export default function BrandLockup({
   const palette = inverse
     ? {
         title: 'text-white',
-        subtitle: 'text-cyan-100/70',
+        subtitle: 'text-blue-100/70',
         tagline: 'text-slate-200/80',
       }
     : {
@@ -55,12 +55,12 @@ export default function BrandLockup({
   return (
     <div className={`flex items-center gap-4 ${className}`.trim()}>
       <div
-        className={`brand-mark relative ${config.mark} overflow-hidden rounded-[28px] border border-white/20 shadow-[0_18px_34px_rgba(8,24,43,0.22)]`}
+        className={`brand-mark relative ${config.mark} overflow-hidden rounded-xl border border-white/20 shadow-sm`}
         aria-hidden="true"
       >
         <span className="brand-mark__glow absolute inset-0"></span>
-        <span className="brand-mark__ring brand-mark__ring--outer absolute inset-[5px] rounded-[22px]"></span>
-        <span className="brand-mark__ring brand-mark__ring--inner absolute inset-[13px] rounded-[18px]"></span>
+        <span className="brand-mark__ring brand-mark__ring--outer absolute inset-[5px] rounded-lg"></span>
+        <span className="brand-mark__ring brand-mark__ring--inner absolute inset-[13px] rounded-md"></span>
         <span
           className={`brand-mark__core absolute left-1/2 top-1/2 ${config.core} -translate-x-1/2 -translate-y-1/2 rounded-full`}
         ></span>
@@ -69,10 +69,10 @@ export default function BrandLockup({
       </div>
 
       <div className="min-w-0">
-        <div className={`brand-display ${config.title} font-black tracking-tight ${palette.title}`}>
+        <div className={`brand-display ${config.title} font-black ${palette.title}`}>
           {BRAND.name}
         </div>
-        <div className={`${config.subtitle} font-semibold uppercase tracking-[0.26em] ${palette.subtitle}`}>
+        <div className={`${config.subtitle} font-semibold uppercase ${palette.subtitle}`}>
           {BRAND.englishName}
         </div>
         {showTagline && (

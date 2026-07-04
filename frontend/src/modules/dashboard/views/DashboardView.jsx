@@ -260,8 +260,8 @@ export default function DashboardView({
   ].filter(Boolean);
 
   return (
-    <div className="custom-scrollbar h-full overflow-y-auto p-6 md:p-8">
-      <div className="mx-auto max-w-7xl space-y-6">
+    <div className="custom-scrollbar h-full overflow-y-auto bg-slate-100 p-4 lg:p-5">
+      <div className="mx-auto max-w-[1600px] space-y-4">
         <DashboardHero
           eyebrow={BRAND.navigation.dashboard}
           title={roleConfig.title}
@@ -270,7 +270,7 @@ export default function DashboardView({
           summaryTiles={heroSummaryTiles}
         />
 
-        <section className="grid gap-6 xl:grid-cols-[1fr_1fr]">
+        <section className="grid gap-4 xl:grid-cols-[1fr_1fr]">
           <DashboardQuickActions
             title={`${currentUserDisplay || '当前用户'} 的快捷入口`}
             subtitle="卡片直接带你进入对应工作区，而不是只停留在统计层。"
@@ -280,7 +280,7 @@ export default function DashboardView({
           <DashboardPriorityCards items={visibleActionCards} onNavigate={onNavigate} />
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[1.06fr_0.94fr]">
+        <section className="grid gap-4 xl:grid-cols-[1.06fr_0.94fr]">
           <DashboardDatacenterHeatPanel datacenters={dashboard.locationStats} onJumpToDc={onJumpToDc} />
           <DashboardRecentActivityPanel
             logs={logs}
@@ -289,7 +289,7 @@ export default function DashboardView({
           />
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[1fr_1fr]">
+        <section className="grid gap-4 xl:grid-cols-[1fr_1fr]">
           <DashboardAdvicePanel items={adviceItems} />
           <DashboardVersionStatusPanel
             overview={overview}

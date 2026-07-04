@@ -49,7 +49,7 @@ const actionLabel = (action) => {
 
 const actionTone = (action) => {
   if (action === 'create') return 'text-emerald-600';
-  if (action === 'update') return 'text-cyan-700';
+  if (action === 'update') return 'text-blue-700';
   if (action === 'skip') return 'text-amber-700';
   return 'text-rose-700';
 };
@@ -303,7 +303,7 @@ export default function ImportWizardModal({ file, onClose, onConfirm, context = 
                   {preview?.detected_encoding ? `检测编码：${preview.detected_encoding}` : copy.previewPendingText}
                 </p>
               </div>
-              {isPreviewLoading ? <Loader2 className="h-4 w-4 animate-spin text-cyan-600" /> : null}
+              {isPreviewLoading ? <Loader2 className="h-4 w-4 animate-spin text-blue-600" /> : null}
             </div>
 
             {previewError ? (

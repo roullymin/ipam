@@ -440,7 +440,7 @@ export default function ResidentManagementView({ residentStaff, onRefresh, initi
   };
 
   return (
-    <div className="h-full overflow-y-auto p-8 animate-in fade-in duration-500">
+    <div className="h-full overflow-y-auto bg-slate-50/70 p-3 lg:p-4 animate-in fade-in duration-500">
       <input
         ref={fileInputRef}
         type="file"
@@ -449,7 +449,7 @@ export default function ResidentManagementView({ residentStaff, onRefresh, initi
         onChange={handleImport}
       />
 
-      <div className="mx-auto max-w-7xl space-y-6">
+      <div className="mx-auto max-w-[1600px] space-y-3">
         <ResidentOverview stats={stats} onOpenCreate={openCreate} />
 
         <ResidentRegistrationCard

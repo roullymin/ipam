@@ -777,51 +777,46 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
   }
 
   return (
-    <div className="custom-scrollbar h-full overflow-y-auto p-6 xl:p-8">
-      <div className="mx-auto max-w-7xl space-y-5">
-        <section className="rounded-[28px] border border-slate-200 bg-white px-6 py-6 shadow-sm">
-          <div className="flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <div className="text-sm font-semibold text-sky-600">统一申请中心</div>
-              <h2 className="mt-3 text-[30px] font-black tracking-tight text-slate-900">把设备变更和协助事项都放进同一个申请入口</h2>
-              <p className="mt-3 max-w-4xl text-sm leading-6 text-slate-500">管理员先预填基础信息，再生成带时效的独立链接发给对方补充内容。设备类申请继续支持位置、U 位和 IP 预填，协助事项则直接走协助缘由与内容审批。</p>
+    <div className="custom-scrollbar h-full overflow-y-auto bg-slate-50/70 p-3 lg:p-4">
+      <div className="mx-auto max-w-[1600px] space-y-3">
+        <section className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-bold text-blue-700">统一申请中心</div>
+              <h2 className="mt-1 truncate text-lg font-black text-slate-900">设备变更与协助申请入口</h2>
+              <p className="mt-1 max-w-4xl text-xs leading-5 text-slate-500">预填基础信息后生成独立时效链接；设备申请支持位置、U 位和 IP 预填，协助事项直接进入内容审批。</p>
             </div>
-            <div className="flex flex-wrap gap-3">
-              <button onClick={loadData} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50" type="button"><RefreshCw className="h-4 w-4" />刷新</button>
-              <button onClick={() => { resetForm(); setDraftError(''); setOpen(true); }} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700" type="button"><Plus className="h-4 w-4" />新建草稿</button>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={loadData} className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:border-blue-200 hover:text-blue-700" type="button"><RefreshCw className="h-4 w-4" />刷新</button>
+              <button onClick={() => { resetForm(); setDraftError(''); setOpen(true); }} className="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-bold text-white hover:bg-blue-700" type="button"><Plus className="h-4 w-4" />新建草稿</button>
             </div>
           </div>
-          {error ? <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
-          {notice ? <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</div> : null}
+          {error ? <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
+          {notice ? <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{notice}</div> : null}
         </section>
 
-        <section className="rounded-[24px] border border-sky-200 bg-gradient-to-r from-sky-50 via-white to-cyan-50 px-6 py-5 shadow-sm">
-          <div className="grid gap-5 lg:grid-cols-[1.35fr_1fr]">
-            <div className="space-y-2">
-              <div className="text-sm font-bold text-sky-700">独立链接说明</div>
-              <div className="text-base font-black text-slate-900">每一条申请都会生成自己的独立时效链接，后台复制出去的链接不会共用。</div>
-              <div className="text-sm leading-6 text-slate-600">A 和 B 默认看不到彼此的申请内容，只有拿到同一条精确链接的人才能打开对应页面，所以请把链接定向发给对应申请人，不要转发错人。</div>
-              <div className="rounded-2xl border border-sky-200 bg-white/80 px-4 py-3 text-sm text-slate-700">提交后系统会自动生成表单号，当前链接后续也可以继续查看并打印，申请单中已预留领导签名位置。</div>
+        <section className="rounded-lg border border-blue-100 bg-blue-50/70 px-4 py-3 shadow-sm">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="min-w-0">
+              <div className="text-sm font-bold text-blue-700">独立链接说明</div>
+              <div className="mt-1 max-w-4xl text-xs leading-5 text-slate-600">每条申请都会生成自己的独立时效链接；请定向发送给对应申请人，后续可继续查看、打印并保留签名位置。</div>
             </div>
-            <div className="rounded-3xl border border-slate-200 bg-white/90 p-4">
-              <div className="text-xs font-bold uppercase tracking-[0.2em] text-slate-400">流程预览</div>
-              <div className="mt-4 grid grid-cols-1 gap-3">
+            <div className="flex flex-wrap gap-2">
                 {REQUEST_FLOW_STEPS.map((step, index) => (
-                  <div key={step} className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-sky-100 text-xs font-black text-sky-700">{index + 1}</div>
-                    <div className="text-sm font-semibold text-slate-700">{step}</div>
+                  <div key={step} className="inline-flex h-8 items-center gap-2 rounded-lg border border-blue-100 bg-white px-2.5 text-xs font-bold text-slate-700">
+                    <div className="flex h-5 w-5 items-center justify-center rounded-md bg-blue-100 text-[11px] font-black text-blue-700">{index + 1}</div>
+                    <div>{step}</div>
                   </div>
                 ))}
-              </div>
             </div>
           </div>
         </section>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
           {metrics.map((metric) => (
-            <div key={metric.label} className="rounded-[22px] border border-slate-200 bg-white px-5 py-4 shadow-sm">
-              <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">{metric.label}</div>
-              <div className="mt-3 text-[26px] font-black leading-none text-slate-900">{metric.value}</div>
+            <div key={metric.label} className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+              <div className="text-xs font-bold text-slate-500">{metric.label}</div>
+              <div className="mt-1 text-xl font-black leading-none text-slate-900">{metric.value}</div>
             </div>
           ))}
         </div>

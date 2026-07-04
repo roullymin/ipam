@@ -6,11 +6,11 @@ function AdviceCard({ title, body, onClick }) {
   return (
     <button
       onClick={onClick}
-      className="w-full rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4 text-left transition-all hover:-translate-y-0.5 hover:border-cyan-200 hover:bg-white"
+      className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-left transition hover:border-blue-200 hover:bg-white"
       type="button"
     >
       <div className="text-sm font-bold text-slate-900">{title}</div>
-      <div className="mt-2 text-sm leading-6 text-slate-600">{body}</div>
+      <div className="mt-1 text-sm leading-5 text-slate-600">{body}</div>
     </button>
   );
 }

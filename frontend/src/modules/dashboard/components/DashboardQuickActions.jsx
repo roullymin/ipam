@@ -11,11 +11,11 @@ export default function DashboardQuickActions({ title, subtitle, actions, onNavi
           <button
             key={action.label}
             onClick={() => onNavigate?.(action.target)}
-            className="flex items-center justify-between rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4 text-left text-sm font-semibold text-slate-700 transition-all hover:-translate-y-0.5 hover:border-cyan-200 hover:bg-cyan-50/60"
+            className="flex min-h-11 items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-left text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50/60"
             type="button"
           >
             <span>{action.label}</span>
-            <ArrowRight className="h-4 w-4 text-cyan-600" />
+            <ArrowRight className="h-4 w-4 text-blue-600" />
           </button>
         ))}
       </div>

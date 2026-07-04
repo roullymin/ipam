@@ -180,7 +180,7 @@ const RISK_LABELS = {
 
 function Pill({ children, tone = 'bg-slate-100 text-slate-700 ring-slate-200' }) {
   return (
-    <span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${tone}`}>
+    <span className={`inline-flex whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-semibold ring-1 ring-inset ${tone}`}>
       {children}
     </span>
   );
@@ -188,20 +188,20 @@ function Pill({ children, tone = 'bg-slate-100 text-slate-700 ring-slate-200' })
 
 function IconTile({ icon: Icon, label, value, tone = 'text-slate-700', subtext }) {
   return (
-    <div className="min-h-[112px] rounded-lg border border-white bg-white/82 p-4 shadow-sm">
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
       <div className="flex items-center justify-between gap-3">
         <div className="text-xs font-semibold text-slate-500">{label}</div>
         <Icon className={`h-4 w-4 ${tone}`} />
       </div>
-      <div className="mt-3 text-2xl font-black text-slate-950">{value}</div>
-      <div className="mt-1 min-h-5 text-xs text-slate-500">{subtext}</div>
+      <div className="mt-2 text-2xl font-black text-slate-950">{value}</div>
+      <div className="mt-1 truncate text-xs text-slate-500">{subtext}</div>
     </div>
   );
 }
 
 function EmptyState() {
   return (
-    <div className="flex min-h-[360px] items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white/70 p-6 text-center">
+    <div className="flex min-h-[360px] items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white p-6 text-center">
       <div>
         <Server className="mx-auto h-8 w-8 text-slate-400" />
         <div className="mt-3 text-sm font-bold text-slate-800">暂无资产数据</div>
@@ -442,8 +442,8 @@ function buildGroupSummary(assets) {
 function SortIcon({ active, direction }) {
   if (!active) return <ArrowUpDown className="h-3.5 w-3.5 text-slate-400" />;
   return direction === 'asc'
-    ? <ArrowUp className="h-3.5 w-3.5 text-cyan-600" />
-    : <ArrowDown className="h-3.5 w-3.5 text-cyan-600" />;
+    ? <ArrowUp className="h-3.5 w-3.5 text-blue-600" />
+    : <ArrowDown className="h-3.5 w-3.5 text-blue-600" />;
 }
 
 function SortHeader({ children, sortKey, sort, onSort }) {
@@ -452,7 +452,7 @@ function SortHeader({ children, sortKey, sort, onSort }) {
     <button
       type="button"
       onClick={() => onSort(sortKey)}
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-black transition ${active ? 'text-cyan-700' : 'text-slate-500 hover:text-slate-800'}`}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-black transition ${active ? 'text-blue-700' : 'text-slate-500 hover:text-slate-800'}`}
       title={`按${SORT_LABELS[sortKey] || children}排序`}
     >
       {children}
@@ -461,15 +461,15 @@ function SortHeader({ children, sortKey, sort, onSort }) {
   );
 }
 
-function StatBar({ label, count, total, meta, tone = 'bg-cyan-500' }) {
-  const percent = total ? Math.max(4, Math.round((count / total) * 100)) : 0;
+function StatBar({ label, count, total, meta, tone = 'bg-blue-500' }) {
+  const percent = total && count ? Math.max(4, Math.round((count / total) * 100)) : 0;
   return (
-    <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+    <div className="rounded-md bg-slate-50 px-3 py-2">
       <div className="flex items-center justify-between gap-3">
         <span className="truncate text-sm font-bold text-slate-800">{label}</span>
         <span className="text-sm font-black text-slate-950">{count}</span>
       </div>
-      <div className="mt-2 h-2 overflow-hidden rounded-full bg-white">
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white">
         <div className={`h-full rounded-full ${tone}`} style={{ width: `${percent}%` }} />
       </div>
       {meta ? <div className="mt-1 text-xs text-slate-500">{meta}</div> : null}
@@ -477,15 +477,30 @@ function StatBar({ label, count, total, meta, tone = 'bg-cyan-500' }) {
   );
 }
 
+function SummaryColumn({ icon: Icon, title, children }) {
+  return (
+    <div className="min-w-0 space-y-2">
+      <div className="mb-2 flex items-center gap-2 text-sm font-black text-slate-900">
+        <Icon className="h-4 w-4 text-blue-600" />
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 function GroupSummary({ summary, total }) {
   return (
-    <section className="grid gap-3 xl:grid-cols-3">
-      <div className="rounded-lg border border-white bg-white/82 p-4 shadow-sm">
-        <div className="mb-3 flex items-center gap-2 text-sm font-black text-slate-900">
-          <BarChart3 className="h-4 w-4 text-cyan-600" />
-          机房分布
+    <section className="rounded-lg border border-slate-200 bg-white p-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-black text-slate-950">资产分布摘要</div>
+          <div className="mt-0.5 text-xs text-slate-500">跟随当前筛选条件实时统计，优先显示数量和风险集中区域。</div>
         </div>
-        <div className="space-y-2">
+        <div className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">{total} 条资产</div>
+      </div>
+      <div className="grid gap-4 xl:grid-cols-3">
+        <SummaryColumn icon={BarChart3} title="机房分布">
           {summary.datacenters.slice(0, 5).map((item) => (
             <StatBar
               key={item.label}
@@ -493,18 +508,12 @@ function GroupSummary({ summary, total }) {
               count={item.count}
               total={total}
               meta={`${item.offline} 离线/未检测，${item.credentialMissing} 未绑密码`}
-              tone="bg-cyan-500"
+              tone="bg-blue-500"
             />
           ))}
-        </div>
-      </div>
+        </SummaryColumn>
 
-      <div className="rounded-lg border border-white bg-white/82 p-4 shadow-sm">
-        <div className="mb-3 flex items-center gap-2 text-sm font-black text-slate-900">
-          <HardDrive className="h-4 w-4 text-violet-600" />
-          类型分布
-        </div>
-        <div className="space-y-2">
+        <SummaryColumn icon={HardDrive} title="类型分布">
           {summary.types.slice(0, 5).map((item) => (
             <StatBar
               key={item.label}
@@ -515,15 +524,9 @@ function GroupSummary({ summary, total }) {
               tone="bg-violet-500"
             />
           ))}
-        </div>
-      </div>
+        </SummaryColumn>
 
-      <div className="rounded-lg border border-white bg-white/82 p-4 shadow-sm">
-        <div className="mb-3 flex items-center gap-2 text-sm font-black text-slate-900">
-          <AlertTriangle className="h-4 w-4 text-rose-600" />
-          风险分布
-        </div>
-        <div className="space-y-2">
+        <SummaryColumn icon={AlertTriangle} title="风险分布">
           {summary.risks.map((item) => (
             <StatBar
               key={item.key}
@@ -534,43 +537,53 @@ function GroupSummary({ summary, total }) {
               tone="bg-rose-500"
             />
           ))}
-        </div>
+        </SummaryColumn>
       </div>
     </section>
   );
 }
 
-function AssetTable({ assets, selectedAssetId, onSelect, sort, onSort }) {
+function AssetTable({ assets, selectedAssetId, onSelect, sort, onSort, sortLabel }) {
   if (assets.length === 0) return <EmptyState />;
 
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-      <div className="overflow-auto">
-        <table className="min-w-[1040px] w-full border-collapse text-sm">
-          <thead className="bg-slate-50 text-xs font-bold text-slate-500">
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+      <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+        <div>
+          <div className="text-sm font-black text-slate-950">资产清单</div>
+          <div className="mt-0.5 text-xs text-slate-500">点击表头可排序，点击行查看右侧资产档案。</div>
+        </div>
+        <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
+          <span className="rounded-md bg-slate-100 px-2.5 py-1">{assets.length} 条</span>
+          <span className="rounded-md bg-blue-50 px-2.5 py-1 text-blue-700">{sortLabel}</span>
+        </div>
+      </div>
+      <div className="max-h-[calc(100vh-22rem)] overflow-auto">
+        <table className="min-w-[1160px] w-full border-collapse text-sm">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-xs font-bold text-slate-500 shadow-[0_1px_0_rgba(226,232,240,1)]">
             <tr>
-              <th className="border-b border-slate-200 px-4 py-3 text-left">
+              <th className="px-4 py-3 text-left">
                 <SortHeader sortKey="name" sort={sort} onSort={onSort}>资产</SortHeader>
               </th>
-              <th className="border-b border-slate-200 px-4 py-3 text-left">
+              <th className="px-4 py-3 text-left">
                 <SortHeader sortKey="location" sort={sort} onSort={onSort}>位置</SortHeader>
               </th>
-              <th className="border-b border-slate-200 px-4 py-3 text-left">
+              <th className="px-4 py-3 text-left">
                 <SortHeader sortKey="status" sort={sort} onSort={onSort}>状态</SortHeader>
               </th>
-              <th className="border-b border-slate-200 px-4 py-3 text-left">
+              <th className="px-4 py-3 text-left">
                 <SortHeader sortKey="backup" sort={sort} onSort={onSort}>配置备份</SortHeader>
               </th>
-              <th className="border-b border-slate-200 px-4 py-3 text-left">
+              <th className="px-4 py-3 text-left">
                 <SortHeader sortKey="credential" sort={sort} onSort={onSort}>密码</SortHeader>
               </th>
-              <th className="border-b border-slate-200 px-4 py-3 text-left">
+              <th className="px-4 py-3 text-left">
                 <SortHeader sortKey="automation" sort={sort} onSort={onSort}>自动化</SortHeader>
               </th>
-              <th className="border-b border-slate-200 px-4 py-3 text-left">
+              <th className="px-4 py-3 text-left">
                 <SortHeader sortKey="owner" sort={sort} onSort={onSort}>责任</SortHeader>
               </th>
-              <th className="border-b border-slate-200 px-4 py-3 text-left">
+              <th className="px-4 py-3 text-left">
                 <SortHeader sortKey="risk" sort={sort} onSort={onSort}>风险</SortHeader>
               </th>
             </tr>
@@ -581,12 +594,12 @@ function AssetTable({ assets, selectedAssetId, onSelect, sort, onSort }) {
               return (
                 <tr
                   key={asset.id}
-                  className={`cursor-pointer align-top transition ${selected ? 'bg-cyan-50/80' : 'hover:bg-slate-50'}`}
+                  className={`cursor-pointer align-top transition ${selected ? 'bg-blue-50/80 shadow-[inset_3px_0_0_#2563eb]' : 'hover:bg-slate-50'}`}
                   onClick={() => onSelect(asset.id)}
                 >
                   <td className="border-b border-slate-100 px-4 py-3">
                     <div className="flex items-start gap-3">
-                      <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg bg-slate-900 text-white">
+                      <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-md bg-slate-900 text-white">
                         <HardDrive className="h-4 w-4" />
                       </div>
                       <div className="min-w-0">
@@ -623,9 +636,13 @@ function AssetTable({ assets, selectedAssetId, onSelect, sort, onSort }) {
                   </td>
                   <td className="border-b border-slate-100 px-4 py-3">
                     <div className="flex max-w-[180px] flex-wrap gap-1.5">
-                      {asset.riskCodes.slice(0, 3).map((risk) => (
-                        <Pill key={risk} tone="bg-rose-50 text-rose-700 ring-rose-200">{RISK_LABELS[risk]}</Pill>
-                      ))}
+                      {asset.riskCodes.length ? (
+                        asset.riskCodes.slice(0, 3).map((risk) => (
+                          <Pill key={risk} tone="bg-rose-50 text-rose-700 ring-rose-200">{RISK_LABELS[risk]}</Pill>
+                        ))
+                      ) : (
+                        <Pill tone="bg-emerald-50 text-emerald-700 ring-emerald-200">正常</Pill>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -640,9 +657,9 @@ function AssetTable({ assets, selectedAssetId, onSelect, sort, onSort }) {
 
 function DetailBlock({ icon: Icon, title, children }) {
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="mb-3 flex items-center gap-2 text-sm font-black text-slate-900">
-        <Icon className="h-4 w-4 text-cyan-600" />
+    <section className="rounded-lg border border-slate-200 bg-white p-3">
+      <div className="mb-2.5 flex items-center gap-2 text-sm font-black text-slate-900">
+        <Icon className="h-4 w-4 text-blue-600" />
         {title}
       </div>
       {children}
@@ -652,7 +669,7 @@ function DetailBlock({ icon: Icon, title, children }) {
 
 function InfoRow({ label, value, mono = false }) {
   return (
-    <div className="flex items-start justify-between gap-3 border-b border-slate-100 py-2 last:border-b-0">
+    <div className="flex items-start justify-between gap-3 border-b border-slate-100 py-1.5 last:border-b-0">
       <span className="text-xs font-semibold text-slate-500">{label}</span>
       <span className={`max-w-[62%] text-right text-sm font-semibold text-slate-800 ${mono ? 'font-mono' : ''}`}>
         {safeText(value)}
@@ -671,27 +688,29 @@ function AssetDetail({ asset }) {
   }
 
   return (
-    <div className="space-y-4">
-      <section className="rounded-lg border border-slate-900 bg-slate-950 p-5 text-white shadow-sm">
+    <div className="space-y-3">
+      <section className="rounded-lg border border-slate-200 bg-white p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">Asset</div>
-            <div className="mt-2 text-xl font-black">{asset.name}</div>
+            <div className="text-xs font-bold text-blue-700">Asset</div>
+            <div className="mt-1 text-xl font-black text-slate-950">{asset.name}</div>
             <div className="mt-2 flex flex-wrap gap-2">
-              <Pill tone="bg-white/10 text-cyan-100 ring-white/10">{asset.typeLabel}</Pill>
+              <Pill tone="bg-blue-50 text-blue-700 ring-blue-200">{asset.typeLabel}</Pill>
               <Pill tone={STATUS_TONES[asset.status] || STATUS_TONES.unknown}>{STATUS_LABELS[asset.status] || asset.status}</Pill>
             </div>
           </div>
-          <Server className="h-8 w-8 text-cyan-200" />
-        </div>
-        <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-          <div className="rounded-lg bg-white/8 p-3">
-            <div className="text-xs text-slate-300">管理 IP</div>
-            <div className="mt-1 font-mono font-bold">{safeText(asset.managementIp)}</div>
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-900 text-white">
+            <Server className="h-5 w-5" />
           </div>
-          <div className="rounded-lg bg-white/8 p-3">
-            <div className="text-xs text-slate-300">位置</div>
-            <div className="mt-1 truncate font-bold">{safeText([asset.datacenterName, asset.rackCode].filter(Boolean).join(' / '))}</div>
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+          <div className="rounded-md bg-slate-50 p-3">
+            <div className="text-xs font-semibold text-slate-500">管理 IP</div>
+            <div className="mt-1 truncate font-mono font-bold text-slate-950">{safeText(asset.managementIp)}</div>
+          </div>
+          <div className="rounded-md bg-slate-50 p-3">
+            <div className="text-xs font-semibold text-slate-500">位置</div>
+            <div className="mt-1 truncate font-bold text-slate-950">{safeText([asset.datacenterName, asset.rackCode].filter(Boolean).join(' / '))}</div>
           </div>
         </div>
       </section>
@@ -707,15 +726,15 @@ function AssetDetail({ asset }) {
 
       <DetailBlock icon={Database} title="配置备份">
         <div className="grid grid-cols-3 gap-2">
-          <div className="rounded-lg bg-amber-50 p-3">
+          <div className="rounded-md bg-amber-50 p-2.5">
             <div className="text-xs font-semibold text-amber-700">状态</div>
             <div className="mt-1 text-sm font-black text-amber-900">{asset.backup.label}</div>
           </div>
-          <div className="rounded-lg bg-slate-50 p-3">
+          <div className="rounded-md bg-slate-50 p-2.5">
             <div className="text-xs font-semibold text-slate-500">版本</div>
             <div className="mt-1 text-sm font-black text-slate-900">{asset.backup.versionCount}</div>
           </div>
-          <div className="rounded-lg bg-slate-50 p-3">
+          <div className="rounded-md bg-slate-50 p-2.5">
             <div className="text-xs font-semibold text-slate-500">最近</div>
             <div className="mt-1 text-sm font-black text-slate-900">{formatTime(asset.backup.lastBackupAt)}</div>
           </div>
@@ -730,7 +749,7 @@ function AssetDetail({ asset }) {
         {asset.credential.items.length ? (
           <div className="mt-3 space-y-2">
             {asset.credential.items.slice(0, 4).map((secret) => (
-              <div key={secret.id} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+              <div key={secret.id} className="rounded-md bg-slate-50 px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-sm font-bold text-slate-800">{secret.name}</span>
                   <Pill tone={SECRET_TONES[secret.lifecycle_status || secret.status || 'active']}>
@@ -755,7 +774,7 @@ function AssetDetail({ asset }) {
         {asset.relatedIps.length ? (
           <div className="space-y-2">
             {asset.relatedIps.map((ip) => (
-              <div key={ip.id} className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
+              <div key={ip.id} className="flex items-center justify-between gap-2 rounded-md bg-slate-50 px-3 py-2">
                 <span className="font-mono text-sm font-bold text-slate-800">{ip.ip_address}</span>
                 <Pill tone={STATUS_TONES[ip.status] || STATUS_TONES.unknown}>{STATUS_LABELS[ip.status] || ip.status || '未检测'}</Pill>
               </div>
@@ -815,6 +834,7 @@ export default function AssetCenterView({
   const sortOptionValue = `${sortConfig.key}:${sortConfig.direction}`;
   const hasPresetSortOption = SORT_OPTIONS.some((option) => option.value === sortOptionValue);
   const currentSortLabel = `${SORT_LABELS[sortConfig.key] || '排序'}${sortConfig.direction === 'asc' ? '升序' : '降序'}`;
+  const sortDisplayLabel = SORT_OPTIONS.find((option) => option.value === sortOptionValue)?.label || currentSortLabel;
 
   const handleSort = (key) => {
     setSortConfig((current) => {
@@ -854,23 +874,23 @@ export default function AssetCenterView({
   }, [assets]);
 
   return (
-    <div className="h-full overflow-auto bg-slate-50/70 p-5 lg:p-7">
-      <div className="mx-auto max-w-[1900px] space-y-5">
-        <section className="rounded-lg border border-white bg-white/82 p-5 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-cyan-700">
-                <ShieldCheck className="h-4 w-4" />
-                V2 Asset Center
-              </div>
-              <h1 className="mt-2 text-2xl font-black text-slate-950">资产中心</h1>
-              <div className="mt-1 text-sm text-slate-500">设备、配置、密码、自动化的统一资产视图</div>
+    <div className="h-full overflow-auto bg-slate-100 p-4 lg:p-5">
+      <div className="mx-auto max-w-[1920px] space-y-4">
+        <section className="flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-xs font-bold text-blue-700">
+              <ShieldCheck className="h-4 w-4" />
+              V2 Asset Center
             </div>
+            <h1 className="mt-1 text-2xl font-black text-slate-950">资产中心</h1>
+            <div className="mt-1 text-sm text-slate-500">设备、配置、密码、自动化的统一资产工作台</div>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-4">
             <button
               type="button"
               onClick={onRefresh}
               disabled={isDataLoading}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:border-cyan-200 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition hover:border-blue-200 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
               title="刷新资产数据"
             >
               <RefreshCw className={`h-4 w-4 ${isDataLoading ? 'animate-spin' : ''}`} />
@@ -880,29 +900,29 @@ export default function AssetCenterView({
         </section>
 
         <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-          <IconTile icon={HardDrive} label="资产总数" value={summary.total} subtext={`${filteredAssets.length} 条可见`} tone="text-cyan-600" />
+          <IconTile icon={HardDrive} label="资产总数" value={summary.total} subtext={`${filteredAssets.length} 条可见`} tone="text-blue-600" />
           <IconTile icon={CheckCircle2} label="在线运行" value={summary.healthy} subtext={`${summary.offline} 条离线或未检测`} tone="text-emerald-600" />
           <IconTile icon={Database} label="配置备份" value={`${summary.backupRate}%`} subtext="设备配置采集" tone="text-amber-600" />
           <IconTile icon={KeyRound} label="密码受控" value={`${summary.credentialRate}%`} subtext={dataErrors?.secrets ? '无权限或加载失败' : '按绑定凭据统计'} tone="text-violet-600" />
-          <IconTile icon={Terminal} label="自动化纳管" value={`${summary.automationRate}%`} subtext="Ansible Inventory" tone="text-sky-600" />
+          <IconTile icon={Terminal} label="自动化纳管" value={`${summary.automationRate}%`} subtext="Ansible Inventory" tone="text-blue-600" />
           <IconTile icon={AlertTriangle} label="风险资产" value={summary.riskAssets} subtext="按当前资产状态计算" tone="text-rose-600" />
         </section>
 
-        <section className="rounded-lg border border-white bg-white/82 p-4 shadow-sm">
-          <div className="grid gap-3 lg:grid-cols-[minmax(240px,1.4fr)_180px_180px_180px_200px_auto]">
+        <section className="sticky top-0 z-20 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="grid gap-2 lg:grid-cols-[minmax(240px,1.4fr)_170px_170px_170px_200px_auto]">
             <label className="relative block">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
                 value={keyword}
                 onChange={(event) => setKeyword(event.target.value)}
-                className="h-11 w-full rounded-lg border border-slate-200 bg-white pl-10 pr-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+                className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-10 pr-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
                 placeholder="搜索名称、IP、序列号、项目、负责人"
               />
             </label>
             <select
               value={status}
               onChange={(event) => setStatus(event.target.value)}
-              className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
             >
               <option value="all">全部状态</option>
               <option value="active">运行中</option>
@@ -916,7 +936,7 @@ export default function AssetCenterView({
             <select
               value={type}
               onChange={(event) => setType(event.target.value)}
-              className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
             >
               <option value="all">全部类型</option>
               {typeOptions.map(([value, label]) => (
@@ -926,7 +946,7 @@ export default function AssetCenterView({
             <select
               value={risk}
               onChange={(event) => setRisk(event.target.value)}
-              className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
             >
               <option value="all">全部风险</option>
               <option value="offline">不可达</option>
@@ -937,7 +957,7 @@ export default function AssetCenterView({
             <select
               value={sortOptionValue}
               onChange={handleSortOptionChange}
-              className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
               title="排序方式"
             >
               {hasPresetSortOption ? null : <option value={sortOptionValue}>{currentSortLabel}</option>}
@@ -945,7 +965,7 @@ export default function AssetCenterView({
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
-            <div className="flex h-11 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-600">
+            <div className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-600">
               <Filter className="h-4 w-4 text-slate-400" />
               {filteredAssets.length}
             </div>
@@ -954,13 +974,14 @@ export default function AssetCenterView({
 
         <GroupSummary summary={groupSummary} total={filteredAssets.length} />
 
-        <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_430px]">
+        <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
           <AssetTable
             assets={sortedAssets}
             selectedAssetId={selectedAsset?.id}
             onSelect={setSelectedAssetId}
             sort={sortConfig}
             onSort={handleSort}
+            sortLabel={sortDisplayLabel}
           />
           <aside className="xl:sticky xl:top-4 xl:self-start">
             <AssetDetail asset={selectedAsset} />
