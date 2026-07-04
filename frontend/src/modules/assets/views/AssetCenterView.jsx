@@ -1,6 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  BarChart3,
   CheckCircle2,
   Clock3,
   Database,
@@ -41,6 +45,67 @@ const formatTime = (value) => {
 };
 
 const normalize = (value) => String(value || '').trim().toLowerCase();
+
+const SORT_OPTIONS = [
+  { value: 'risk:desc', label: '风险最多优先' },
+  { value: 'backup:asc', label: '配置未接入优先' },
+  { value: 'automation:desc', label: '未纳管优先' },
+  { value: 'name:asc', label: '资产名称 A-Z' },
+  { value: 'location:asc', label: '位置 A-Z' },
+  { value: 'status:desc', label: '异常状态优先' },
+  { value: 'credential:desc', label: '密码风险优先' },
+  { value: 'owner:asc', label: '责任人 A-Z' },
+  { value: 'type:asc', label: '设备类型 A-Z' },
+  { value: 'updated:desc', label: '最近更新优先' },
+];
+
+const SORT_LABELS = {
+  name: '资产',
+  location: '位置',
+  status: '状态',
+  backup: '配置备份',
+  credential: '密码',
+  automation: '自动化',
+  owner: '责任',
+  risk: '风险',
+  type: '类型',
+  updated: '更新',
+};
+
+const STATUS_SORT_WEIGHT = {
+  offline: 6,
+  unknown: 5,
+  maintenance: 4,
+  planned: 3,
+  retired: 2,
+  removed: 2,
+  decommissioned: 2,
+  reserved: 1,
+  active: 0,
+  online: 0,
+};
+
+const CREDENTIAL_SORT_WEIGHT = {
+  missing: 6,
+  expired: 5,
+  expiring: 4,
+  unavailable: 3,
+  disabled: 2,
+  active: 0,
+};
+
+const DEFAULT_SORT_DIRECTIONS = {
+  name: 'asc',
+  location: 'asc',
+  status: 'desc',
+  backup: 'asc',
+  credential: 'desc',
+  automation: 'desc',
+  owner: 'asc',
+  risk: 'desc',
+  type: 'asc',
+  updated: 'desc',
+};
 
 const DEVICE_TYPE_LABELS = {
   server: '服务器',
@@ -303,7 +368,179 @@ function filterAssets(assets, filters) {
   });
 }
 
-function AssetTable({ assets, selectedAssetId, onSelect }) {
+const comparePrimitive = (left, right) => {
+  if (typeof left === 'number' || typeof right === 'number') {
+    return Number(left || 0) - Number(right || 0);
+  }
+  return String(left || '').localeCompare(String(right || ''), 'zh-CN', { numeric: true });
+};
+
+const getSortValue = (asset, key) => {
+  if (key === 'name') return asset.name;
+  if (key === 'location') return [asset.datacenterName, asset.rackCode, asset.rackPosition].filter(Boolean).join(' / ');
+  if (key === 'status') return STATUS_SORT_WEIGHT[asset.status] ?? 3;
+  if (key === 'backup') return asset.backup.versionCount || 0;
+  if (key === 'credential') return (CREDENTIAL_SORT_WEIGHT[asset.credential.status] ?? 3) * 1000 - asset.credential.count;
+  if (key === 'automation') return asset.automation.managed ? 0 : 1;
+  if (key === 'owner') return [asset.project, asset.contact].filter(Boolean).join(' / ');
+  if (key === 'risk') return asset.riskCodes.length;
+  if (key === 'type') return asset.typeLabel;
+  if (key === 'updated') return asset.updatedAt ? new Date(asset.updatedAt).getTime() || 0 : 0;
+  return asset.name;
+};
+
+function sortAssets(assets, sort) {
+  const direction = sort.direction === 'asc' ? 1 : -1;
+  return assets
+    .map((asset, index) => ({ asset, index }))
+    .sort((left, right) => {
+      const primary = comparePrimitive(getSortValue(left.asset, sort.key), getSortValue(right.asset, sort.key));
+      if (primary !== 0) return primary * direction;
+      const fallback = comparePrimitive(left.asset.name, right.asset.name);
+      if (fallback !== 0) return fallback;
+      return left.index - right.index;
+    })
+    .map((item) => item.asset);
+}
+
+const countBy = (assets, getKey) => {
+  const grouped = new Map();
+  assets.forEach((asset) => {
+    const key = getKey(asset) || '未标注';
+    const current = grouped.get(key) || {
+      label: key,
+      count: 0,
+      risk: 0,
+      offline: 0,
+      credentialMissing: 0,
+    };
+    current.count += 1;
+    current.risk += asset.riskCodes.length;
+    if (['offline', 'unknown'].includes(asset.status)) current.offline += 1;
+    if (asset.credential.status === 'missing') current.credentialMissing += 1;
+    grouped.set(key, current);
+  });
+  return Array.from(grouped.values()).sort((left, right) => right.count - left.count || right.risk - left.risk);
+};
+
+function buildGroupSummary(assets) {
+  const riskRows = Object.entries(RISK_LABELS)
+    .map(([key, label]) => ({
+      key,
+      label,
+      count: assets.filter((asset) => asset.riskCodes.includes(key)).length,
+    }))
+    .sort((left, right) => right.count - left.count);
+
+  return {
+    datacenters: countBy(assets, (asset) => asset.datacenterName || '未标注机房'),
+    types: countBy(assets, (asset) => asset.typeLabel || '未分类'),
+    risks: riskRows,
+  };
+}
+
+function SortIcon({ active, direction }) {
+  if (!active) return <ArrowUpDown className="h-3.5 w-3.5 text-slate-400" />;
+  return direction === 'asc'
+    ? <ArrowUp className="h-3.5 w-3.5 text-cyan-600" />
+    : <ArrowDown className="h-3.5 w-3.5 text-cyan-600" />;
+}
+
+function SortHeader({ children, sortKey, sort, onSort }) {
+  const active = sort.key === sortKey;
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(sortKey)}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-black transition ${active ? 'text-cyan-700' : 'text-slate-500 hover:text-slate-800'}`}
+      title={`按${SORT_LABELS[sortKey] || children}排序`}
+    >
+      {children}
+      <SortIcon active={active} direction={sort.direction} />
+    </button>
+  );
+}
+
+function StatBar({ label, count, total, meta, tone = 'bg-cyan-500' }) {
+  const percent = total ? Math.max(4, Math.round((count / total) * 100)) : 0;
+  return (
+    <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+      <div className="flex items-center justify-between gap-3">
+        <span className="truncate text-sm font-bold text-slate-800">{label}</span>
+        <span className="text-sm font-black text-slate-950">{count}</span>
+      </div>
+      <div className="mt-2 h-2 overflow-hidden rounded-full bg-white">
+        <div className={`h-full rounded-full ${tone}`} style={{ width: `${percent}%` }} />
+      </div>
+      {meta ? <div className="mt-1 text-xs text-slate-500">{meta}</div> : null}
+    </div>
+  );
+}
+
+function GroupSummary({ summary, total }) {
+  return (
+    <section className="grid gap-3 xl:grid-cols-3">
+      <div className="rounded-lg border border-white bg-white/82 p-4 shadow-sm">
+        <div className="mb-3 flex items-center gap-2 text-sm font-black text-slate-900">
+          <BarChart3 className="h-4 w-4 text-cyan-600" />
+          机房分布
+        </div>
+        <div className="space-y-2">
+          {summary.datacenters.slice(0, 5).map((item) => (
+            <StatBar
+              key={item.label}
+              label={item.label}
+              count={item.count}
+              total={total}
+              meta={`${item.offline} 离线/未检测，${item.credentialMissing} 未绑密码`}
+              tone="bg-cyan-500"
+            />
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-white bg-white/82 p-4 shadow-sm">
+        <div className="mb-3 flex items-center gap-2 text-sm font-black text-slate-900">
+          <HardDrive className="h-4 w-4 text-violet-600" />
+          类型分布
+        </div>
+        <div className="space-y-2">
+          {summary.types.slice(0, 5).map((item) => (
+            <StatBar
+              key={item.label}
+              label={item.label}
+              count={item.count}
+              total={total}
+              meta={`${item.risk} 个风险标签`}
+              tone="bg-violet-500"
+            />
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-white bg-white/82 p-4 shadow-sm">
+        <div className="mb-3 flex items-center gap-2 text-sm font-black text-slate-900">
+          <AlertTriangle className="h-4 w-4 text-rose-600" />
+          风险分布
+        </div>
+        <div className="space-y-2">
+          {summary.risks.map((item) => (
+            <StatBar
+              key={item.key}
+              label={item.label}
+              count={item.count}
+              total={total}
+              meta={item.count ? '需要处理' : '当前无'}
+              tone="bg-rose-500"
+            />
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AssetTable({ assets, selectedAssetId, onSelect, sort, onSort }) {
   if (assets.length === 0) return <EmptyState />;
 
   return (
@@ -312,14 +549,30 @@ function AssetTable({ assets, selectedAssetId, onSelect }) {
         <table className="min-w-[1040px] w-full border-collapse text-sm">
           <thead className="bg-slate-50 text-xs font-bold text-slate-500">
             <tr>
-              <th className="border-b border-slate-200 px-4 py-3 text-left">资产</th>
-              <th className="border-b border-slate-200 px-4 py-3 text-left">位置</th>
-              <th className="border-b border-slate-200 px-4 py-3 text-left">状态</th>
-              <th className="border-b border-slate-200 px-4 py-3 text-left">配置备份</th>
-              <th className="border-b border-slate-200 px-4 py-3 text-left">密码</th>
-              <th className="border-b border-slate-200 px-4 py-3 text-left">自动化</th>
-              <th className="border-b border-slate-200 px-4 py-3 text-left">责任</th>
-              <th className="border-b border-slate-200 px-4 py-3 text-left">风险</th>
+              <th className="border-b border-slate-200 px-4 py-3 text-left">
+                <SortHeader sortKey="name" sort={sort} onSort={onSort}>资产</SortHeader>
+              </th>
+              <th className="border-b border-slate-200 px-4 py-3 text-left">
+                <SortHeader sortKey="location" sort={sort} onSort={onSort}>位置</SortHeader>
+              </th>
+              <th className="border-b border-slate-200 px-4 py-3 text-left">
+                <SortHeader sortKey="status" sort={sort} onSort={onSort}>状态</SortHeader>
+              </th>
+              <th className="border-b border-slate-200 px-4 py-3 text-left">
+                <SortHeader sortKey="backup" sort={sort} onSort={onSort}>配置备份</SortHeader>
+              </th>
+              <th className="border-b border-slate-200 px-4 py-3 text-left">
+                <SortHeader sortKey="credential" sort={sort} onSort={onSort}>密码</SortHeader>
+              </th>
+              <th className="border-b border-slate-200 px-4 py-3 text-left">
+                <SortHeader sortKey="automation" sort={sort} onSort={onSort}>自动化</SortHeader>
+              </th>
+              <th className="border-b border-slate-200 px-4 py-3 text-left">
+                <SortHeader sortKey="owner" sort={sort} onSort={onSort}>责任</SortHeader>
+              </th>
+              <th className="border-b border-slate-200 px-4 py-3 text-left">
+                <SortHeader sortKey="risk" sort={sort} onSort={onSort}>风险</SortHeader>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -531,6 +784,7 @@ export default function AssetCenterView({
   const [type, setType] = useState('all');
   const [risk, setRisk] = useState('all');
   const [selectedAssetId, setSelectedAssetId] = useState(null);
+  const [sortConfig, setSortConfig] = useState({ key: 'risk', direction: 'desc' });
   const secretsLoaded = !dataErrors?.secrets;
 
   const assets = useMemo(
@@ -543,10 +797,39 @@ export default function AssetCenterView({
     [assets, keyword, risk, status, type],
   );
 
+  const sortedAssets = useMemo(
+    () => sortAssets(filteredAssets, sortConfig),
+    [filteredAssets, sortConfig],
+  );
+
+  const groupSummary = useMemo(
+    () => buildGroupSummary(filteredAssets),
+    [filteredAssets],
+  );
+
   const selectedAsset = useMemo(() => {
-    const preferred = assets.find((asset) => asset.id === selectedAssetId);
-    return preferred || filteredAssets[0] || assets[0] || null;
-  }, [assets, filteredAssets, selectedAssetId]);
+    const preferred = sortedAssets.find((asset) => asset.id === selectedAssetId);
+    return preferred || sortedAssets[0] || assets[0] || null;
+  }, [assets, selectedAssetId, sortedAssets]);
+
+  const sortOptionValue = `${sortConfig.key}:${sortConfig.direction}`;
+  const hasPresetSortOption = SORT_OPTIONS.some((option) => option.value === sortOptionValue);
+  const currentSortLabel = `${SORT_LABELS[sortConfig.key] || '排序'}${sortConfig.direction === 'asc' ? '升序' : '降序'}`;
+
+  const handleSort = (key) => {
+    setSortConfig((current) => {
+      if (current.key === key) {
+        return { key, direction: current.direction === 'asc' ? 'desc' : 'asc' };
+      }
+      return { key, direction: DEFAULT_SORT_DIRECTIONS[key] || 'asc' };
+    });
+  };
+
+  const handleSortOptionChange = (event) => {
+    const [key, direction] = event.target.value.split(':');
+    setSortConfig({ key, direction });
+  };
+
 
   const typeOptions = useMemo(() => {
     const entries = new Map();
@@ -606,7 +889,7 @@ export default function AssetCenterView({
         </section>
 
         <section className="rounded-lg border border-white bg-white/82 p-4 shadow-sm">
-          <div className="grid gap-3 lg:grid-cols-[minmax(240px,1.4fr)_180px_180px_180px_auto]">
+          <div className="grid gap-3 lg:grid-cols-[minmax(240px,1.4fr)_180px_180px_180px_200px_auto]">
             <label className="relative block">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
@@ -651,6 +934,17 @@ export default function AssetCenterView({
               <option value="backup">配置未接入</option>
               <option value="automation">未纳管</option>
             </select>
+            <select
+              value={sortOptionValue}
+              onChange={handleSortOptionChange}
+              className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100"
+              title="排序方式"
+            >
+              {hasPresetSortOption ? null : <option value={sortOptionValue}>{currentSortLabel}</option>}
+              {SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
             <div className="flex h-11 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-600">
               <Filter className="h-4 w-4 text-slate-400" />
               {filteredAssets.length}
@@ -658,8 +952,16 @@ export default function AssetCenterView({
           </div>
         </section>
 
+        <GroupSummary summary={groupSummary} total={filteredAssets.length} />
+
         <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_430px]">
-          <AssetTable assets={filteredAssets} selectedAssetId={selectedAsset?.id} onSelect={setSelectedAssetId} />
+          <AssetTable
+            assets={sortedAssets}
+            selectedAssetId={selectedAsset?.id}
+            onSelect={setSelectedAssetId}
+            sort={sortConfig}
+            onSort={handleSort}
+          />
           <aside className="xl:sticky xl:top-4 xl:self-start">
             <AssetDetail asset={selectedAsset} />
           </aside>
