@@ -8,6 +8,7 @@ import {
   KeyRound,
   Loader2,
   Plus,
+  PlayCircle,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -132,9 +133,15 @@ export default function VaultView({ currentRole }) {
   const [bulkText, setBulkText] = useState(BULK_IMPORT_TEMPLATE);
   const [bulkConflictMode, setBulkConflictMode] = useState('update');
   const [bulkResult, setBulkResult] = useState(null);
+  const [showBulkTest, setShowBulkTest] = useState(false);
+  const [bulkTestConfig, setBulkTestConfig] = useState({ ssh_port: 22, timeout_seconds: 15 });
+  const [bulkTestResult, setBulkTestResult] = useState(null);
+  const [bulkProvisionResult, setBulkProvisionResult] = useState(null);
 
   const isAdmin = currentRole === 'admin';
   const canReveal = ['admin', 'dc_operator', 'ip_manager'].includes(currentRole);
+  const canTestLogin = ['admin', 'dc_operator', 'ip_manager'].includes(currentRole);
+  const canProvisionBackup = ['admin', 'dc_operator'].includes(currentRole);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -187,6 +194,14 @@ export default function VaultView({ currentRole }) {
     ].some((value) => String(value || '').toLowerCase().includes(keyword)));
   }, [search, secrets]);
 
+  const bulkTestableSecrets = useMemo(
+    () => secrets.filter((item) => (
+      (item.lifecycle_status === 'active' || item.status === 'active')
+      && ['device', 'ip'].includes(item.target_type)
+    )),
+    [secrets],
+  );
+
   const openCreate = () => {
     setEditing(null);
     setForm(EMPTY_FORM);
@@ -198,6 +213,12 @@ export default function VaultView({ currentRole }) {
     setBulkConflictMode('update');
     setBulkResult(null);
     setShowBulkImport(true);
+  };
+
+  const openBulkTest = () => {
+    setBulkTestResult(null);
+    setBulkProvisionResult(null);
+    setShowBulkTest(true);
   };
 
   const openEdit = (item) => {
@@ -268,6 +289,61 @@ export default function VaultView({ currentRole }) {
     }
     const payload = await response.json().catch(() => ({}));
     setBulkResult(payload);
+    setBusy(false);
+    await loadData();
+  };
+
+  const submitBulkLoginTest = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    setBulkTestResult(null);
+    setBulkProvisionResult(null);
+    const response = await safeFetch('/api/secrets/bulk-test-login/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        secret_ids: bulkTestableSecrets.map((item) => item.id),
+        ssh_port: Number(bulkTestConfig.ssh_port || 22),
+        timeout_seconds: Number(bulkTestConfig.timeout_seconds || 15),
+      }),
+    });
+    if (!response.ok) {
+      setError(await readError(response, '批量测试登录失败。'));
+      setBusy(false);
+      return;
+    }
+    setBulkTestResult(await response.json().catch(() => ({})));
+    setBusy(false);
+  };
+
+  const provisionSuccessfulBackups = async () => {
+    const successIds = (bulkTestResult?.results || [])
+      .filter((item) => item.status === 'success' && item.template_status !== 'warning')
+      .map((item) => item.id);
+    if (!successIds.length) {
+      setError('没有可直接纳入配置备份的成功设备，请先处理模板待确认项。');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    setBulkProvisionResult(null);
+    const response = await safeFetch('/api/secrets/provision-backup-targets/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        secret_ids: successIds,
+        ssh_port: Number(bulkTestConfig.ssh_port || 22),
+        timeout_seconds: Number(bulkTestConfig.timeout_seconds || 15),
+        command_profile: 'huawei_vrp',
+      }),
+    });
+    if (!response.ok) {
+      setError(await readError(response, '批量纳入配置备份失败。'));
+      setBusy(false);
+      return;
+    }
+    setBulkProvisionResult(await response.json().catch(() => ({})));
     setBusy(false);
     await loadData();
   };
@@ -375,6 +451,7 @@ export default function VaultView({ currentRole }) {
             </div>
             <div className="flex gap-2">
               <button onClick={loadData} className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:border-blue-200 hover:text-blue-700"><RefreshCw size={15} />刷新</button>
+              {canTestLogin && <button onClick={openBulkTest} className="inline-flex h-9 items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-700 hover:border-blue-300 hover:bg-blue-100"><PlayCircle size={16} />批量测试登录</button>}
               {isAdmin && <button onClick={openBulkImport} className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:border-blue-200 hover:text-blue-700"><UploadCloud size={16} />批量导入</button>}
               {isAdmin && <button onClick={openCreate} className="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-bold text-white hover:bg-blue-500"><Plus size={16} />新增密码</button>}
             </div>
@@ -576,6 +653,150 @@ export default function VaultView({ currentRole }) {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {showBulkTest && (
+        <Modal title="批量测试设备登录" onClose={() => setShowBulkTest(false)} width="max-w-6xl">
+          <form onSubmit={submitBulkLoginTest} className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-[1fr_160px_180px_auto]">
+              <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm leading-6 text-blue-900">
+                <div className="font-bold">测试范围：{bulkTestableSecrets.length} 条已绑定设备/IP 的有效凭据</div>
+                <div className="text-xs text-blue-700">后端直接读取 OpenBao 并发起 SSH 登录测试，页面只展示分类结果，不返回明文密码。</div>
+              </div>
+              <label className="space-y-1.5 text-xs font-bold text-slate-600">
+                SSH 端口
+                <input
+                  type="number"
+                  min="1"
+                  max="65535"
+                  value={bulkTestConfig.ssh_port}
+                  onChange={(event) => setBulkTestConfig({ ...bulkTestConfig, ssh_port: event.target.value })}
+                  className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-500"
+                />
+              </label>
+              <label className="space-y-1.5 text-xs font-bold text-slate-600">
+                超时秒数
+                <input
+                  type="number"
+                  min="5"
+                  max="600"
+                  value={bulkTestConfig.timeout_seconds}
+                  onChange={(event) => setBulkTestConfig({ ...bulkTestConfig, timeout_seconds: event.target.value })}
+                  className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-500"
+                />
+              </label>
+              <div className="flex items-end">
+                <button disabled={busy || !bulkTestableSecrets.length} className="inline-flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-bold text-white disabled:opacity-50">
+                  {busy && <Loader2 size={16} className="animate-spin" />}
+                  开始测试
+                </button>
+              </div>
+            </div>
+          </form>
+
+          {bulkTestResult && (
+            <div className="mt-5 space-y-4">
+              <div className="grid gap-2 sm:grid-cols-5">
+                {[
+                  ['登录成功', bulkTestResult.success, 'text-emerald-700'],
+                  ['登录失败', bulkTestResult.failed, 'text-rose-700'],
+                  ['密码错误', bulkTestResult.auth_failed, 'text-orange-700'],
+                  ['端口/网络', (bulkTestResult.timeout || 0) + (bulkTestResult.refused || 0) + (bulkTestResult.unreachable || 0), 'text-amber-700'],
+                  ['模板待确认', bulkTestResult.template_warning, 'text-blue-700'],
+                ].map(([title, value, tone]) => (
+                  <div key={title} className="rounded-lg border border-slate-200 bg-white p-3">
+                    <div className="text-xs font-bold text-slate-500">{title}</div>
+                    <div className={`mt-1 text-xl font-black ${tone}`}>{value || 0}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="text-xs text-slate-600">
+                  成功且模板明确的设备可直接纳入配置备份；模板待确认的设备建议先在资产里修正设备类型/模板。
+                </div>
+                {canProvisionBackup && (
+                  <button
+                    type="button"
+                    onClick={provisionSuccessfulBackups}
+                    disabled={busy || !(bulkTestResult.results || []).some((item) => item.status === 'success' && item.template_status !== 'warning')}
+                    className="inline-flex h-9 items-center gap-2 rounded-lg bg-emerald-600 px-3 text-sm font-bold text-white disabled:opacity-50"
+                  >
+                    {busy && <Loader2 size={15} className="animate-spin" />}
+                    成功项纳入配置备份
+                  </button>
+                )}
+              </div>
+
+              <div className="max-h-[360px] overflow-auto rounded-lg border border-slate-200">
+                <table className="min-w-[1120px] w-full text-left text-xs">
+                  <thead className="sticky top-0 bg-slate-100 text-slate-500">
+                    <tr>
+                      {['状态', '凭据', '账号', '管理 IP', '绑定对象', '设备类型', '模板', '分类', '详情'].map((head) => (
+                        <th key={head} className="border-b border-r border-slate-200 px-3 py-2 font-bold">{head}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(bulkTestResult.results || []).map((item) => (
+                      <tr key={`${item.id}-${item.management_ip}-${item.status}`} className="hover:bg-slate-50">
+                        <td className="border-b border-r border-slate-100 px-3 py-2">
+                          <StatusPill value={item.status === 'success' ? 'success' : item.status === 'skipped' ? 'pending' : 'error'} />
+                        </td>
+                        <td className="border-b border-r border-slate-100 px-3 py-2 font-semibold text-slate-800">{item.name || '-'}</td>
+                        <td className="border-b border-r border-slate-100 px-3 py-2 font-mono">{item.username_hint || '-'}</td>
+                        <td className="border-b border-r border-slate-100 px-3 py-2 font-mono">{item.management_ip || '-'}</td>
+                        <td className="border-b border-r border-slate-100 px-3 py-2">{item.target || '-'}</td>
+                        <td className="border-b border-r border-slate-100 px-3 py-2">{item.raw_device_type || item.device_type || '-'}</td>
+                        <td className="border-b border-r border-slate-100 px-3 py-2">
+                          {item.template_status === 'warning' ? <span className="rounded-full bg-amber-50 px-2 py-1 font-semibold text-amber-700">待确认</span> : <span className="rounded-full bg-emerald-50 px-2 py-1 font-semibold text-emerald-700">可用</span>}
+                        </td>
+                        <td className="border-b border-r border-slate-100 px-3 py-2">{item.category_label || item.category || '-'}</td>
+                        <td className="border-b border-slate-100 px-3 py-2">{item.template_status === 'warning' ? item.template_detail : item.detail || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {bulkProvisionResult && (
+                <div className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                  <div className="grid gap-2 sm:grid-cols-4">
+                    {[
+                      ['新增目标', bulkProvisionResult.created],
+                      ['更新目标', bulkProvisionResult.updated],
+                      ['跳过', bulkProvisionResult.skipped],
+                      ['失败', bulkProvisionResult.failed],
+                    ].map(([title, value]) => (
+                      <div key={title} className="rounded-lg border border-emerald-100 bg-white p-3">
+                        <div className="text-xs font-bold text-emerald-700">{title}</div>
+                        <div className="mt-1 text-xl font-black text-slate-900">{value || 0}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="max-h-[220px] overflow-auto rounded-lg border border-emerald-100 bg-white">
+                    <table className="min-w-[820px] w-full text-left text-xs">
+                      <thead className="bg-emerald-50 text-emerald-800">
+                        <tr>{['状态', '目标', '管理 IP', '设备类型', '结果'].map((head) => <th key={head} className="border-b border-r border-emerald-100 px-3 py-2">{head}</th>)}</tr>
+                      </thead>
+                      <tbody>
+                        {(bulkProvisionResult.results || []).map((item) => (
+                          <tr key={`${item.id}-${item.management_ip}-${item.action || item.status}`}>
+                            <td className="border-b border-r border-emerald-50 px-3 py-2"><StatusPill value={item.status === 'success' ? 'success' : item.status === 'skipped' ? 'pending' : 'error'} /></td>
+                            <td className="border-b border-r border-emerald-50 px-3 py-2 font-semibold">{item.target || item.name}</td>
+                            <td className="border-b border-r border-emerald-50 px-3 py-2 font-mono">{item.management_ip || '-'}</td>
+                            <td className="border-b border-r border-emerald-50 px-3 py-2">{item.device_type || '-'}</td>
+                            <td className="border-b border-emerald-50 px-3 py-2">{item.detail || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </Modal>

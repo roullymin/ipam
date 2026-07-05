@@ -19,6 +19,7 @@ from rest_framework.test import APITestCase
 
 from .models import (
     Blocklist,
+    ConfigBackupTarget,
     Datacenter,
     DatacenterChangeRequest,
     IPAddress,
@@ -304,6 +305,54 @@ class SecretVaultApiTests(BaseApiTestCase):
         self.assertEqual(SecretRecord.objects.count(), 1)
         self.assertEqual(write_secret.call_count, 2)
         self.assertEqual(write_secret.call_args.args[2], 'RotatedSecret!')
+
+    @patch('ipam.views.test_secret_login')
+    def test_bulk_login_success_can_be_provisioned_as_backup_target(self, login_test):
+        login_test.return_value = {'status': 'success', 'message': 'ok', 'duration_seconds': 1}
+        client = self.make_authenticated_client(self.admin)
+        datacenter = Datacenter.objects.create(name='Login Test DC')
+        rack = Rack.objects.create(datacenter=datacenter, code='NET-01', height=42)
+        device = RackDevice.objects.create(
+            rack=rack,
+            name='Edge Firewall',
+            position=1,
+            u_height=1,
+            device_type='firewall',
+            mgmt_ip='10.77.0.1',
+        )
+        record = SecretRecord.objects.create(
+            name='Edge Firewall Admin',
+            credential_type='ssh',
+            target_type='device',
+            rack_device=device,
+            username_hint='admin',
+            status='active',
+            created_by=self.admin,
+        )
+
+        test_response = client.post(
+            '/api/secrets/bulk-test-login/',
+            {'secret_ids': [record.id], 'ssh_port': 22, 'timeout_seconds': 10},
+            format='json',
+        )
+
+        self.assertEqual(test_response.status_code, 200)
+        self.assertEqual(test_response.data['success'], 1)
+        self.assertEqual(test_response.data['results'][0]['management_ip'], '10.77.0.1')
+        self.assertNotIn('secret_value', json.dumps(test_response.data, ensure_ascii=False))
+
+        provision_response = client.post(
+            '/api/secrets/provision-backup-targets/',
+            {'secret_ids': [record.id], 'ssh_port': 22, 'timeout_seconds': 10},
+            format='json',
+        )
+
+        self.assertEqual(provision_response.status_code, 200)
+        self.assertEqual(provision_response.data['created'], 1)
+        target = ConfigBackupTarget.objects.get(management_ip='10.77.0.1')
+        self.assertEqual(target.credential, record)
+        self.assertEqual(target.device_type, 'firewall')
+        self.assertTrue(target.enabled)
 
     @patch('ipam.views.vault_read_secret')
     def test_operator_can_directly_reveal_secret(self, read_secret):

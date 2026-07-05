@@ -1845,6 +1845,110 @@ def _find_secret_bulk_conflict(payload):
     return queryset.filter(target_type='general', name__iexact=payload.get('name') or '').first()
 
 
+def _parse_id_list(value):
+    if value in (None, ''):
+        return []
+    if isinstance(value, str):
+        candidates = [item.strip() for item in value.split(',')]
+    elif isinstance(value, (list, tuple, set)):
+        candidates = value
+    else:
+        candidates = [value]
+    ids = []
+    for item in candidates:
+        if item in (None, ''):
+            continue
+        try:
+            ids.append(int(item))
+        except (TypeError, ValueError):
+            raise ValueError('ID 列表只能包含数字。')
+    return ids
+
+
+def _parse_positive_int(value, default, *, minimum=1, maximum=None, field_name='数值'):
+    try:
+        parsed = int(value if value not in (None, '') else default)
+    except (TypeError, ValueError):
+        raise ValueError(f'{field_name}必须是数字。')
+    if parsed < minimum:
+        raise ValueError(f'{field_name}不能小于 {minimum}。')
+    if maximum is not None and parsed > maximum:
+        raise ValueError(f'{field_name}不能大于 {maximum}。')
+    return parsed
+
+
+def _backup_device_type_with_template_state(value):
+    raw = str(value or '').strip()
+    lowered = raw.lower()
+    device_type = _normalize_backup_device_type(raw)
+    known_markers = {
+        'switch': ('switch', '交换'),
+        'router': ('router', 'route', '路由'),
+        'firewall': ('firewall', 'fw', '防火'),
+    }
+    recognized = bool(raw) and any(marker in lowered for marker in known_markers.get(device_type, ()))
+    if not recognized:
+        return device_type, 'warning', '设备类型未明确匹配到网络备份模板，请先确认厂商/命令模板。'
+    return device_type, 'ok', ''
+
+
+def _resolve_secret_login_target(secret):
+    rack_device = secret.rack_device if getattr(secret, 'rack_device_id', None) else None
+    ip_asset = secret.ip_address if getattr(secret, 'ip_address_id', None) else None
+    management_ip = ''
+    raw_device_type = ''
+    name = secret.name
+    target_label = secret.name
+    location = ''
+
+    if rack_device is not None:
+        management_ip = _extract_management_host(rack_device.mgmt_ip)
+        raw_device_type = rack_device.device_type
+        name = rack_device.name or secret.name
+        rack_label = ''
+        if rack_device.rack_id:
+            rack_label = f'{rack_device.rack.datacenter.name if rack_device.rack.datacenter_id else ""} / {rack_device.rack.code}'
+        target_label = f'{name}{f" / {management_ip}" if management_ip else ""}'
+        location = rack_label.strip(' /')
+    elif ip_asset is not None:
+        management_ip = _extract_management_host(ip_asset.ip_address)
+        raw_device_type = ip_asset.device_type
+        name = ip_asset.device_name or secret.name or ip_asset.ip_address
+        target_label = f'{name} / {ip_asset.ip_address}'
+
+    device_type, template_status, template_detail = _backup_device_type_with_template_state(raw_device_type)
+    return {
+        'management_ip': management_ip,
+        'rack_device': rack_device,
+        'ip_asset': ip_asset,
+        'name': name,
+        'target_label': target_label,
+        'location': location,
+        'raw_device_type': raw_device_type,
+        'device_type': device_type,
+        'template_status': template_status,
+        'template_detail': template_detail,
+    }
+
+
+def _classify_login_failure(detail):
+    message = str(detail or '')
+    lowered = message.lower()
+    if '认证' in message or '密码' in message or 'authentication' in lowered or 'auth' in lowered:
+        return 'auth_failed', '账号或密码错误'
+    if '超时' in message or 'timed out' in lowered or 'timeout' in lowered:
+        return 'timeout', '连接超时'
+    if '拒绝' in message or 'connection refused' in lowered:
+        return 'refused', '端口拒绝连接'
+    if '不可达' in message or 'no route to host' in lowered or 'network is unreachable' in lowered:
+        return 'unreachable', '网络不可达'
+    if '解析' in message or 'name or service not known' in lowered or 'temporary failure in name resolution' in lowered:
+        return 'resolve_failed', '管理地址无法解析'
+    if 'paramiko' in lowered or '依赖' in message:
+        return 'dependency', '后端依赖缺失'
+    return 'other', '其他失败'
+
+
 class SecretRecordViewSet(OptionalPaginationMixin, BaseViewSet):
     audit_module = 'secret_record'
     permission_classes = [SecretRecordPermission]
@@ -2180,6 +2284,233 @@ class SecretRecordViewSet(OptionalPaginationMixin, BaseViewSet):
         record_secret_audit(request, secret, 'test_login', reason=f'{management_ip}:{ssh_port}')
         return Response(payload)
 
+    @action(detail=False, methods=['post'], permission_classes=[SecretActionPermission], url_path='bulk-test-login')
+    def bulk_test_login(self, request):
+        role = get_user_role(request.user)
+        if role not in ('admin', 'dc_operator', 'ip_manager'):
+            raise PermissionDenied('当前角色不能批量测试设备登录。')
+        try:
+            secret_ids = _parse_id_list(request.data.get('secret_ids'))
+            ssh_port = _parse_positive_int(
+                request.data.get('ssh_port'),
+                22,
+                minimum=1,
+                maximum=65535,
+                field_name='SSH 端口',
+            )
+            timeout_seconds = _parse_positive_int(
+                request.data.get('timeout_seconds'),
+                30,
+                minimum=5,
+                maximum=600,
+                field_name='连接超时',
+            )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        queryset = self.get_queryset().filter(status='active').order_by('name', 'id')
+        if secret_ids:
+            queryset = queryset.filter(pk__in=secret_ids)
+        else:
+            queryset = queryset.filter(target_type__in=('device', 'ip'))
+
+        results = []
+        counters = {
+            'success': 0,
+            'failed': 0,
+            'skipped': 0,
+            'auth_failed': 0,
+            'timeout': 0,
+            'refused': 0,
+            'unreachable': 0,
+            'resolve_failed': 0,
+            'dependency': 0,
+            'other': 0,
+            'template_warning': 0,
+        }
+        for secret in queryset:
+            target = _resolve_secret_login_target(secret)
+            base_payload = {
+                'id': secret.pk,
+                'name': secret.name,
+                'username_hint': secret.username_hint,
+                'credential_type': secret.credential_type,
+                'target': target['target_label'],
+                'management_ip': target['management_ip'],
+                'location': target['location'],
+                'device_type': target['device_type'],
+                'raw_device_type': target['raw_device_type'],
+                'template_status': target['template_status'],
+                'template_detail': target['template_detail'],
+            }
+            if not target['management_ip']:
+                counters['skipped'] += 1
+                results.append(
+                    {
+                        **base_payload,
+                        'status': 'skipped',
+                        'category': 'missing_management_ip',
+                        'category_label': '缺少管理地址',
+                        'detail': '该凭据没有绑定可测试的设备管理 IP。',
+                    }
+                )
+                continue
+
+            if target['template_status'] == 'warning':
+                counters['template_warning'] += 1
+
+            try:
+                payload = test_secret_login(
+                    credential=secret,
+                    management_ip=target['management_ip'],
+                    ssh_port=ssh_port,
+                    timeout_seconds=timeout_seconds,
+                    read_secret=vault_read_secret,
+                )
+            except (ConfigBackupConnectionError, ConfigBackupError, VaultError) as exc:
+                category, category_label = _classify_login_failure(exc)
+                counters['failed'] += 1
+                counters[category] = counters.get(category, 0) + 1
+                record_secret_audit(request, secret, 'test_login', 'error', f'批量测试：{exc}')
+                results.append(
+                    {
+                        **base_payload,
+                        'status': 'failed',
+                        'category': category,
+                        'category_label': category_label,
+                        'detail': str(exc),
+                    }
+                )
+                continue
+
+            counters['success'] += 1
+            record_secret_audit(request, secret, 'test_login', reason=f'批量测试：{target["management_ip"]}:{ssh_port}')
+            results.append(
+                {
+                    **base_payload,
+                    'status': 'success',
+                    'category': 'ok',
+                    'category_label': '登录成功',
+                    'detail': payload.get('message') or 'SSH 登录测试成功。',
+                    'duration_seconds': payload.get('duration_seconds', 0),
+                }
+            )
+
+        return Response(
+            {
+                'status': 'success' if counters['failed'] == 0 else 'partial',
+                'total': len(results),
+                'ssh_port': ssh_port,
+                'timeout_seconds': timeout_seconds,
+                **counters,
+                'results': results,
+            }
+        )
+
+    @action(detail=False, methods=['post'], permission_classes=[SecretActionPermission], url_path='provision-backup-targets')
+    def provision_backup_targets(self, request):
+        role = get_user_role(request.user)
+        if role not in ('admin', 'dc_operator'):
+            raise PermissionDenied('当前角色不能批量纳入配置备份。')
+        try:
+            secret_ids = _parse_id_list(request.data.get('secret_ids'))
+            ssh_port = _parse_positive_int(
+                request.data.get('ssh_port'),
+                22,
+                minimum=1,
+                maximum=65535,
+                field_name='SSH 端口',
+            )
+            timeout_seconds = _parse_positive_int(
+                request.data.get('timeout_seconds'),
+                30,
+                minimum=5,
+                maximum=600,
+                field_name='连接超时',
+            )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if not secret_ids:
+            return Response({'detail': '请先选择登录测试成功的凭据。'}, status=status.HTTP_400_BAD_REQUEST)
+
+        command_profile = str(request.data.get('command_profile') or 'huawei_vrp').strip() or 'huawei_vrp'
+        allow_template_warnings = _coerce_bool(request.data.get('allow_template_warnings'), False)
+        queryset = self.get_queryset().filter(status='active', pk__in=secret_ids).order_by('name', 'id')
+        results = []
+        counters = {'created': 0, 'updated': 0, 'skipped': 0, 'failed': 0}
+
+        for secret in queryset:
+            target = _resolve_secret_login_target(secret)
+            base_payload = {
+                'id': secret.pk,
+                'name': secret.name,
+                'target': target['target_label'],
+                'management_ip': target['management_ip'],
+                'device_type': target['device_type'],
+                'template_status': target['template_status'],
+                'template_detail': target['template_detail'],
+            }
+            if not target['management_ip']:
+                counters['skipped'] += 1
+                results.append({**base_payload, 'status': 'skipped', 'detail': '缺少管理 IP，无法纳入配置备份。'})
+                continue
+            if target['template_status'] == 'warning' and not allow_template_warnings:
+                counters['skipped'] += 1
+                results.append({**base_payload, 'status': 'skipped', 'detail': target['template_detail']})
+                continue
+            try:
+                config_target, created = ConfigBackupTarget.objects.update_or_create(
+                    management_ip=target['management_ip'],
+                    defaults={
+                        'name': target['name'] or secret.name or target['management_ip'],
+                        'rack_device': target['rack_device'],
+                        'ip_address': target['ip_asset'],
+                        'device_type': target['device_type'],
+                        'command_profile': command_profile,
+                        'ssh_port': ssh_port,
+                        'timeout_seconds': timeout_seconds,
+                        'save_before_backup': _coerce_bool(request.data.get('save_before_backup'), True),
+                        'credential': secret,
+                        'enabled': True,
+                        'created_by': request.user if request.user.is_authenticated else None,
+                    },
+                )
+            except Exception as exc:
+                counters['failed'] += 1
+                results.append({**base_payload, 'status': 'failed', 'detail': str(exc)})
+                continue
+
+            action_name = 'created' if created else 'updated'
+            counters[action_name] += 1
+            record_audit(
+                request,
+                'config_backup_target',
+                'bulk_provision',
+                config_target,
+                '从批量登录测试结果纳入配置备份目标' if created else '从批量登录测试结果更新配置备份目标',
+            )
+            results.append(
+                {
+                    **base_payload,
+                    'status': 'success',
+                    'action': action_name,
+                    'backup_target_id': config_target.pk,
+                    'detail': '已创建配置备份目标。' if created else '已更新配置备份目标。',
+                }
+            )
+
+        return Response(
+            {
+                'status': 'success' if counters['failed'] == 0 else 'partial',
+                'total': len(results),
+                'command_profile': command_profile,
+                'ssh_port': ssh_port,
+                'timeout_seconds': timeout_seconds,
+                **counters,
+                'results': results,
+            }
+        )
+
 
 class SecretAccessRequestViewSet(OptionalPaginationMixin, viewsets.ReadOnlyModelViewSet):
     authentication_classes = (SessionAuthentication, BasicAuthentication)
@@ -2257,11 +2588,11 @@ def _find_backup_credential(rack_device=None, ip_asset=None):
 
 def _normalize_backup_device_type(value):
     normalized = str(value or '').strip().lower()
-    if 'firewall' in normalized or 'fw' == normalized:
+    if 'firewall' in normalized or '防火' in normalized or 'fw' == normalized:
         return 'firewall'
-    if 'router' in normalized:
+    if 'router' in normalized or '路由' in normalized:
         return 'router'
-    if 'switch' in normalized or normalized in {'switch_core', 'switch_access'}:
+    if 'switch' in normalized or '交换' in normalized or normalized in {'switch_core', 'switch_access'}:
         return 'switch'
     return normalized if normalized in {'switch', 'router', 'firewall'} else 'switch'
 
