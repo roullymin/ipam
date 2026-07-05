@@ -1,6 +1,6 @@
 import inspect
 import secrets
-from datetime import timedelta
+from datetime import time, timedelta
 
 from django.contrib.auth.models import User
 from django.db import models
@@ -883,6 +883,53 @@ class ConfigBackupTarget(models.Model):
         verbose_name_plural = '配置备份目标'
         db_table = 'ops_config_backup_target'
         ordering = ['management_ip', 'id']
+
+
+class ConfigBackupPolicy(models.Model):
+    SCHEDULE_CHOICES = [
+        ('manual', '手动执行'),
+        ('daily', '每天'),
+        ('weekly', '每周'),
+    ]
+    STRATEGY_CHOICES = [
+        ('all', '全部启用目标'),
+        ('failed', '只执行失败设备'),
+        ('device_type', '按设备类型'),
+        ('datacenter', '按机房'),
+    ]
+    RUN_STATUS_CHOICES = [
+        ('not_run', '未执行'),
+        ('success', '成功'),
+        ('failed', '失败'),
+        ('partial', '部分失败'),
+    ]
+
+    enabled = models.BooleanField('启用计划', default=False)
+    schedule_frequency = models.CharField('执行频率', max_length=20, choices=SCHEDULE_CHOICES, default='weekly')
+    schedule_time = models.TimeField('执行时间', default=time(3, 0))
+    schedule_weekday = models.PositiveSmallIntegerField('每周星期', default=6)
+    execution_strategy = models.CharField('执行策略', max_length=32, choices=STRATEGY_CHOICES, default='all')
+    strategy_device_type = models.CharField('策略设备类型', max_length=32, blank=True, default='')
+    strategy_datacenter = models.CharField('策略机房', max_length=120, blank=True, default='')
+    retention_count = models.PositiveSmallIntegerField('默认保留版本数', default=12)
+    email_enabled = models.BooleanField('启用邮件通知', default=False)
+    email_recipients = models.TextField('收件人', blank=True, default='')
+    notify_on_success = models.BooleanField('成功时通知', default=False)
+    notify_on_failure = models.BooleanField('失败时通知', default=True)
+    email_subject_prefix = models.CharField('邮件主题前缀', max_length=120, default='[IPAM 配置备份]')
+    last_run_at = models.DateTimeField('最近计划执行时间', null=True, blank=True)
+    last_run_status = models.CharField('最近计划执行状态', max_length=20, choices=RUN_STATUS_CHOICES, default='not_run')
+    last_run_message = models.TextField('最近计划执行摘要', blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return '网络配置备份策略'
+
+    class Meta:
+        verbose_name = '配置备份策略'
+        verbose_name_plural = '配置备份策略'
+        db_table = 'ops_config_backup_policy'
 
 
 class ConfigBackupVersion(models.Model):

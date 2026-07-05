@@ -11,6 +11,7 @@ from .models import (
     AuditLog,
     DatacenterChangeFirewallRule,
     Blocklist,
+    ConfigBackupPolicy,
     ConfigBackupTarget,
     ConfigBackupVersion,
     DatacenterChangeItem,
@@ -31,6 +32,7 @@ from .models import (
     UserProfile,
 )
 from .domains.change_requests.services import build_change_request_title
+from .domains.config_backup.policy import build_policy_cron_command, build_policy_cron_expression
 
 
 MAC_SANITIZE_PATTERN = re.compile(r'[^0-9a-fA-F]+')
@@ -752,6 +754,44 @@ class ConfigBackupTargetSerializer(serializers.ModelSerializer):
         if obj.ip_address:
             return obj.ip_address.ip_address
         return ''
+
+
+class ConfigBackupPolicySerializer(serializers.ModelSerializer):
+    cron_expression = serializers.SerializerMethodField()
+    cron_command = serializers.SerializerMethodField()
+    schedule_frequency_label = serializers.CharField(source='get_schedule_frequency_display', read_only=True)
+    execution_strategy_label = serializers.CharField(source='get_execution_strategy_display', read_only=True)
+    last_run_status_label = serializers.CharField(source='get_last_run_status_display', read_only=True)
+
+    class Meta:
+        model = ConfigBackupPolicy
+        fields = '__all__'
+        read_only_fields = [
+            'last_run_at',
+            'last_run_status',
+            'last_run_message',
+            'created_at',
+            'updated_at',
+        ]
+
+    def validate(self, attrs):
+        retention_count = attrs.get('retention_count', self.instance.retention_count if self.instance else 12)
+        try:
+            retention_count_value = int(retention_count)
+        except (TypeError, ValueError):
+            raise serializers.ValidationError({'retention_count': ['保留版本数必须是数字。']})
+        if not (1 <= retention_count_value <= 200):
+            raise serializers.ValidationError({'retention_count': ['保留版本数必须在 1-200 之间。']})
+        email_recipients = attrs.get('email_recipients', self.instance.email_recipients if self.instance else '')
+        if attrs.get('email_enabled', self.instance.email_enabled if self.instance else False) and not str(email_recipients or '').strip():
+            raise serializers.ValidationError({'email_recipients': ['启用邮件通知时必须填写收件人。']})
+        return attrs
+
+    def get_cron_expression(self, obj):
+        return build_policy_cron_expression(obj)
+
+    def get_cron_command(self, obj):
+        return build_policy_cron_command(obj)
 
 
 class ResidentDeviceSerializer(serializers.ModelSerializer):

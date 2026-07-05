@@ -53,6 +53,8 @@ urlpatterns = [
     path('api/list-backups/', views.list_backups),
     path('api/backup/summary/', views.backup_summary),
     path('api/config-backups/summary/', views.config_backup_summary),
+    path('api/config-backups/policy/', views.config_backup_policy),
+    path('api/config-backups/test-email/', views.config_backup_test_email),
     path('api/backup/download/', views.download_backup),
     path('api/data-quality/encoding-report/', views.encoding_report),
     path('api/scan/', views.scan_subnet),

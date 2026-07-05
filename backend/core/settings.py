@@ -177,6 +177,18 @@ OPENBAO_KV_MOUNT = get_env('OPENBAO_KV_MOUNT', default='secret')
 OPENBAO_NAMESPACE = get_env('OPENBAO_NAMESPACE', default='')
 OPENBAO_TIMEOUT_SECONDS = int(get_env('OPENBAO_TIMEOUT_SECONDS', default='5'))
 
+EMAIL_HOST = get_env('EMAIL_HOST', 'SMTP_HOST', default='')
+EMAIL_PORT = int(get_env('EMAIL_PORT', 'SMTP_PORT', default='25'))
+EMAIL_HOST_USER = get_env('EMAIL_HOST_USER', 'SMTP_USER', default='')
+EMAIL_HOST_PASSWORD = get_env('EMAIL_HOST_PASSWORD', 'SMTP_PASSWORD', default='')
+EMAIL_USE_TLS = get_env_bool('EMAIL_USE_TLS', 'SMTP_USE_TLS', default=False)
+EMAIL_USE_SSL = get_env_bool('EMAIL_USE_SSL', 'SMTP_USE_SSL', default=False)
+DEFAULT_FROM_EMAIL = get_env('DEFAULT_FROM_EMAIL', 'EMAIL_FROM', default=EMAIL_HOST_USER or 'ipam@example.local')
+EMAIL_BACKEND = get_env(
+    'EMAIL_BACKEND',
+    default='django.core.mail.backends.smtp.EmailBackend' if EMAIL_HOST else 'django.core.mail.backends.console.EmailBackend',
+)
+
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
     { 'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator', },

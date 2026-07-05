@@ -1,20 +1,26 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Archive,
+  CalendarDays,
   CheckCircle2,
   Clock3,
   Database,
   Download,
+  Eye,
   FolderOpen,
+  HardDrive,
   ListChecks,
+  Mail,
   Play,
   RefreshCw,
+  Save,
   Search,
   Server,
   Settings2,
   ShieldCheck,
   Terminal,
+  X,
 } from 'lucide-react';
 import { safeFetch } from '../../../lib/api';
 
@@ -72,6 +78,42 @@ const STATUS_STYLES = {
   never: 'bg-slate-100 text-slate-600 ring-slate-200',
   disabled: 'bg-amber-50 text-amber-700 ring-amber-200',
 };
+
+const WEEKDAY_OPTIONS = [
+  { value: 0, label: '周一' },
+  { value: 1, label: '周二' },
+  { value: 2, label: '周三' },
+  { value: 3, label: '周四' },
+  { value: 4, label: '周五' },
+  { value: 5, label: '周六' },
+  { value: 6, label: '周日' },
+];
+
+const DEVICE_TYPE_LABELS = {
+  switch: '交换机',
+  router: '路由器',
+  firewall: '防火墙',
+  other: '其他',
+};
+
+function createPolicyForm(policy = {}) {
+  return {
+    enabled: !!policy.enabled,
+    schedule_frequency: policy.schedule_frequency || 'weekly',
+    schedule_time: String(policy.schedule_time || '03:00').slice(0, 5),
+    schedule_weekday: Number(policy.schedule_weekday ?? 6),
+    execution_strategy: policy.execution_strategy || 'all',
+    strategy_device_type: policy.strategy_device_type || '',
+    strategy_datacenter: policy.strategy_datacenter || '',
+    retention_count: policy.retention_count || 12,
+    email_enabled: !!policy.email_enabled,
+    email_recipients: policy.email_recipients || '',
+    notify_on_success: !!policy.notify_on_success,
+    notify_on_failure: policy.notify_on_failure ?? true,
+    email_subject_prefix: policy.email_subject_prefix || '[IPAM 配置备份]',
+    apply_retention_to_targets: false,
+  };
+}
 
 function ActionButton({ icon: Icon, label, onClick, primary = false, disabled = false }) {
   return (
@@ -188,6 +230,38 @@ async function readApiError(response, fallback) {
   return payload?.detail || payload?.message || fallback;
 }
 
+function joinBackupPath(base, relative) {
+  if (!base || !relative) return relative || base || '-';
+  return `${String(base).replace(/[\\/]+$/, '')}/${String(relative).replace(/^[\\/]+/, '')}`;
+}
+
+function VersionContentModal({ viewer, onClose }) {
+  if (!viewer) return null;
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm">
+      <div className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+          <div>
+            <h3 className="text-base font-black text-slate-900">{viewer.filename || '配置版本'}</h3>
+            <div className="mt-1 font-mono text-xs text-slate-500">{viewer.container_full_path || viewer.relative_path}</div>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        {viewer.truncated ? (
+          <div className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs font-bold text-amber-800">
+            文件较大，当前只展示前 1 MB 内容。
+          </div>
+        ) : null}
+        <pre className="custom-scrollbar overflow-auto bg-slate-950 p-4 text-xs leading-5 text-slate-100">
+          {viewer.content || '暂无内容'}
+        </pre>
+      </div>
+    </div>
+  );
+}
+
 function SegmentButton({ active, icon: Icon, label, onClick }) {
   return (
     <button
@@ -213,8 +287,11 @@ function NetworkBackupPanel({ configBackups, onRefresh }) {
   const [errorFilter, setErrorFilter] = useState('all');
   const [selectedTargetIds, setSelectedTargetIds] = useState([]);
   const [busyAction, setBusyAction] = useState('');
+  const [policyForm, setPolicyForm] = useState(() => createPolicyForm(configBackups?.policy));
+  const [viewer, setViewer] = useState(null);
 
   const targets = useMemo(() => getTargets(configBackups), [configBackups]);
+  const versions = useMemo(() => (Array.isArray(configBackups?.versions) ? configBackups.versions : []), [configBackups]);
   const failedTargets = useMemo(() => targets.filter((target) => getTargetStatus(target) === 'failed'), [targets]);
   const typeOptions = useMemo(
     () => Array.from(new Set(targets.map((target) => target.device_type || '未分类'))),
@@ -260,6 +337,13 @@ function NetworkBackupPanel({ configBackups, onRefresh }) {
 
   const allFilteredSelected =
     filteredTargets.length > 0 && filteredTargets.every((target) => selectedTargetIds.includes(target.id));
+  const hostStoragePath = configBackups?.host_storage_path || './data/config_backups';
+  const containerStoragePath = configBackups?.container_storage_path || configBackups?.storage_path || '/backup';
+  const latestPolicy = configBackups?.policy || {};
+
+  useEffect(() => {
+    setPolicyForm(createPolicyForm(configBackups?.policy));
+  }, [configBackups?.policy]);
 
   const refreshBackupData = async () => {
     if (typeof onRefresh === 'function') {
@@ -287,6 +371,89 @@ function NetworkBackupPanel({ configBackups, onRefresh }) {
     } finally {
       setBusyAction('');
     }
+  };
+
+  const runStrategy = async (strategy = policyForm.execution_strategy) => {
+    setBusyAction(`strategy:${strategy}`);
+    try {
+      const response = await safeFetch('/api/config-backup-targets/run-all/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          strategy,
+          device_type: policyForm.strategy_device_type,
+          datacenter: policyForm.strategy_datacenter,
+          notify: policyForm.email_enabled,
+        }),
+      });
+      if (!response.ok) {
+        window.alert(await readApiError(response, '按策略执行失败。'));
+        return;
+      }
+      const payload = await response.json().catch(() => ({}));
+      const emailDetail = payload.email?.detail ? `\n邮件：${payload.email.detail}` : '';
+      window.alert(`执行完成：成功 ${payload.success || 0}，失败 ${payload.failed || 0}。${emailDetail}`);
+      await refreshBackupData();
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const savePolicy = async (event) => {
+    event.preventDefault();
+    setBusyAction('policy:save');
+    try {
+      const response = await safeFetch('/api/config-backups/policy/', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(policyForm),
+      });
+      if (!response.ok) {
+        window.alert(await readApiError(response, '保存备份策略失败。'));
+        return;
+      }
+      await refreshBackupData();
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const testEmail = async () => {
+    setBusyAction('policy:test-email');
+    try {
+      const response = await safeFetch('/api/config-backups/test-email/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(policyForm),
+      });
+      if (!response.ok) {
+        window.alert(await readApiError(response, '测试邮件发送失败。'));
+        return;
+      }
+      const payload = await response.json().catch(() => ({}));
+      window.alert(payload.detail || '测试邮件已发送。');
+      await refreshBackupData();
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const viewVersion = async (version) => {
+    setBusyAction(`view:${version.id}`);
+    try {
+      const response = await safeFetch(`/api/config-backup-versions/${version.id}/content/`);
+      if (!response.ok) {
+        window.alert(await readApiError(response, '读取配置内容失败。'));
+        return;
+      }
+      setViewer(await response.json());
+    } finally {
+      setBusyAction('');
+    }
+  };
+
+  const downloadVersion = (version) => {
+    window.open(`/api/config-backup-versions/${version.id}/download/`, '_blank', 'noopener,noreferrer');
   };
 
   const testTarget = async (target) => {
@@ -343,6 +510,18 @@ function NetworkBackupPanel({ configBackups, onRefresh }) {
               onClick={() => runTargets(selectedTargetIds)}
               disabled={busyAction || selectedTargetIds.length === 0}
             />
+            <ActionButton
+              icon={Settings2}
+              label="按策略执行"
+              onClick={() => runStrategy()}
+              disabled={!!busyAction}
+            />
+            <ActionButton
+              icon={AlertTriangle}
+              label="重试失败"
+              onClick={() => runStrategy('failed')}
+              disabled={!!busyAction || failedTargets.length === 0}
+            />
             <ActionButton icon={Play} label="执行全部" onClick={() => runTargets()} primary disabled={!!busyAction} />
           </div>
         </div>
@@ -356,7 +535,33 @@ function NetworkBackupPanel({ configBackups, onRefresh }) {
         <SummaryTile icon={Clock3} title="最近备份" value={formatDateTime(configBackups?.latest_backup_at)} subtext={configBackups?.latest_backup_name || '暂无文件'} tone="blue" />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_320px]">
+      <section className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 bg-white p-4 xl:grid-cols-[1fr_1fr_160px_160px]">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
+            <FolderOpen className="h-4 w-4 text-blue-600" />
+            宿主机存储目录
+          </div>
+          <div className="mt-2 truncate font-mono text-sm font-bold text-slate-900">{hostStoragePath}</div>
+        </div>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
+            <HardDrive className="h-4 w-4 text-emerald-600" />
+            容器存储目录
+          </div>
+          <div className="mt-2 truncate font-mono text-sm font-bold text-slate-900">{containerStoragePath}</div>
+        </div>
+        <div>
+          <div className="text-xs font-bold text-slate-500">文件数量</div>
+          <div className="mt-2 text-xl font-black text-slate-900">{configBackups?.total_files || 0}</div>
+        </div>
+        <div>
+          <div className="text-xs font-bold text-slate-500">已用空间</div>
+          <div className="mt-2 text-xl font-black text-slate-900">{configBackups?.total_size || formatBytes(configBackups?.total_bytes || 0)}</div>
+        </div>
+      </section>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_380px]">
+        <div className="space-y-4">
         <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
           <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 xl:flex-row xl:items-center xl:justify-between">
             <div>
@@ -508,12 +713,273 @@ function NetworkBackupPanel({ configBackups, onRefresh }) {
           </div>
         </section>
 
+        <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+          <div className="flex flex-col gap-2 border-b border-slate-100 px-4 py-3 xl:flex-row xl:items-center xl:justify-between">
+            <div>
+              <h3 className="text-base font-black text-slate-900">版本存储</h3>
+              <p className="mt-1 text-sm text-slate-500">最近 {versions.length} 个配置版本，支持在线查看和下载。</p>
+            </div>
+            <div className="rounded-md bg-slate-50 px-2 py-1 text-xs font-bold text-slate-500">
+              路径 = 存储目录 + 相对路径
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-[980px] text-left text-sm">
+              <thead className="border-b border-slate-100 bg-slate-50/80 text-xs text-slate-500">
+                <tr>
+                  <th className="px-4 py-3 font-bold">文件名</th>
+                  <th className="px-4 py-3 font-bold">完整路径</th>
+                  <th className="px-4 py-3 font-bold">大小</th>
+                  <th className="px-4 py-3 font-bold">时间</th>
+                  <th className="px-4 py-3 font-bold">状态</th>
+                  <th className="px-4 py-3 font-bold text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {versions.map((version) => (
+                  <tr key={version.id} className="hover:bg-slate-50/70">
+                    <td className="px-4 py-3 align-top">
+                      <div className="font-mono text-sm font-bold text-slate-900">{version.filename || '-'}</div>
+                      <div className="mt-1 text-xs text-slate-500">{version.target_name || version.target || ''}</div>
+                    </td>
+                    <td className="max-w-[420px] px-4 py-3 align-top">
+                      <div className="truncate font-mono text-xs text-slate-600" title={joinBackupPath(hostStoragePath, version.relative_path)}>
+                        {joinBackupPath(hostStoragePath, version.relative_path)}
+                      </div>
+                      <div className="mt-1 truncate font-mono text-xs text-slate-400" title={joinBackupPath(containerStoragePath, version.relative_path)}>
+                        {joinBackupPath(containerStoragePath, version.relative_path)}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 align-top font-semibold text-slate-700">{version.size || formatBytes(version.bytes || 0)}</td>
+                    <td className="px-4 py-3 align-top text-slate-500">{version.time || formatDateTime(version.time_iso)}</td>
+                    <td className="px-4 py-3 align-top">
+                      <Pill status={version.status === 'success' ? 'success' : 'failed'} />
+                      {version.error_message ? <div className="mt-1 max-w-[220px] truncate text-xs text-rose-600">{version.error_message}</div> : null}
+                    </td>
+                    <td className="px-4 py-3 text-right align-top">
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => viewVersion(version)}
+                          disabled={busyAction === `view:${version.id}` || version.status !== 'success'}
+                          className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:text-slate-400"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          查看
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => downloadVersion(version)}
+                          disabled={version.status !== 'success'}
+                          className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-2.5 py-2 text-xs font-bold text-white hover:bg-blue-700 disabled:bg-slate-300"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          下载
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {versions.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-400">
+                      暂无配置版本。
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        </div>
+
         <aside className="space-y-4">
+          <section className="rounded-lg border border-slate-200 bg-white p-4">
+            <div className="flex items-center gap-2 text-base font-black text-slate-900">
+              <CalendarDays className="h-5 w-5 text-blue-600" />
+              计划与通知
+            </div>
+            <form className="mt-3 space-y-3" onSubmit={savePolicy}>
+              <label className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
+                启用计划
+                <input
+                  type="checkbox"
+                  checked={policyForm.enabled}
+                  onChange={(event) => setPolicyForm((current) => ({ ...current, enabled: event.target.checked }))}
+                />
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-500">频率</span>
+                  <select
+                    value={policyForm.schedule_frequency}
+                    onChange={(event) => setPolicyForm((current) => ({ ...current, schedule_frequency: event.target.value }))}
+                    className="mt-1 h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm font-bold text-slate-700"
+                  >
+                    <option value="manual">手动</option>
+                    <option value="daily">每天</option>
+                    <option value="weekly">每周</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-500">时间</span>
+                  <input
+                    type="time"
+                    value={policyForm.schedule_time}
+                    onChange={(event) => setPolicyForm((current) => ({ ...current, schedule_time: event.target.value }))}
+                    className="mt-1 h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm font-bold text-slate-700"
+                  />
+                </label>
+              </div>
+              {policyForm.schedule_frequency === 'weekly' ? (
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-500">每周</span>
+                  <select
+                    value={policyForm.schedule_weekday}
+                    onChange={(event) => setPolicyForm((current) => ({ ...current, schedule_weekday: Number(event.target.value) }))}
+                    className="mt-1 h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm font-bold text-slate-700"
+                  >
+                    {WEEKDAY_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                  </select>
+                </label>
+              ) : null}
+              <label className="block">
+                <span className="text-xs font-bold text-slate-500">执行策略</span>
+                <select
+                  value={policyForm.execution_strategy}
+                  onChange={(event) => setPolicyForm((current) => ({ ...current, execution_strategy: event.target.value }))}
+                  className="mt-1 h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm font-bold text-slate-700"
+                >
+                  <option value="all">全部启用目标</option>
+                  <option value="failed">只执行失败设备</option>
+                  <option value="device_type">按设备类型</option>
+                  <option value="datacenter">按机房</option>
+                </select>
+              </label>
+              {policyForm.execution_strategy === 'device_type' ? (
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-500">设备类型</span>
+                  <select
+                    value={policyForm.strategy_device_type}
+                    onChange={(event) => setPolicyForm((current) => ({ ...current, strategy_device_type: event.target.value }))}
+                    className="mt-1 h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm font-bold text-slate-700"
+                  >
+                    <option value="">请选择类型</option>
+                    {typeOptions.map((type) => <option key={type} value={type}>{DEVICE_TYPE_LABELS[type] || type}</option>)}
+                  </select>
+                </label>
+              ) : null}
+              {policyForm.execution_strategy === 'datacenter' ? (
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-500">机房</span>
+                  <select
+                    value={policyForm.strategy_datacenter}
+                    onChange={(event) => setPolicyForm((current) => ({ ...current, strategy_datacenter: event.target.value }))}
+                    className="mt-1 h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm font-bold text-slate-700"
+                  >
+                    <option value="">请选择机房</option>
+                    {locationOptions.map((location) => <option key={location} value={location}>{location}</option>)}
+                  </select>
+                </label>
+              ) : null}
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-500">默认保留版本</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="200"
+                    value={policyForm.retention_count}
+                    onChange={(event) => setPolicyForm((current) => ({ ...current, retention_count: event.target.value }))}
+                    className="mt-1 h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-sm font-bold text-slate-700"
+                  />
+                </label>
+                <label className="mt-5 flex items-center gap-2 rounded-md border border-slate-100 bg-slate-50 px-2 text-xs font-bold text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={policyForm.apply_retention_to_targets}
+                    onChange={(event) => setPolicyForm((current) => ({ ...current, apply_retention_to_targets: event.target.checked }))}
+                  />
+                  应用到目标
+                </label>
+              </div>
+              <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                <label className="flex items-center justify-between text-sm font-bold text-slate-700">
+                  邮件通知
+                  <input
+                    type="checkbox"
+                    checked={policyForm.email_enabled}
+                    onChange={(event) => setPolicyForm((current) => ({ ...current, email_enabled: event.target.checked }))}
+                  />
+                </label>
+                <textarea
+                  value={policyForm.email_recipients}
+                  onChange={(event) => setPolicyForm((current) => ({ ...current, email_recipients: event.target.value }))}
+                  placeholder="admin@example.com, noc@example.com"
+                  className="mt-2 min-h-[58px] w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm text-slate-700 outline-none"
+                />
+                <div className="mt-2 grid grid-cols-2 gap-2 text-xs font-bold text-slate-600">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={policyForm.notify_on_success}
+                      onChange={(event) => setPolicyForm((current) => ({ ...current, notify_on_success: event.target.checked }))}
+                    />
+                    成功通知
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={policyForm.notify_on_failure}
+                      onChange={(event) => setPolicyForm((current) => ({ ...current, notify_on_failure: event.target.checked }))}
+                    />
+                    失败通知
+                  </label>
+                </div>
+              </div>
+              <div className="rounded-lg bg-slate-950 px-3 py-2">
+                <div className="text-xs font-bold text-slate-400">宿主机 cron 建议</div>
+                <div className="mt-2 break-all font-mono text-xs leading-5 text-slate-100">
+                  {latestPolicy.cron_command || '手动模式不生成 cron 命令'}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={busyAction === 'policy:save'}
+                  className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-md bg-blue-600 px-3 text-sm font-bold text-white hover:bg-blue-700 disabled:bg-slate-300"
+                >
+                  <Save className="h-4 w-4" />
+                  保存策略
+                </button>
+                <button
+                  type="button"
+                  onClick={testEmail}
+                  disabled={busyAction === 'policy:test-email'}
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:text-slate-400"
+                >
+                  <Mail className="h-4 w-4" />
+                  测试
+                </button>
+              </div>
+            </form>
+          </section>
+
           <section className="rounded-lg border border-slate-200 bg-white p-4">
             <div className="flex items-center gap-2 text-base font-black text-slate-900">
               <AlertTriangle className="h-5 w-5 text-rose-500" />
               失败设备
             </div>
+            {Array.isArray(configBackups?.failure_summary) && configBackups.failure_summary.length > 0 ? (
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                {configBackups.failure_summary.map((item) => (
+                  <div key={item.reason} className="rounded-md bg-rose-50 px-2 py-2">
+                    <div className="text-xs font-bold text-rose-700">{item.reason}</div>
+                    <div className="mt-1 text-lg font-black text-rose-900">{item.count}</div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <div className="mt-3 space-y-2">
               {failedTargets.slice(0, 6).map((target) => (
                 <div key={target.id} className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-2">
@@ -551,6 +1017,7 @@ function NetworkBackupPanel({ configBackups, onRefresh }) {
           </section>
         </aside>
       </div>
+      <VersionContentModal viewer={viewer} onClose={() => setViewer(null)} />
     </div>
   );
 }

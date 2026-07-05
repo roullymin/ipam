@@ -82,6 +82,15 @@ from .domains.config_backup.selectors import (
     collect_config_backup_files,
     get_config_backup_dir,
 )
+from .domains.config_backup.policy import (
+    ConfigBackupPolicyError,
+    get_or_create_config_backup_policy,
+    run_config_backup_targets,
+    select_policy_targets,
+    send_config_backup_notification,
+    summarize_failure_reasons,
+    update_policy_run_state,
+)
 from .domains.config_backup.services import (
     ConfigBackupConnectionError,
     ConfigBackupError,
@@ -123,6 +132,7 @@ from .domains.vault.services import (
 from .serializers import (
     AuditLogSerializer,
     BlocklistSerializer,
+    ConfigBackupPolicySerializer,
     ConfigBackupTargetSerializer,
     ConfigBackupVersionSerializer,
     DatacenterChangeRequestPublicSerializer,
@@ -2047,47 +2057,72 @@ class ConfigBackupTargetViewSet(OptionalPaginationMixin, BaseViewSet):
     @action(detail=False, methods=['post'], url_path='run-all')
     def run_all(self, request):
         target_ids = request.data.get('target_ids') or []
-        queryset = self.get_queryset().filter(enabled=True)
+        strategy = request.data.get('strategy') or 'all'
+        policy = get_or_create_config_backup_policy()
+        queryset = self.get_queryset()
         if target_ids:
-            queryset = queryset.filter(pk__in=target_ids)
-        targets = list(queryset.order_by('management_ip'))
-        results = []
-        success_count = 0
-        failed_count = 0
-        for target in targets:
-            try:
-                version = run_config_backup_target(
-                    target=target,
-                    base_dir=settings.BASE_DIR,
-                    read_secret=vault_read_secret,
-                )
-                status_value = version.status
-                detail = version.error_message if version.status != 'success' else ''
-            except (ConfigBackupError, VaultError) as exc:
-                status_value = 'failed'
-                detail = str(exc)
-                version = None
-            if status_value == 'success':
-                success_count += 1
-            else:
-                failed_count += 1
-            target.refresh_from_db()
-            results.append(
-                {
-                    'target': ConfigBackupTargetSerializer(target, context={'request': request}).data,
-                    'status': status_value,
-                    'detail': detail,
-                    'version': ConfigBackupVersionSerializer(version).data if version else None,
-                }
+            queryset = queryset.filter(enabled=True, pk__in=target_ids)
+        else:
+            queryset = select_policy_targets(
+                policy,
+                strategy=strategy,
+                device_type=request.data.get('device_type') or '',
+                datacenter=request.data.get('datacenter') or '',
+                queryset=queryset,
             )
+        targets = list(queryset.order_by('management_ip', 'id'))
+        run_result = run_config_backup_targets(
+            targets=targets,
+            base_dir=settings.BASE_DIR,
+            read_secret=vault_read_secret,
+        )
+        email_result = {'sent': False, 'detail': ''}
+        if request.data.get('notify'):
+            try:
+                email_result = send_config_backup_notification(policy, run_result, force=True)
+            except ConfigBackupPolicyError as exc:
+                email_result = {'sent': False, 'detail': str(exc)}
+        results = [
+            {
+                'target': ConfigBackupTargetSerializer(item['target'], context={'request': request}).data,
+                'status': item['status'],
+                'detail': item['detail'],
+                'version': ConfigBackupVersionSerializer(item['version']).data if item['version'] else None,
+            }
+            for item in run_result.results
+        ]
         return Response(
             {
-                'total': len(results),
-                'success': success_count,
-                'failed': failed_count,
+                'total': run_result.total,
+                'success': run_result.success,
+                'failed': run_result.failed,
                 'results': results,
+                'email': email_result,
             }
         )
+
+
+def _resolve_config_backup_version_path(version):
+    if not version.relative_path:
+        raise FileNotFoundError('该版本没有关联文件路径。')
+    backup_dir = os.path.abspath(get_config_backup_dir(settings.BASE_DIR))
+    relative_path = version.relative_path.replace('/', os.sep)
+    file_path = os.path.abspath(os.path.join(backup_dir, relative_path))
+    if file_path != backup_dir and not file_path.startswith(f'{backup_dir}{os.sep}'):
+        raise PermissionDenied('备份文件路径非法。')
+    if not os.path.isfile(file_path):
+        raise FileNotFoundError('没有找到对应的配置备份文件。')
+    return backup_dir, file_path
+
+
+def _read_config_backup_file(file_path, limit=1024 * 1024):
+    opener = gzip.open if file_path.endswith('.gz') else open
+    with opener(file_path, 'rb') as handle:
+        content = handle.read(limit + 1)
+    truncated = len(content) > limit
+    if truncated:
+        content = content[:limit]
+    return content.decode('utf-8', errors='replace'), truncated
 
 
 class ConfigBackupVersionViewSet(OptionalPaginationMixin, viewsets.ReadOnlyModelViewSet):
@@ -2097,6 +2132,36 @@ class ConfigBackupVersionViewSet(OptionalPaginationMixin, viewsets.ReadOnlyModel
     serializer_class = ConfigBackupVersionSerializer
     filter_backends = [filters.SearchFilter]
     search_fields = ['target__name', 'target__management_ip', 'filename', 'relative_path', 'error_message']
+
+    @action(detail=True, methods=['get'])
+    def download(self, request, pk=None):
+        version = self.get_object()
+        try:
+            _, file_path = _resolve_config_backup_version_path(version)
+        except FileNotFoundError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_404_NOT_FOUND)
+        record_audit(request, 'config_backup_version', 'download', version, f'下载配置备份：{version.filename}')
+        return FileResponse(open(file_path, 'rb'), as_attachment=True, filename=version.filename or os.path.basename(file_path))
+
+    @action(detail=True, methods=['get'])
+    def content(self, request, pk=None):
+        version = self.get_object()
+        try:
+            backup_dir, file_path = _resolve_config_backup_version_path(version)
+            content, truncated = _read_config_backup_file(file_path)
+        except FileNotFoundError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_404_NOT_FOUND)
+        return Response(
+            {
+                'id': version.id,
+                'filename': version.filename,
+                'relative_path': version.relative_path,
+                'container_full_path': file_path,
+                'container_storage_path': backup_dir,
+                'content': content,
+                'truncated': truncated,
+            }
+        )
 
 
 class BlocklistViewSet(OptionalPaginationMixin, BaseViewSet):
@@ -3132,8 +3197,13 @@ def backup_summary(request):
 @permission_classes([DcimAccessPermission])
 def config_backup_summary(request):
     backup_dir = get_config_backup_dir(settings.BASE_DIR)
+    host_backup_dir = os.environ.get('CONFIG_BACKUP_HOST_DIR') or os.environ.get('NETWORK_CONFIG_BACKUP_HOST_DIR') or './data/config_backups'
     files = collect_config_backup_files(backup_dir)
     payload = build_config_backup_summary(files, backup_dir)
+    policy = get_or_create_config_backup_policy()
+    payload['container_storage_path'] = backup_dir
+    payload['host_storage_path'] = host_backup_dir
+    payload['policy'] = ConfigBackupPolicySerializer(policy).data
     payload['targets'] = {}
     targets = ConfigBackupTarget.objects.select_related(
         'rack_device',
@@ -3170,11 +3240,58 @@ def config_backup_summary(request):
     payload['target_count'] = len(payload['targets'])
     payload['enabled_target_count'] = sum(1 for target in targets if target.enabled)
     payload['total_devices'] = len(payload['devices'])
+    payload['failure_summary'] = summarize_failure_reasons(targets)
+    payload['versions'] = ConfigBackupVersionSerializer(
+        ConfigBackupVersion.objects.select_related('target', 'target__rack_device', 'target__ip_address').order_by('-started_at', '-id')[:200],
+        many=True,
+    ).data
     if latest_db_version is not None and not payload.get('latest_backup_at'):
         latest_payload = ConfigBackupVersionSerializer(latest_db_version).data
         payload['latest_backup_at'] = latest_payload.get('time_iso') or ''
         payload['latest_backup_name'] = latest_payload.get('filename') or ''
     return Response(payload)
+
+
+@api_view(['GET', 'PATCH', 'POST'])
+@authentication_classes([SessionAuthentication, BasicAuthentication])
+@permission_classes([DcimAccessPermission])
+def config_backup_policy(request):
+    policy = get_or_create_config_backup_policy()
+    if request.method == 'GET':
+        return Response(ConfigBackupPolicySerializer(policy).data)
+    serializer = ConfigBackupPolicySerializer(policy, data=request.data, partial=True)
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    if request.data.get('apply_retention_to_targets'):
+        ConfigBackupTarget.objects.update(retention_count=serializer.instance.retention_count)
+    record_audit(request, 'config_backup_policy', 'update', detail='更新网络配置备份计划与通知策略')
+    return Response(ConfigBackupPolicySerializer(serializer.instance).data)
+
+
+@api_view(['POST'])
+@authentication_classes([SessionAuthentication, BasicAuthentication])
+@permission_classes([DcimAccessPermission])
+def config_backup_test_email(request):
+    policy = get_or_create_config_backup_policy()
+    serializer = ConfigBackupPolicySerializer(policy, data=request.data or {}, partial=True)
+    serializer.is_valid(raise_exception=True)
+    policy = serializer.save()
+    fake_result = type(
+        'ConfigBackupEmailTestResult',
+        (),
+        {
+            'total': 0,
+            'success': 0,
+            'failed': 0,
+            'message': '配置备份邮件测试',
+            'results': [],
+        },
+    )()
+    try:
+        result = send_config_backup_notification(policy, fake_result, force=True)
+    except ConfigBackupPolicyError as exc:
+        return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(result)
 
 
 @api_view(['GET'])
