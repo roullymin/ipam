@@ -235,6 +235,94 @@ function joinBackupPath(base, relative) {
   return `${String(base).replace(/[\\/]+$/, '')}/${String(relative).replace(/^[\\/]+/, '')}`;
 }
 
+function unwrapListPayload(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.results)) return payload.results;
+  return [];
+}
+
+function getVersionMoment(version) {
+  return version?.time_iso || version?.finished_at || version?.started_at || version?.created_at || '';
+}
+
+function sortVersionsByTime(versions) {
+  return [...versions].sort((a, b) => {
+    const timeA = new Date(getVersionMoment(a)).getTime() || 0;
+    const timeB = new Date(getVersionMoment(b)).getTime() || 0;
+    return timeB - timeA || Number(b?.id || 0) - Number(a?.id || 0);
+  });
+}
+
+function hasConfigBackupRows(summary) {
+  return getTargets(summary).length > 0 || (Array.isArray(summary?.versions) && summary.versions.length > 0);
+}
+
+function buildFallbackConfigBackups({ existing, targets, versions }) {
+  const useExistingRows = hasConfigBackupRows(existing);
+  const sortedVersions = sortVersionsByTime(versions);
+  const versionsByTarget = new Map();
+  sortedVersions.forEach((version) => {
+    const targetKey = String(version?.target || '');
+    if (!targetKey) return;
+    const bucket = versionsByTarget.get(targetKey) || [];
+    bucket.push(version);
+    versionsByTarget.set(targetKey, bucket);
+  });
+
+  const targetMap = {};
+  const deviceMap = {};
+  const failureCounts = {};
+  targets.forEach((target) => {
+    const ipKey = String(target?.management_ip || target?.ip || target?.id || '').trim();
+    if (!ipKey) return;
+    const targetVersions = versionsByTarget.get(String(target.id)) || [];
+    const latestVersion = target.latest_version || targetVersions[0] || null;
+    const normalizedTarget = {
+      ...target,
+      latest_version: latestVersion,
+      version_count: Number(target.version_count ?? targetVersions.length),
+      last_backup_at: target.last_backup_at || getVersionMoment(latestVersion),
+    };
+    targetMap[ipKey] = normalizedTarget;
+    deviceMap[ipKey] = {
+      ip: ipKey,
+      device_type: target.device_type || '',
+      version_count: normalizedTarget.version_count,
+      latest: latestVersion,
+      versions: targetVersions,
+      target: normalizedTarget,
+    };
+
+    if (getTargetStatus(target) === 'failed') {
+      const reason = classifyError(target.last_error);
+      failureCounts[reason] = (failureCounts[reason] || 0) + 1;
+    }
+  });
+
+  const latestVersion = sortedVersions[0] || null;
+  const totalBytes = sortedVersions.reduce((sum, version) => sum + Number(version?.bytes || 0), 0);
+  return {
+    ...(existing || {}),
+    targets: useExistingRows && Object.keys(existing?.targets || {}).length ? existing.targets : targetMap,
+    devices: useExistingRows && Object.keys(existing?.devices || {}).length ? existing.devices : deviceMap,
+    versions: useExistingRows && Array.isArray(existing?.versions) && existing.versions.length ? existing.versions : sortedVersions,
+    target_count: useExistingRows ? existing?.target_count ?? Object.keys(targetMap).length : Object.keys(targetMap).length,
+    enabled_target_count: useExistingRows ? existing?.enabled_target_count ?? targets.filter((target) => target.enabled).length : targets.filter((target) => target.enabled).length,
+    total_devices: useExistingRows ? existing?.total_devices ?? Object.keys(deviceMap).length : Object.keys(deviceMap).length,
+    total_files: useExistingRows ? existing?.total_files ?? sortedVersions.length : sortedVersions.length,
+    total_bytes: useExistingRows ? existing?.total_bytes ?? totalBytes : totalBytes,
+    total_size: useExistingRows && existing?.total_size ? existing.total_size : formatBytes(totalBytes, '0 B'),
+    latest_backup_at: useExistingRows && existing?.latest_backup_at ? existing.latest_backup_at : getVersionMoment(latestVersion),
+    latest_backup_name: useExistingRows && existing?.latest_backup_name ? existing.latest_backup_name : latestVersion?.filename || '',
+    container_storage_path: existing?.container_storage_path || existing?.storage_path || '/backup',
+    host_storage_path: existing?.host_storage_path || './data/config_backups',
+    storage_path: existing?.storage_path || '/backup',
+    failure_summary: Array.isArray(existing?.failure_summary) && existing.failure_summary.length
+      ? existing.failure_summary
+      : Object.entries(failureCounts).map(([reason, count]) => ({ reason, count })),
+  };
+}
+
 function VersionContentModal({ viewer, onClose }) {
   if (!viewer) return null;
   return (
@@ -289,9 +377,16 @@ function NetworkBackupPanel({ configBackups, onRefresh }) {
   const [busyAction, setBusyAction] = useState('');
   const [policyForm, setPolicyForm] = useState(() => createPolicyForm(configBackups?.policy));
   const [viewer, setViewer] = useState(null);
+  const [fallbackConfigBackups, setFallbackConfigBackups] = useState(null);
+  const [fallbackError, setFallbackError] = useState('');
 
-  const targets = useMemo(() => getTargets(configBackups), [configBackups]);
-  const versions = useMemo(() => (Array.isArray(configBackups?.versions) ? configBackups.versions : []), [configBackups]);
+  const effectiveConfigBackups = fallbackConfigBackups || configBackups;
+  const isFallbackSummary = Boolean(fallbackConfigBackups);
+  const targets = useMemo(() => getTargets(effectiveConfigBackups), [effectiveConfigBackups]);
+  const versions = useMemo(
+    () => (Array.isArray(effectiveConfigBackups?.versions) ? effectiveConfigBackups.versions : []),
+    [effectiveConfigBackups],
+  );
   const failedTargets = useMemo(() => targets.filter((target) => getTargetStatus(target) === 'failed'), [targets]);
   const typeOptions = useMemo(
     () => Array.from(new Set(targets.map((target) => target.device_type || '未分类'))),
@@ -337,13 +432,61 @@ function NetworkBackupPanel({ configBackups, onRefresh }) {
 
   const allFilteredSelected =
     filteredTargets.length > 0 && filteredTargets.every((target) => selectedTargetIds.includes(target.id));
-  const hostStoragePath = configBackups?.host_storage_path || './data/config_backups';
-  const containerStoragePath = configBackups?.container_storage_path || configBackups?.storage_path || '/backup';
-  const latestPolicy = configBackups?.policy || {};
+  const hostStoragePath = effectiveConfigBackups?.host_storage_path || './data/config_backups';
+  const containerStoragePath = effectiveConfigBackups?.container_storage_path || effectiveConfigBackups?.storage_path || '/backup';
+  const latestPolicy = effectiveConfigBackups?.policy || {};
 
   useEffect(() => {
-    setPolicyForm(createPolicyForm(configBackups?.policy));
-  }, [configBackups?.policy]);
+    setPolicyForm(createPolicyForm(effectiveConfigBackups?.policy));
+  }, [effectiveConfigBackups?.policy]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (hasConfigBackupRows(configBackups)) {
+      setFallbackConfigBackups(null);
+      setFallbackError('');
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const loadFallbackSummary = async () => {
+      try {
+        const [targetsResponse, versionsResponse] = await Promise.all([
+          safeFetch('/api/config-backup-targets/'),
+          safeFetch('/api/config-backup-versions/'),
+        ]);
+        if (!targetsResponse.ok) {
+          throw new Error(await readApiError(targetsResponse, '读取配置备份目标失败。'));
+        }
+        if (!versionsResponse.ok) {
+          throw new Error(await readApiError(versionsResponse, '读取配置版本失败。'));
+        }
+        const [targetPayload, versionPayload] = await Promise.all([
+          targetsResponse.json().catch(() => []),
+          versionsResponse.json().catch(() => []),
+        ]);
+        if (cancelled) return;
+        const fallbackSummary = buildFallbackConfigBackups({
+          existing: configBackups,
+          targets: unwrapListPayload(targetPayload),
+          versions: unwrapListPayload(versionPayload),
+        });
+        setFallbackConfigBackups(fallbackSummary);
+        setFallbackError('');
+      } catch (error) {
+        if (cancelled) return;
+        setFallbackConfigBackups(null);
+        setFallbackError(error?.message || '读取配置备份明细失败。');
+      }
+    };
+
+    loadFallbackSummary();
+    return () => {
+      cancelled = true;
+    };
+  }, [configBackups]);
 
   const refreshBackupData = async () => {
     if (typeof onRefresh === 'function') {
@@ -527,12 +670,23 @@ function NetworkBackupPanel({ configBackups, onRefresh }) {
         </div>
       </section>
 
+      {isFallbackSummary && (targets.length > 0 || versions.length > 0) ? (
+        <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">
+          备份汇总暂未返回目标，已从目标和版本明细恢复当前视图。
+        </div>
+      ) : null}
+      {fallbackError ? (
+        <div className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+          配置备份明细读取失败：{fallbackError}
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
-        <SummaryTile icon={Server} title="备份目标" value={configBackups?.target_count || targets.length} subtext={`${configBackups?.enabled_target_count || 0} 个启用`} />
+        <SummaryTile icon={Server} title="备份目标" value={effectiveConfigBackups?.target_count || targets.length} subtext={`${effectiveConfigBackups?.enabled_target_count || 0} 个启用`} />
         <SummaryTile icon={CheckCircle2} title="成功目标" value={targets.filter((target) => getTargetStatus(target) === 'success').length} subtext="最近状态成功" tone="emerald" />
         <SummaryTile icon={AlertTriangle} title="失败目标" value={failedTargets.length} subtext="需要处理" tone={failedTargets.length ? 'rose' : 'default'} />
         <SummaryTile icon={Archive} title="配置版本" value={targets.reduce((sum, target) => sum + Number(target.version_count || 0), 0)} subtext="已保存版本" tone="violet" />
-        <SummaryTile icon={Clock3} title="最近备份" value={formatDateTime(configBackups?.latest_backup_at)} subtext={configBackups?.latest_backup_name || '暂无文件'} tone="blue" />
+        <SummaryTile icon={Clock3} title="最近备份" value={formatDateTime(effectiveConfigBackups?.latest_backup_at)} subtext={effectiveConfigBackups?.latest_backup_name || '暂无文件'} tone="blue" />
       </div>
 
       <section className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 bg-white p-4 xl:grid-cols-[1fr_1fr_160px_160px]">
@@ -552,11 +706,11 @@ function NetworkBackupPanel({ configBackups, onRefresh }) {
         </div>
         <div>
           <div className="text-xs font-bold text-slate-500">文件数量</div>
-          <div className="mt-2 text-xl font-black text-slate-900">{configBackups?.total_files || 0}</div>
+          <div className="mt-2 text-xl font-black text-slate-900">{effectiveConfigBackups?.total_files || 0}</div>
         </div>
         <div>
           <div className="text-xs font-bold text-slate-500">已用空间</div>
-          <div className="mt-2 text-xl font-black text-slate-900">{configBackups?.total_size || formatBytes(configBackups?.total_bytes || 0)}</div>
+          <div className="mt-2 text-xl font-black text-slate-900">{effectiveConfigBackups?.total_size || formatBytes(effectiveConfigBackups?.total_bytes || 0)}</div>
         </div>
       </section>
 
@@ -970,9 +1124,9 @@ function NetworkBackupPanel({ configBackups, onRefresh }) {
               <AlertTriangle className="h-5 w-5 text-rose-500" />
               失败设备
             </div>
-            {Array.isArray(configBackups?.failure_summary) && configBackups.failure_summary.length > 0 ? (
+            {Array.isArray(effectiveConfigBackups?.failure_summary) && effectiveConfigBackups.failure_summary.length > 0 ? (
               <div className="mt-3 grid grid-cols-2 gap-2">
-                {configBackups.failure_summary.map((item) => (
+                {effectiveConfigBackups.failure_summary.map((item) => (
                   <div key={item.reason} className="rounded-md bg-rose-50 px-2 py-2">
                     <div className="text-xs font-bold text-rose-700">{item.reason}</div>
                     <div className="mt-1 text-lg font-black text-rose-900">{item.count}</div>
