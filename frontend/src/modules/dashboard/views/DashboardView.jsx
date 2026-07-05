@@ -260,8 +260,8 @@ export default function DashboardView({
   ].filter(Boolean);
 
   return (
-    <div className="custom-scrollbar h-full overflow-y-auto bg-slate-100 p-4 lg:p-5">
-      <div className="mx-auto max-w-[1600px] space-y-4">
+    <div className="custom-scrollbar h-full overflow-y-auto bg-transparent p-3 lg:p-4">
+      <div className="mx-auto max-w-[1680px] space-y-4">
         <DashboardHero
           eyebrow={BRAND.navigation.dashboard}
           title={roleConfig.title}
