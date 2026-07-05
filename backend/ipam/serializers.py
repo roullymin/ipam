@@ -664,6 +664,9 @@ class ConfigBackupTargetSerializer(serializers.ModelSerializer):
     credential_name = serializers.CharField(source='credential.name', read_only=True)
     credential_username_hint = serializers.CharField(source='credential.username_hint', read_only=True)
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
+    datacenter_name = serializers.SerializerMethodField()
+    rack_code = serializers.SerializerMethodField()
+    location_label = serializers.SerializerMethodField()
     version_count = serializers.SerializerMethodField()
     latest_version = serializers.SerializerMethodField()
 
@@ -679,6 +682,12 @@ class ConfigBackupTargetSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         ]
+
+    def to_internal_value(self, data):
+        if isinstance(data, dict) and 'management_ip' in data:
+            data = data.copy()
+            data['management_ip'] = extract_management_host(data.get('management_ip'))
+        return super().to_internal_value(data)
 
     def validate(self, attrs):
         instance = self.instance
@@ -696,6 +705,22 @@ class ConfigBackupTargetSerializer(serializers.ModelSerializer):
         if not attrs.get('management_ip', management_ip):
             raise serializers.ValidationError({'management_ip': ['必须提供管理 IP。']})
 
+        ssh_port = attrs.get('ssh_port', instance.ssh_port if instance else 22)
+        timeout_seconds = attrs.get('timeout_seconds', instance.timeout_seconds if instance else 30)
+        retention_count = attrs.get('retention_count', instance.retention_count if instance else 12)
+        try:
+            ssh_port_value = int(ssh_port)
+            timeout_seconds_value = int(timeout_seconds)
+            retention_count_value = int(retention_count)
+        except (TypeError, ValueError):
+            raise serializers.ValidationError({'ssh_port': ['端口、超时时间和保留版本数必须是数字。']})
+        if not (1 <= ssh_port_value <= 65535):
+            raise serializers.ValidationError({'ssh_port': ['SSH 端口必须在 1-65535 之间。']})
+        if not (5 <= timeout_seconds_value <= 600):
+            raise serializers.ValidationError({'timeout_seconds': ['超时时间必须在 5-600 秒之间。']})
+        if not (1 <= retention_count_value <= 200):
+            raise serializers.ValidationError({'retention_count': ['保留版本数必须在 1-200 之间。']})
+
         if not attrs.get('name') and instance is None:
             attrs['name'] = rack_device.name if rack_device else (ip_address.device_name if ip_address else attrs['management_ip'])
 
@@ -710,6 +735,23 @@ class ConfigBackupTargetSerializer(serializers.ModelSerializer):
     def get_latest_version(self, obj):
         latest = obj.versions.order_by('-started_at', '-id').first()
         return ConfigBackupVersionSerializer(latest).data if latest else None
+
+    def get_datacenter_name(self, obj):
+        if obj.rack_device and obj.rack_device.rack and obj.rack_device.rack.datacenter:
+            return obj.rack_device.rack.datacenter.name
+        return ''
+
+    def get_rack_code(self, obj):
+        if obj.rack_device and obj.rack_device.rack:
+            return obj.rack_device.rack.code
+        return ''
+
+    def get_location_label(self, obj):
+        if obj.rack_device and obj.rack_device.rack and obj.rack_device.rack.datacenter:
+            return f'{obj.rack_device.rack.datacenter.name} / {obj.rack_device.rack.code} / {obj.rack_device.name}'
+        if obj.ip_address:
+            return obj.ip_address.ip_address
+        return ''
 
 
 class ResidentDeviceSerializer(serializers.ModelSerializer):

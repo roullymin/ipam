@@ -13,13 +13,16 @@ import {
   Filter,
   HardDrive,
   KeyRound,
+  Link2,
   MapPin,
   Network,
   Pencil,
+  Plus,
   RefreshCw,
   Save,
   Search,
   Server,
+  Settings2,
   ShieldCheck,
   Terminal,
   X,
@@ -257,6 +260,36 @@ const CONFIG_BACKUP_STATUS_LABELS = {
   disabled: '已停用',
 };
 
+const COMMAND_PROFILE_OPTIONS = [
+  { value: 'huawei_vrp', label: '华为 / H3C VRP' },
+  { value: 'h3c_comware', label: 'H3C Comware' },
+  { value: 'cisco_ios', label: 'Cisco IOS' },
+  { value: 'generic_show_run', label: '通用 show running-config' },
+];
+
+const COMMAND_PROFILE_LABELS = Object.fromEntries(COMMAND_PROFILE_OPTIONS.map((item) => [item.value, item.label]));
+
+const createCredentialForm = (asset, secret = null) => ({
+  id: secret?.id || null,
+  name: secret?.name || `${asset?.name || '设备'} SSH 登录`,
+  secret_username: secret?.username_hint || '',
+  secret_value: '',
+  owner_team: secret?.owner_team || asset?.project || '',
+  environment: secret?.environment || 'production',
+  sensitivity: secret?.sensitivity || 'confidential',
+  rotation_days: secret?.rotation_days || 90,
+  notes: secret?.notes || '',
+});
+
+const createBackupTargetForm = (asset) => ({
+  command_profile: asset?.backup?.targetCommandProfile || 'huawei_vrp',
+  ssh_port: asset?.backup?.targetSshPort || 22,
+  timeout_seconds: asset?.backup?.targetTimeoutSeconds || 30,
+  save_before_backup: asset?.backup?.targetSaveBeforeBackup ?? true,
+  retention_count: asset?.backup?.targetRetentionCount || 12,
+  credential: asset?.backup?.targetCredentialId || asset?.credential?.items?.[0]?.id || '',
+});
+
 function Pill({ children, tone = 'bg-slate-100 text-slate-700 ring-slate-200' }) {
   return (
     <span className={`inline-flex whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-semibold ring-1 ring-inset ${tone}`}>
@@ -352,7 +385,13 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
         targetEnabled: target?.enabled ?? false,
         targetStatus: target?.last_status || 'not_run',
         targetStatusLabel: CONFIG_BACKUP_STATUS_LABELS[target?.last_status || 'not_run'] || target?.last_status || '未执行',
+        targetCredentialId: target?.credential || null,
         targetCredentialName: target?.credential_name || '',
+        targetCommandProfile: target?.command_profile || 'huawei_vrp',
+        targetSshPort: target?.ssh_port || 22,
+        targetTimeoutSeconds: target?.timeout_seconds || 30,
+        targetSaveBeforeBackup: target?.save_before_backup ?? true,
+        targetRetentionCount: target?.retention_count || 12,
         targetError: target?.last_error || '',
       };
     }
@@ -377,7 +416,13 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
       targetEnabled: target?.enabled ?? false,
       targetStatus: target?.last_status || 'not_run',
       targetStatusLabel: CONFIG_BACKUP_STATUS_LABELS[target?.last_status || 'not_run'] || target?.last_status || '未执行',
+      targetCredentialId: target?.credential || null,
       targetCredentialName: target?.credential_name || '',
+      targetCommandProfile: target?.command_profile || 'huawei_vrp',
+      targetSshPort: target?.ssh_port || 22,
+      targetTimeoutSeconds: target?.timeout_seconds || 30,
+      targetSaveBeforeBackup: target?.save_before_backup ?? true,
+      targetRetentionCount: target?.retention_count || 12,
       targetError: target?.last_error || '',
     };
   };
@@ -973,6 +1018,214 @@ function EmptyDetailNote({ children }) {
   );
 }
 
+function AssetModal({ title, children, onClose, width = 'max-w-xl' }) {
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-sm">
+      <div className={`max-h-[92vh] w-full ${width} overflow-auto rounded-lg border border-slate-200 bg-white shadow-2xl`}>
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white px-4 py-3">
+          <h3 className="text-base font-black text-slate-950">{title}</h3>
+          <button type="button" onClick={onClose} className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="p-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <label className="block">
+      <span className="text-xs font-bold text-slate-500">{label}</span>
+      <div className="mt-1">{children}</div>
+    </label>
+  );
+}
+
+function formInputClass(extra = '') {
+  return `h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 ${extra}`;
+}
+
+function CredentialEditorModal({
+  mode,
+  asset,
+  secrets,
+  form,
+  setForm,
+  onClose,
+  onSubmit,
+  busy,
+}) {
+  const isBind = mode === 'bind';
+  const isEdit = mode === 'edit';
+  const title = isBind ? '绑定已有凭据' : isEdit ? '修改凭据' : '新增设备凭据';
+
+  return (
+    <AssetModal title={title} onClose={onClose}>
+      <form className="space-y-3" onSubmit={onSubmit}>
+        <div className="rounded-md bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
+          当前资产：<span className="font-bold text-slate-800">{asset?.name}</span>
+          <span className="ml-2 font-mono">{extractManagementHost(asset?.managementIp) || '-'}</span>
+        </div>
+
+        {isBind ? (
+          <Field label="选择已有凭据">
+            <select
+              value={form.id || ''}
+              onChange={(event) => {
+                const selected = secrets.find((item) => String(item.id) === event.target.value);
+                setForm(createCredentialForm(asset, selected || null));
+              }}
+              className={formInputClass()}
+              required
+            >
+              <option value="">请选择凭据</option>
+              {secrets.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name} / {item.username_hint || '未填账号'} / {item.target_display || '通用'}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : (
+          <>
+            <Field label="名称">
+              <input
+                value={form.name}
+                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                className={formInputClass()}
+                required
+              />
+            </Field>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="账号">
+                <input
+                  value={form.secret_username}
+                  onChange={(event) => setForm((current) => ({ ...current, secret_username: event.target.value }))}
+                  className={formInputClass('font-mono')}
+                  required={!isEdit}
+                />
+              </Field>
+              <Field label={isEdit ? '新密码（留空不改）' : '密码'}>
+                <input
+                  type="password"
+                  value={form.secret_value}
+                  onChange={(event) => setForm((current) => ({ ...current, secret_value: event.target.value }))}
+                  className={formInputClass()}
+                  required={!isEdit}
+                />
+              </Field>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <Field label="环境">
+                <select value={form.environment} onChange={(event) => setForm((current) => ({ ...current, environment: event.target.value }))} className={formInputClass()}>
+                  <option value="production">生产</option>
+                  <option value="test">测试</option>
+                  <option value="development">开发</option>
+                  <option value="other">其他</option>
+                </select>
+              </Field>
+              <Field label="敏感级别">
+                <select value={form.sensitivity} onChange={(event) => setForm((current) => ({ ...current, sensitivity: event.target.value }))} className={formInputClass()}>
+                  <option value="internal">内部</option>
+                  <option value="confidential">机密</option>
+                  <option value="restricted">严格受限</option>
+                </select>
+              </Field>
+              <Field label="轮换周期">
+                <input
+                  type="number"
+                  min="1"
+                  value={form.rotation_days}
+                  onChange={(event) => setForm((current) => ({ ...current, rotation_days: event.target.value }))}
+                  className={formInputClass()}
+                />
+              </Field>
+            </div>
+            <Field label="责任团队">
+              <input
+                value={form.owner_team}
+                onChange={(event) => setForm((current) => ({ ...current, owner_team: event.target.value }))}
+                className={formInputClass()}
+              />
+            </Field>
+            <Field label="备注">
+              <textarea
+                value={form.notes}
+                onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+                className="min-h-[70px] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              />
+            </Field>
+          </>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" onClick={onClose} className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700">
+            取消
+          </button>
+          <button type="submit" disabled={busy} className="inline-flex h-9 items-center gap-2 rounded-md bg-blue-600 px-3 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60">
+            <Save className="h-4 w-4" />
+            保存
+          </button>
+        </div>
+      </form>
+    </AssetModal>
+  );
+}
+
+function BackupTargetModal({ asset, form, setForm, secrets, onClose, onSubmit, busy }) {
+  return (
+    <AssetModal title="配置备份目标设置" onClose={onClose}>
+      <form className="space-y-3" onSubmit={onSubmit}>
+        <div className="rounded-md bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
+          目标：<span className="font-bold text-slate-800">{asset?.name}</span>
+          <span className="ml-2 font-mono">{extractManagementHost(asset?.managementIp) || '-'}</span>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field label="命令模板">
+            <select value={form.command_profile} onChange={(event) => setForm((current) => ({ ...current, command_profile: event.target.value }))} className={formInputClass()}>
+              {COMMAND_PROFILE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
+          </Field>
+          <Field label="绑定凭据">
+            <select value={form.credential || ''} onChange={(event) => setForm((current) => ({ ...current, credential: event.target.value }))} className={formInputClass()}>
+              <option value="">自动匹配或暂不绑定</option>
+              {secrets.map((item) => (
+                <option key={item.id} value={item.id}>{item.name} / {item.username_hint || '未填账号'}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="SSH 端口">
+            <input type="number" min="1" max="65535" value={form.ssh_port} onChange={(event) => setForm((current) => ({ ...current, ssh_port: event.target.value }))} className={formInputClass()} />
+          </Field>
+          <Field label="连接超时（秒）">
+            <input type="number" min="5" max="600" value={form.timeout_seconds} onChange={(event) => setForm((current) => ({ ...current, timeout_seconds: event.target.value }))} className={formInputClass()} />
+          </Field>
+          <Field label="保留版本数">
+            <input type="number" min="1" max="200" value={form.retention_count} onChange={(event) => setForm((current) => ({ ...current, retention_count: event.target.value }))} className={formInputClass()} />
+          </Field>
+          <label className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
+            <input type="checkbox" checked={!!form.save_before_backup} onChange={(event) => setForm((current) => ({ ...current, save_before_backup: event.target.checked }))} />
+            采集前执行 save
+          </label>
+        </div>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" onClick={onClose} className="h-9 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700">
+            取消
+          </button>
+          <button type="submit" disabled={busy} className="inline-flex h-9 items-center gap-2 rounded-md bg-blue-600 px-3 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60">
+            <Save className="h-4 w-4" />
+            保存设置
+          </button>
+        </div>
+      </form>
+    </AssetModal>
+  );
+}
+
 function getAssetReadiness(asset) {
   const hasCredential = asset.credential.status === 'active' && asset.credential.count > 0;
   const hasBackup = asset.backup.versionCount > 0 || asset.backup.status === 'ready';
@@ -1021,7 +1274,13 @@ function AssetDetail({
   onProvisionBackup,
   onRunBackup,
   onUpdateManagementIp,
+  onOpenCredentialModal,
+  onTestCredential,
+  onOpenBackupSettings,
+  onTestBackupTarget,
   backupActionAssetId,
+  backupTestAssetId,
+  credentialTestAssetId,
   managementIpActionAssetId,
 }) {
   const [activeTab, setActiveTab] = useState('basic');
@@ -1047,6 +1306,9 @@ function AssetDetail({
   const inventoryGroups = getInventoryGroups(asset);
   const backupVersions = Array.isArray(asset.backup.versions) ? asset.backup.versions : [];
   const backupBusy = backupActionAssetId === asset.id;
+  const backupTestBusy = backupTestAssetId === asset.id;
+  const credentialTestBusy = credentialTestAssetId === asset.id;
+  const primaryCredential = asset.credential.items?.[0] || null;
   const managementIpBusy = managementIpActionAssetId === asset.id;
   const normalizedManagementIp = extractManagementHost(asset.managementIp);
   const hasManagementIpFormatHint = asset.managementIp && normalizedManagementIp && normalizedManagementIp !== asset.managementIp;
@@ -1209,6 +1471,14 @@ function AssetDetail({
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => onOpenBackupSettings(asset)}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+            >
+              <Settings2 className="h-3.5 w-3.5" />
+              设置
+            </button>
             {!asset.backup.targetId ? (
               <button
                 type="button"
@@ -1220,15 +1490,26 @@ function AssetDetail({
                 创建目标
               </button>
             ) : (
-              <button
-                type="button"
-                onClick={() => onRunBackup(asset)}
-                disabled={backupBusy || !asset.backup.targetEnabled}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md bg-blue-600 px-2.5 text-xs font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <RefreshCw className={`h-3.5 w-3.5 ${backupBusy ? 'animate-spin' : ''}`} />
-                执行备份
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => onTestBackupTarget(asset)}
+                  disabled={backupTestBusy || !asset.backup.targetEnabled}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <CheckCircle2 className={`h-3.5 w-3.5 ${backupTestBusy ? 'animate-pulse' : ''}`} />
+                  测试连接
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onRunBackup(asset)}
+                  disabled={backupBusy || !asset.backup.targetEnabled}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md bg-blue-600 px-2.5 text-xs font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${backupBusy ? 'animate-spin' : ''}`} />
+                  执行备份
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -1252,6 +1533,9 @@ function AssetDetail({
         <div className="mt-3 rounded-md border border-slate-200 bg-white px-3 py-2">
           <InfoRow label="备份类型目录" value={asset.backup.deviceType} />
           <InfoRow label="目标状态" value={asset.backup.targetStatusLabel || asset.backup.targetStatus} />
+          <InfoRow label="命令模板" value={COMMAND_PROFILE_LABELS[asset.backup.targetCommandProfile] || asset.backup.targetCommandProfile} />
+          <InfoRow label="SSH 端口" value={asset.backup.targetSshPort} />
+          <InfoRow label="采集前保存" value={asset.backup.targetSaveBeforeBackup ? '执行 save' : '不执行 save'} />
           <InfoRow label="最近文件路径" value={asset.backup.storagePath} mono />
         </div>
         {asset.backup.targetError ? (
@@ -1287,9 +1571,40 @@ function AssetDetail({
 
       {activeTab === 'credential' ? (
       <DetailBlock icon={KeyRound} title="密码状态">
-        <div className="flex items-center justify-between gap-3">
-          <Pill tone={SECRET_TONES[asset.credential.status]}>{SECRET_LABELS[asset.credential.status]}</Pill>
-          <span className="text-sm font-bold text-slate-800">{asset.credential.count} 条凭据</span>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Pill tone={SECRET_TONES[asset.credential.status]}>{SECRET_LABELS[asset.credential.status]}</Pill>
+            <span className="text-sm font-bold text-slate-800">{asset.credential.count} 条凭据</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => onOpenCredentialModal(asset, 'create')}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-blue-600 px-2.5 text-xs font-bold text-white transition hover:bg-blue-700"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              新增凭据
+            </button>
+            <button
+              type="button"
+              onClick={() => onOpenCredentialModal(asset, 'bind')}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+            >
+              <Link2 className="h-3.5 w-3.5" />
+              绑定已有
+            </button>
+            {primaryCredential ? (
+              <button
+                type="button"
+                onClick={() => onTestCredential(asset, primaryCredential)}
+                disabled={credentialTestBusy}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <CheckCircle2 className={`h-3.5 w-3.5 ${credentialTestBusy ? 'animate-pulse' : ''}`} />
+                测试登录
+              </button>
+            ) : null}
+          </div>
         </div>
         {asset.credential.items.length ? (
           <div className="mt-3 space-y-2">
@@ -1297,9 +1612,28 @@ function AssetDetail({
               <div key={secret.id} className="rounded-md border border-slate-200 bg-white px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-sm font-bold text-slate-800">{secret.name}</span>
-                  <Pill tone={SECRET_TONES[secret.lifecycle_status || secret.status || 'active']}>
-                    {SECRET_LABELS[secret.lifecycle_status || secret.status || 'active'] || secret.status}
-                  </Pill>
+                  <div className="flex items-center gap-2">
+                    <Pill tone={SECRET_TONES[secret.lifecycle_status || secret.status || 'active']}>
+                      {SECRET_LABELS[secret.lifecycle_status || secret.status || 'active'] || secret.status}
+                    </Pill>
+                    <button
+                      type="button"
+                      onClick={() => onOpenCredentialModal(asset, 'edit', secret)}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:text-blue-700"
+                      title="修改凭据"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onTestCredential(asset, secret)}
+                      disabled={credentialTestBusy}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      title="测试登录"
+                    >
+                      <CheckCircle2 className={`h-3.5 w-3.5 ${credentialTestBusy ? 'animate-pulse' : ''}`} />
+                    </button>
+                  </div>
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
                   <div className="min-w-0 rounded-md bg-slate-50 px-2 py-1.5">
@@ -1429,6 +1763,13 @@ export default function AssetCenterView({
   const [sortConfig, setSortConfig] = useState({ key: 'risk', direction: 'desc' });
   const [backupActionAssetId, setBackupActionAssetId] = useState(null);
   const [managementIpActionAssetId, setManagementIpActionAssetId] = useState(null);
+  const [credentialActionAssetId, setCredentialActionAssetId] = useState(null);
+  const [credentialTestAssetId, setCredentialTestAssetId] = useState(null);
+  const [backupTestAssetId, setBackupTestAssetId] = useState(null);
+  const [credentialModal, setCredentialModal] = useState(null);
+  const [credentialForm, setCredentialForm] = useState(null);
+  const [backupSettingsModal, setBackupSettingsModal] = useState(null);
+  const [backupTargetForm, setBackupTargetForm] = useState(null);
   const secretsLoaded = !dataErrors?.secrets;
 
   const assets = useMemo(
@@ -1503,6 +1844,186 @@ export default function AssetCenterView({
     return payload?.detail || payload?.message || fallback;
   };
 
+  const buildAssetSecretPayload = (asset, extra = {}) => ({
+    target_type: asset.source === 'device' ? 'device' : 'ip',
+    rack_device: asset.source === 'device' ? asset.deviceId : null,
+    ip_address: asset.relatedIps?.[0]?.id || null,
+    ...extra,
+  });
+
+  const syncBackupTargetCredential = async (asset, credentialId) => {
+    if (!asset?.backup?.targetId || !credentialId) return;
+    await safeFetch(`/api/config-backup-targets/${asset.backup.targetId}/`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential: credentialId }),
+    });
+  };
+
+  const openCredentialModal = (asset, mode, secret = null) => {
+    setCredentialModal({ asset, mode, secret });
+    setCredentialForm(createCredentialForm(asset, secret));
+  };
+
+  const closeCredentialModal = () => {
+    setCredentialModal(null);
+    setCredentialForm(null);
+  };
+
+  const handleSaveCredential = async (event) => {
+    event.preventDefault();
+    if (!credentialModal || !credentialForm) return;
+    const { asset, mode } = credentialModal;
+    setCredentialActionAssetId(asset.id);
+    try {
+      let response;
+      if (mode === 'bind') {
+        response = await safeFetch(`/api/secrets/${credentialForm.id}/`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildAssetSecretPayload(asset)),
+        });
+      } else {
+        const payload = buildAssetSecretPayload(asset, {
+          name: credentialForm.name,
+          credential_type: 'ssh',
+          secret_username: credentialForm.secret_username,
+          secret_value: credentialForm.secret_value,
+          owner_team: credentialForm.owner_team,
+          environment: credentialForm.environment,
+          sensitivity: credentialForm.sensitivity,
+          rotation_days: Number(credentialForm.rotation_days || 90),
+          status: 'active',
+          notes: credentialForm.notes,
+        });
+        if (mode === 'edit' && !payload.secret_value) {
+          delete payload.secret_username;
+          delete payload.secret_value;
+        }
+        response = await safeFetch(mode === 'edit' ? `/api/secrets/${credentialForm.id}/` : '/api/secrets/', {
+          method: mode === 'edit' ? 'PATCH' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      }
+      if (!response.ok) {
+        window.alert(await readApiError(response, '保存凭据失败。'));
+        return;
+      }
+      const saved = await response.json().catch(() => null);
+      await syncBackupTargetCredential(asset, saved?.id || credentialForm.id);
+      closeCredentialModal();
+      await refreshAssets();
+    } finally {
+      setCredentialActionAssetId(null);
+    }
+  };
+
+  const handleTestCredential = async (asset, secret) => {
+    if (!asset || !secret) return;
+    const managementIp = extractManagementHost(asset.managementIp);
+    if (!managementIp) {
+      window.alert('请先补充管理 IP。');
+      return;
+    }
+    setCredentialTestAssetId(asset.id);
+    try {
+      const response = await safeFetch(`/api/secrets/${secret.id}/test-login/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          management_ip: managementIp,
+          ssh_port: asset.backup.targetSshPort || 22,
+          timeout_seconds: asset.backup.targetTimeoutSeconds || 30,
+        }),
+      });
+      if (!response.ok) {
+        window.alert(await readApiError(response, '测试登录失败。'));
+        return;
+      }
+      const payload = await response.json().catch(() => ({}));
+      window.alert(payload.message || 'SSH 登录测试成功。');
+    } finally {
+      setCredentialTestAssetId(null);
+    }
+  };
+
+  const openBackupSettings = (asset) => {
+    setBackupSettingsModal({ asset });
+    setBackupTargetForm(createBackupTargetForm(asset));
+  };
+
+  const closeBackupSettings = () => {
+    setBackupSettingsModal(null);
+    setBackupTargetForm(null);
+  };
+
+  const handleSaveBackupSettings = async (event) => {
+    event.preventDefault();
+    if (!backupSettingsModal || !backupTargetForm) return;
+    const { asset } = backupSettingsModal;
+    const managementIp = extractManagementHost(asset.managementIp);
+    if (!managementIp) {
+      window.alert('请先补充管理 IP。');
+      return;
+    }
+    setBackupActionAssetId(asset.id);
+    try {
+      const payload = {
+        name: asset.name,
+        management_ip: managementIp,
+        rack_device: asset.source === 'device' ? asset.deviceId : null,
+        ip_address: asset.relatedIps?.[0]?.id || null,
+        device_type: asset.type,
+        command_profile: backupTargetForm.command_profile,
+        ssh_port: Number(backupTargetForm.ssh_port || 22),
+        timeout_seconds: Number(backupTargetForm.timeout_seconds || 30),
+        save_before_backup: !!backupTargetForm.save_before_backup,
+        retention_count: Number(backupTargetForm.retention_count || 12),
+        credential: backupTargetForm.credential || null,
+      };
+      const response = await safeFetch(
+        asset.backup.targetId ? `/api/config-backup-targets/${asset.backup.targetId}/` : '/api/config-backup-targets/provision/',
+        {
+          method: asset.backup.targetId ? 'PATCH' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+      );
+      if (!response.ok) {
+        window.alert(await readApiError(response, '保存配置备份目标失败。'));
+        return;
+      }
+      closeBackupSettings();
+      await refreshAssets();
+    } finally {
+      setBackupActionAssetId(null);
+    }
+  };
+
+  const handleTestBackupTarget = async (asset) => {
+    if (!asset?.backup?.targetId) {
+      window.alert('请先创建配置备份目标。');
+      return;
+    }
+    setBackupTestAssetId(asset.id);
+    try {
+      const response = await safeFetch(`/api/config-backup-targets/${asset.backup.targetId}/test/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!response.ok) {
+        window.alert(await readApiError(response, '测试连接失败。'));
+        await refreshAssets();
+        return;
+      }
+      const payload = await response.json().catch(() => ({}));
+      window.alert(payload.message || 'SSH 登录测试成功。');
+    } finally {
+      setBackupTestAssetId(null);
+    }
+  };
+
   const handleUpdateManagementIp = async (asset, nextValue) => {
     const nextHost = extractManagementHost(nextValue);
     if (!asset || !nextHost) {
@@ -1567,6 +2088,11 @@ export default function AssetCenterView({
           ip_address: asset.relatedIps[0]?.id || null,
           device_type: asset.type,
           command_profile: 'huawei_vrp',
+          ssh_port: 22,
+          timeout_seconds: 30,
+          save_before_backup: true,
+          retention_count: 12,
+          credential: asset.credential.items?.[0]?.id || null,
         }),
       });
       if (!response.ok) {
@@ -1777,12 +2303,41 @@ export default function AssetCenterView({
               onProvisionBackup={handleProvisionBackup}
               onRunBackup={handleRunBackup}
               onUpdateManagementIp={handleUpdateManagementIp}
+              onOpenCredentialModal={openCredentialModal}
+              onTestCredential={handleTestCredential}
+              onOpenBackupSettings={openBackupSettings}
+              onTestBackupTarget={handleTestBackupTarget}
               backupActionAssetId={backupActionAssetId}
+              backupTestAssetId={backupTestAssetId}
+              credentialTestAssetId={credentialTestAssetId}
               managementIpActionAssetId={managementIpActionAssetId}
             />
           </aside>
         </section>
       </div>
+      {credentialModal && credentialForm ? (
+        <CredentialEditorModal
+          mode={credentialModal.mode}
+          asset={credentialModal.asset}
+          secrets={secrets}
+          form={credentialForm}
+          setForm={setCredentialForm}
+          onClose={closeCredentialModal}
+          onSubmit={handleSaveCredential}
+          busy={credentialActionAssetId === credentialModal.asset.id}
+        />
+      ) : null}
+      {backupSettingsModal && backupTargetForm ? (
+        <BackupTargetModal
+          asset={backupSettingsModal.asset}
+          form={backupTargetForm}
+          setForm={setBackupTargetForm}
+          secrets={secrets}
+          onClose={closeBackupSettings}
+          onSubmit={handleSaveBackupSettings}
+          busy={backupActionAssetId === backupSettingsModal.asset.id}
+        />
+      ) : null}
     </div>
   );
 }

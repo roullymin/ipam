@@ -814,6 +814,8 @@ class ConfigBackupTarget(models.Model):
     ]
     COMMAND_PROFILE_CHOICES = [
         ('huawei_vrp', '华为 / H3C VRP'),
+        ('h3c_comware', 'H3C Comware'),
+        ('cisco_ios', 'Cisco IOS'),
         ('generic_show_run', '通用 show running-config'),
     ]
     STATUS_CHOICES = [
@@ -844,6 +846,9 @@ class ConfigBackupTarget(models.Model):
     management_ip = models.GenericIPAddressField('管理 IP', unique=True)
     device_type = models.CharField('设备类型', max_length=32, choices=DEVICE_TYPE_CHOICES, default='switch')
     command_profile = models.CharField('命令模板', max_length=32, choices=COMMAND_PROFILE_CHOICES, default='huawei_vrp')
+    ssh_port = models.PositiveSmallIntegerField('SSH 端口', default=22)
+    timeout_seconds = models.PositiveSmallIntegerField('连接超时（秒）', default=30)
+    save_before_backup = models.BooleanField('采集前保存配置', default=True)
     credential = models.ForeignKey(
         SecretRecord,
         on_delete=models.SET_NULL,

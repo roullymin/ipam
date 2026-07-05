@@ -113,6 +113,7 @@ export function useAppDataLoader({
         if (targetTab === 'backup') {
           addRequest('backups', '/api/list-backups/');
           addRequest('backupSummary', '/api/backup/summary/');
+          addRequest('configBackups', '/api/config-backups/summary/');
         }
 
         if (targetTab === 'users') {

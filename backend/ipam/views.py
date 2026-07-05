@@ -82,7 +82,13 @@ from .domains.config_backup.selectors import (
     collect_config_backup_files,
     get_config_backup_dir,
 )
-from .domains.config_backup.services import ConfigBackupError, run_config_backup_target
+from .domains.config_backup.services import (
+    ConfigBackupConnectionError,
+    ConfigBackupError,
+    run_config_backup_target,
+    test_config_backup_target,
+    test_secret_login,
+)
 from .domains.data_quality.services import build_encoding_report_payload
 from .domains.data_quality.selectors import get_data_quality_summary
 from .domains.dcim.selectors import build_public_dcim_payload
@@ -143,7 +149,7 @@ logger = logging.getLogger('django')
 
 LOGIN_LOCK_THRESHOLD = 5
 LOGIN_LOCK_MINUTES = 30
-APP_VERSION = os.environ.get('APP_VERSION', 'ipam-20260703.1')
+APP_VERSION = os.environ.get('APP_VERSION', 'ipam-20260705')
 
 
 class VaultServiceUnavailable(APIException):
@@ -1791,6 +1797,34 @@ class SecretRecordViewSet(OptionalPaginationMixin, BaseViewSet):
         record_secret_audit(request, secret, 'rotate', reason=reason)
         return Response(SecretRecordSerializer(secret, context={'request': request}).data)
 
+    @action(detail=True, methods=['post'], permission_classes=[SecretActionPermission], url_path='test-login')
+    def test_login(self, request, pk=None):
+        secret = self.get_object()
+        role = get_user_role(request.user)
+        if role not in ('admin', 'dc_operator', 'ip_manager'):
+            raise PermissionDenied('当前角色不能测试设备登录。')
+        management_ip = _extract_management_host(request.data.get('management_ip') or '')
+        if not management_ip:
+            return Response({'detail': '请提供管理 IP。'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            ssh_port = int(request.data.get('ssh_port') or 22)
+            timeout_seconds = int(request.data.get('timeout_seconds') or 30)
+        except (TypeError, ValueError):
+            return Response({'detail': 'SSH 端口和超时时间必须是数字。'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            payload = test_secret_login(
+                credential=secret,
+                management_ip=management_ip,
+                ssh_port=ssh_port,
+                timeout_seconds=timeout_seconds,
+                read_secret=vault_read_secret,
+            )
+        except (ConfigBackupConnectionError, ConfigBackupError, VaultError) as exc:
+            record_secret_audit(request, secret, 'test_login', 'error', str(exc))
+            return Response({'status': 'failed', 'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        record_secret_audit(request, secret, 'test_login', reason=f'{management_ip}:{ssh_port}')
+        return Response(payload)
+
 
 class SecretAccessRequestViewSet(OptionalPaginationMixin, viewsets.ReadOnlyModelViewSet):
     authentication_classes = (SessionAuthentication, BasicAuthentication)
@@ -1888,6 +1922,14 @@ def _extract_management_host(value):
     return re.sub(r'^[a-z][a-z0-9+.-]*://', '', text, flags=re.IGNORECASE).split('/')[0].split(':')[0].strip()
 
 
+def _coerce_bool(value, default=True):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in {'0', 'false', 'no', 'off', 'disabled'}
+
+
 class ConfigBackupTargetViewSet(OptionalPaginationMixin, BaseViewSet):
     audit_module = 'config_backup_target'
     permission_classes = [DcimAccessPermission]
@@ -1946,6 +1988,9 @@ class ConfigBackupTargetViewSet(OptionalPaginationMixin, BaseViewSet):
                 'ip_address': ip_asset,
                 'device_type': device_type,
                 'command_profile': request.data.get('command_profile') or 'huawei_vrp',
+                'ssh_port': request.data.get('ssh_port') or 22,
+                'timeout_seconds': request.data.get('timeout_seconds') or 30,
+                'save_before_backup': _coerce_bool(request.data.get('save_before_backup'), True),
                 'credential': credential,
                 'enabled': True,
                 'created_by': request.user if request.user.is_authenticated else None,
@@ -1962,6 +2007,18 @@ class ConfigBackupTargetViewSet(OptionalPaginationMixin, BaseViewSet):
             self.get_serializer(target).data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
+
+    @action(detail=True, methods=['post'], url_path='test')
+    def test(self, request, pk=None):
+        target = self.get_object()
+        try:
+            payload = test_config_backup_target(target=target, read_secret=vault_read_secret)
+        except (ConfigBackupConnectionError, ConfigBackupError, VaultError) as exc:
+            target.last_status = 'failed'
+            target.last_error = str(exc)[:2000]
+            target.save(update_fields=['last_status', 'last_error', 'updated_at'])
+            return Response({'status': 'failed', 'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(payload)
 
     @action(detail=True, methods=['post'])
     def run(self, request, pk=None):
@@ -1985,6 +2042,51 @@ class ConfigBackupTargetViewSet(OptionalPaginationMixin, BaseViewSet):
                 'version': ConfigBackupVersionSerializer(version).data,
             },
             status=status.HTTP_200_OK if version.status == 'success' else status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    @action(detail=False, methods=['post'], url_path='run-all')
+    def run_all(self, request):
+        target_ids = request.data.get('target_ids') or []
+        queryset = self.get_queryset().filter(enabled=True)
+        if target_ids:
+            queryset = queryset.filter(pk__in=target_ids)
+        targets = list(queryset.order_by('management_ip'))
+        results = []
+        success_count = 0
+        failed_count = 0
+        for target in targets:
+            try:
+                version = run_config_backup_target(
+                    target=target,
+                    base_dir=settings.BASE_DIR,
+                    read_secret=vault_read_secret,
+                )
+                status_value = version.status
+                detail = version.error_message if version.status != 'success' else ''
+            except (ConfigBackupError, VaultError) as exc:
+                status_value = 'failed'
+                detail = str(exc)
+                version = None
+            if status_value == 'success':
+                success_count += 1
+            else:
+                failed_count += 1
+            target.refresh_from_db()
+            results.append(
+                {
+                    'target': ConfigBackupTargetSerializer(target, context={'request': request}).data,
+                    'status': status_value,
+                    'detail': detail,
+                    'version': ConfigBackupVersionSerializer(version).data if version else None,
+                }
+            )
+        return Response(
+            {
+                'total': len(results),
+                'success': success_count,
+                'failed': failed_count,
+                'results': results,
+            }
         )
 
 
@@ -3035,6 +3137,8 @@ def config_backup_summary(request):
     payload['targets'] = {}
     targets = ConfigBackupTarget.objects.select_related(
         'rack_device',
+        'rack_device__rack',
+        'rack_device__rack__datacenter',
         'ip_address',
         'credential',
         'created_by',
