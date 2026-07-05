@@ -9,7 +9,7 @@ import secrets
 import subprocess
 from functools import lru_cache
 from datetime import date, datetime, timedelta
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import pandas as pd
 import qrcode
@@ -1877,6 +1877,17 @@ def _normalize_backup_device_type(value):
     return normalized if normalized in {'switch', 'router', 'firewall'} else 'switch'
 
 
+def _extract_management_host(value):
+    text = str(value or '').strip()
+    if not text:
+        return ''
+    parse_target = text if '://' in text else f'//{text}'
+    parsed = urlparse(parse_target)
+    if parsed.hostname:
+        return parsed.hostname
+    return re.sub(r'^[a-z][a-z0-9+.-]*://', '', text, flags=re.IGNORECASE).split('/')[0].split(':')[0].strip()
+
+
 class ConfigBackupTargetViewSet(OptionalPaginationMixin, BaseViewSet):
     audit_module = 'config_backup_target'
     permission_classes = [DcimAccessPermission]
@@ -1902,12 +1913,12 @@ class ConfigBackupTargetViewSet(OptionalPaginationMixin, BaseViewSet):
         ip_address_id = request.data.get('ip_address') or request.data.get('ip_address_id')
         rack_device = RackDevice.objects.filter(pk=rack_device_id).first() if rack_device_id else None
         ip_asset = IPAddress.objects.filter(pk=ip_address_id).first() if ip_address_id else None
-        management_ip = str(request.data.get('management_ip') or '').strip()
+        management_ip = _extract_management_host(request.data.get('management_ip'))
 
         if rack_device is not None and not management_ip:
-            management_ip = str(rack_device.mgmt_ip or '').strip()
+            management_ip = _extract_management_host(rack_device.mgmt_ip)
         if ip_asset is not None and not management_ip:
-            management_ip = str(ip_asset.ip_address or '').strip()
+            management_ip = _extract_management_host(ip_asset.ip_address)
         if not management_ip:
             return Response({'detail': '请先为资产设置管理 IP。'}, status=status.HTTP_400_BAD_REQUEST)
 

@@ -1,6 +1,7 @@
 import ipaddress
 import re
 from datetime import timedelta
+from urllib.parse import urlparse
 
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -33,6 +34,17 @@ from .domains.change_requests.services import build_change_request_title
 
 
 MAC_SANITIZE_PATTERN = re.compile(r'[^0-9a-fA-F]+')
+
+
+def extract_management_host(value):
+    text = str(value or '').strip()
+    if not text:
+        return ''
+    parse_target = text if '://' in text else f'//{text}'
+    parsed = urlparse(parse_target)
+    if parsed.hostname:
+        return parsed.hostname
+    return re.sub(r'^[a-z][a-z0-9+.-]*://', '', text, flags=re.IGNORECASE).split('/')[0].split(':')[0].strip()
 
 
 def normalize_mac_address(value):
@@ -673,11 +685,14 @@ class ConfigBackupTargetSerializer(serializers.ModelSerializer):
         rack_device = attrs.get('rack_device', instance.rack_device if instance else None)
         ip_address = attrs.get('ip_address', instance.ip_address if instance else None)
         management_ip = attrs.get('management_ip', instance.management_ip if instance else '')
+        if 'management_ip' in attrs:
+            attrs['management_ip'] = extract_management_host(attrs.get('management_ip'))
+            management_ip = attrs['management_ip']
 
         if not management_ip and rack_device and rack_device.mgmt_ip:
-            attrs['management_ip'] = rack_device.mgmt_ip
+            attrs['management_ip'] = extract_management_host(rack_device.mgmt_ip)
         if not management_ip and ip_address:
-            attrs['management_ip'] = ip_address.ip_address
+            attrs['management_ip'] = extract_management_host(ip_address.ip_address)
         if not attrs.get('management_ip', management_ip):
             raise serializers.ValidationError({'management_ip': ['必须提供管理 IP。']})
 

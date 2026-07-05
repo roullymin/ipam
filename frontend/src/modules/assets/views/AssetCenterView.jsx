@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   ArrowDown,
@@ -15,11 +15,14 @@ import {
   KeyRound,
   MapPin,
   Network,
+  Pencil,
   RefreshCw,
+  Save,
   Search,
   Server,
   ShieldCheck,
   Terminal,
+  X,
 } from 'lucide-react';
 
 import { safeFetch } from '../../../lib/api';
@@ -49,6 +52,22 @@ const formatTime = (value) => {
 };
 
 const normalize = (value) => String(value || '').trim().toLowerCase();
+
+const extractManagementHost = (value) => {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  try {
+    const urlText = /^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `ssh://${text}`;
+    const parsed = new URL(urlText);
+    return parsed.hostname || text;
+  } catch (error) {
+    return text
+      .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
+      .split('/')[0]
+      .split(':')[0]
+      .trim();
+  }
+};
 
 const inventoryToken = (value, fallback = 'unknown') => {
   const token = String(value || '')
@@ -997,8 +1016,22 @@ function buildInventoryPreview(asset) {
   ].join('\n');
 }
 
-function AssetDetail({ asset, onProvisionBackup, onRunBackup, backupActionAssetId }) {
+function AssetDetail({
+  asset,
+  onProvisionBackup,
+  onRunBackup,
+  onUpdateManagementIp,
+  backupActionAssetId,
+  managementIpActionAssetId,
+}) {
   const [activeTab, setActiveTab] = useState('basic');
+  const [isEditingManagementIp, setIsEditingManagementIp] = useState(false);
+  const [managementIpDraft, setManagementIpDraft] = useState('');
+
+  useEffect(() => {
+    setIsEditingManagementIp(false);
+    setManagementIpDraft(extractManagementHost(asset?.managementIp));
+  }, [asset?.id, asset?.managementIp]);
 
   if (!asset) {
     return (
@@ -1014,6 +1047,19 @@ function AssetDetail({ asset, onProvisionBackup, onRunBackup, backupActionAssetI
   const inventoryGroups = getInventoryGroups(asset);
   const backupVersions = Array.isArray(asset.backup.versions) ? asset.backup.versions : [];
   const backupBusy = backupActionAssetId === asset.id;
+  const managementIpBusy = managementIpActionAssetId === asset.id;
+  const normalizedManagementIp = extractManagementHost(asset.managementIp);
+  const hasManagementIpFormatHint = asset.managementIp && normalizedManagementIp && normalizedManagementIp !== asset.managementIp;
+
+  const handleSaveManagementIp = async () => {
+    const nextValue = extractManagementHost(managementIpDraft);
+    if (!nextValue) {
+      window.alert('请输入管理 IP。');
+      return;
+    }
+    await onUpdateManagementIp(asset, nextValue);
+    setIsEditingManagementIp(false);
+  };
 
   return (
     <div className="space-y-3">
@@ -1035,7 +1081,68 @@ function AssetDetail({ asset, onProvisionBackup, onRunBackup, backupActionAssetI
           </div>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-2">
-          <DetailMetric icon={Network} label="管理 IP" value={asset.managementIp} mono />
+          <div className="rounded-md bg-slate-50 p-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+                <Network className="h-3.5 w-3.5 text-blue-600" />
+                管理 IP
+              </div>
+              {!isEditingManagementIp ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setManagementIpDraft(normalizedManagementIp || asset.managementIp || '');
+                    setIsEditingManagementIp(true);
+                  }}
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-slate-500 transition hover:bg-white hover:text-blue-700"
+                  title="修改管理 IP"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+              ) : null}
+            </div>
+            {isEditingManagementIp ? (
+              <div className="mt-2 flex items-center gap-1.5">
+                <input
+                  value={managementIpDraft}
+                  onChange={(event) => setManagementIpDraft(event.target.value)}
+                  className="h-8 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 font-mono text-xs font-bold text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                  placeholder="172.25.254.130"
+                  disabled={managementIpBusy}
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveManagementIp}
+                  disabled={managementIpBusy}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-blue-600 text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  title="保存"
+                >
+                  <Save className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setManagementIpDraft(normalizedManagementIp || asset.managementIp || '');
+                    setIsEditingManagementIp(false);
+                  }}
+                  disabled={managementIpBusy}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  title="取消"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : (
+              <div className="mt-1 truncate font-mono text-sm font-black text-slate-950">
+                {safeText(normalizedManagementIp || asset.managementIp)}
+              </div>
+            )}
+            {hasManagementIpFormatHint ? (
+              <div className="mt-1 truncate text-[11px] font-semibold text-amber-600">
+                原值：{asset.managementIp}
+              </div>
+            ) : null}
+          </div>
           <DetailMetric icon={MapPin} label="位置" value={[asset.datacenterName, asset.rackCode].filter(Boolean).join(' / ')} tone="text-emerald-600" />
           <DetailMetric icon={Database} label="配置版本" value={`${asset.backup.versionCount} 个`} tone="text-amber-600" />
           <DetailMetric icon={Terminal} label="纳管状态" value={asset.automation.label} tone="text-blue-600" />
@@ -1321,6 +1428,7 @@ export default function AssetCenterView({
   const [selectedAssetId, setSelectedAssetId] = useState(null);
   const [sortConfig, setSortConfig] = useState({ key: 'risk', direction: 'desc' });
   const [backupActionAssetId, setBackupActionAssetId] = useState(null);
+  const [managementIpActionAssetId, setManagementIpActionAssetId] = useState(null);
   const secretsLoaded = !dataErrors?.secrets;
 
   const assets = useMemo(
@@ -1395,8 +1503,55 @@ export default function AssetCenterView({
     return payload?.detail || payload?.message || fallback;
   };
 
+  const handleUpdateManagementIp = async (asset, nextValue) => {
+    const nextHost = extractManagementHost(nextValue);
+    if (!asset || !nextHost) {
+      window.alert('请输入管理 IP。');
+      return;
+    }
+
+    const isDeviceAsset = asset.source === 'device' && asset.deviceId;
+    const ipAssetId = asset.relatedIps?.[0]?.id;
+    const endpoint = isDeviceAsset ? `/api/rack-devices/${asset.deviceId}/` : `/api/ips/${ipAssetId}/`;
+    const payload = isDeviceAsset ? { mgmt_ip: nextHost } : { ip_address: nextHost };
+
+    if (!isDeviceAsset && !ipAssetId) {
+      window.alert('当前资产没有可更新的 IP 地址台账记录。');
+      return;
+    }
+
+    setManagementIpActionAssetId(asset.id);
+    try {
+      const response = await safeFetch(endpoint, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        window.alert(await readApiError(response, '更新管理 IP 失败。'));
+        return;
+      }
+
+      if (asset.backup?.targetId) {
+        const targetResponse = await safeFetch(`/api/config-backup-targets/${asset.backup.targetId}/`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ management_ip: nextHost }),
+        });
+        if (!targetResponse.ok) {
+          window.alert(await readApiError(targetResponse, '管理 IP 已更新，但同步配置备份目标失败。'));
+        }
+      }
+
+      await refreshAssets();
+    } finally {
+      setManagementIpActionAssetId(null);
+    }
+  };
+
   const handleProvisionBackup = async (asset) => {
-    if (!asset?.managementIp) {
+    const managementIp = extractManagementHost(asset?.managementIp);
+    if (!managementIp) {
       window.alert('请先为该资产补充管理 IP。');
       return;
     }
@@ -1407,7 +1562,7 @@ export default function AssetCenterView({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: asset.name,
-          management_ip: asset.managementIp,
+          management_ip: managementIp,
           rack_device: asset.source === 'device' ? asset.deviceId : null,
           ip_address: asset.relatedIps[0]?.id || null,
           device_type: asset.type,
@@ -1621,7 +1776,9 @@ export default function AssetCenterView({
               asset={selectedAsset}
               onProvisionBackup={handleProvisionBackup}
               onRunBackup={handleRunBackup}
+              onUpdateManagementIp={handleUpdateManagementIp}
               backupActionAssetId={backupActionAssetId}
+              managementIpActionAssetId={managementIpActionAssetId}
             />
           </aside>
         </section>
