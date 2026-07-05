@@ -201,6 +201,97 @@ const DEVICE_TYPE_LABELS = {
   unknown: '未分类',
 };
 
+const ASSET_CENTER_INCLUDED_TYPES = new Set([
+  'server',
+  'vm',
+  'switch_core',
+  'switch_access',
+  'switch',
+  'router',
+  'firewall',
+  'storage',
+  'storage_device',
+  'security',
+  'load_balancer',
+  'waf',
+  'vpn',
+  'ids',
+  'ips',
+  'wireless_controller',
+  'ap',
+]);
+
+const ASSET_CENTER_EXCLUDED_TYPES = new Set([
+  'pc',
+  'printer',
+  'terminal',
+  'desktop',
+  'laptop',
+  'computer',
+  'client',
+  'endpoint',
+  'camera',
+  'phone',
+  'mobile',
+  'tablet',
+  'other',
+  'unknown',
+]);
+
+const INFRASTRUCTURE_TYPE_KEYWORDS = [
+  '服务器',
+  'server',
+  '虚拟机',
+  '交换机',
+  'switch',
+  '路由',
+  'router',
+  '防火墙',
+  'firewall',
+  '安全',
+  'security',
+  '存储',
+  'storage',
+  '负载',
+  'load balancer',
+  '网关',
+  'gateway',
+  'waf',
+  'vpn',
+  '无线控制器',
+  'ap',
+];
+
+const ENDPOINT_TYPE_KEYWORDS = [
+  '电脑',
+  '终端',
+  'pc',
+  'desktop',
+  'laptop',
+  '笔记本',
+  '打印',
+  'printer',
+  '摄像',
+  'camera',
+  '手机',
+  'phone',
+  '平板',
+  'tablet',
+  '客户端',
+  '办公',
+];
+
+function isAssetCenterInfrastructure(record = {}) {
+  const rawType = normalize(record.device_type || record.type);
+  const label = normalize(DEVICE_TYPE_LABELS[record.device_type] || record.device_type || record.type || '');
+  const name = normalize(record.name || record.device_name || '');
+  const text = `${rawType} ${label} ${name}`;
+  if (ASSET_CENTER_INCLUDED_TYPES.has(rawType)) return true;
+  if (ASSET_CENTER_EXCLUDED_TYPES.has(rawType)) return false;
+  if (ENDPOINT_TYPE_KEYWORDS.some((keyword) => text.includes(normalize(keyword)))) return false;
+  return INFRASTRUCTURE_TYPE_KEYWORDS.some((keyword) => text.includes(normalize(keyword)));
+}
+
 const STATUS_LABELS = {
   active: '运行中',
   online: '在线',
@@ -427,7 +518,7 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
     };
   };
 
-  const deviceAssets = asArray(rackDevices).map((device) => {
+  const deviceAssets = asArray(rackDevices).filter(isAssetCenterInfrastructure).map((device) => {
     usedDeviceKeys.add(normalize(device.name));
     const rack = rackMap.get(String(device.rack));
     const datacenter = rack ? datacenterMap.get(String(rack.datacenter)) : null;
@@ -482,7 +573,12 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
   });
 
   const ipOnlyAssets = ipList
-    .filter((ip) => ip.device_name && !usedIpIds.has(String(ip.id)) && !usedDeviceKeys.has(normalize(ip.device_name)))
+    .filter((ip) => (
+      ip.device_name
+      && isAssetCenterInfrastructure(ip)
+      && !usedIpIds.has(String(ip.id))
+      && !usedDeviceKeys.has(normalize(ip.device_name))
+    ))
     .map((ip) => {
       const assetIpIds = new Set([String(ip.id)]);
       const credential = getSecretState(assetIpIds, null);
