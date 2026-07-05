@@ -12,6 +12,7 @@ import {
   Search,
   ShieldCheck,
   Trash2,
+  UploadCloud,
   X,
 } from 'lucide-react';
 
@@ -36,6 +37,12 @@ const EMPTY_FORM = {
   status: 'active',
   notes: '',
 };
+
+const BULK_IMPORT_TEMPLATE = 'name,management_ip,username,password,owner_team,credential_type,environment,sensitivity,rotation_days,notes';
+const BULK_IMPORT_PLACEHOLDER = [
+  BULK_IMPORT_TEMPLATE,
+  '核心交换机 SSH,172.25.254.10,admin,真实密码,网络运维,ssh,production,restricted,90,配置备份账号',
+].join('\n');
 
 const unwrap = (payload) => (Array.isArray(payload) ? payload : payload?.results || []);
 const formatTime = (value) => (value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-');
@@ -121,6 +128,10 @@ export default function VaultView({ currentRole }) {
   const [accessForm, setAccessForm] = useState({ reason: '', current_password: '' });
   const [revealResult, setRevealResult] = useState(null);
   const [countdown, setCountdown] = useState(0);
+  const [showBulkImport, setShowBulkImport] = useState(false);
+  const [bulkText, setBulkText] = useState(BULK_IMPORT_TEMPLATE);
+  const [bulkConflictMode, setBulkConflictMode] = useState('update');
+  const [bulkResult, setBulkResult] = useState(null);
 
   const isAdmin = currentRole === 'admin';
   const canReveal = ['admin', 'dc_operator', 'ip_manager'].includes(currentRole);
@@ -182,6 +193,13 @@ export default function VaultView({ currentRole }) {
     setShowEditor(true);
   };
 
+  const openBulkImport = () => {
+    setBulkText(BULK_IMPORT_TEMPLATE);
+    setBulkConflictMode('update');
+    setBulkResult(null);
+    setShowBulkImport(true);
+  };
+
   const openEdit = (item) => {
     setEditing(item);
     setForm({
@@ -226,6 +244,30 @@ export default function VaultView({ currentRole }) {
       return;
     }
     setShowEditor(false);
+    setBusy(false);
+    await loadData();
+  };
+
+  const submitBulkImport = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    setBulkResult(null);
+    const response = await safeFetch('/api/secrets/bulk-import/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        csv_text: bulkText,
+        conflict_mode: bulkConflictMode,
+      }),
+    });
+    if (!response.ok) {
+      setError(await readError(response, '批量导入失败。'));
+      setBusy(false);
+      return;
+    }
+    const payload = await response.json().catch(() => ({}));
+    setBulkResult(payload);
     setBusy(false);
     await loadData();
   };
@@ -333,6 +375,7 @@ export default function VaultView({ currentRole }) {
             </div>
             <div className="flex gap-2">
               <button onClick={loadData} className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:border-blue-200 hover:text-blue-700"><RefreshCw size={15} />刷新</button>
+              {isAdmin && <button onClick={openBulkImport} className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:border-blue-200 hover:text-blue-700"><UploadCloud size={16} />批量导入</button>}
               {isAdmin && <button onClick={openCreate} className="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-bold text-white hover:bg-blue-500"><Plus size={16} />新增密码</button>}
             </div>
           </div>
@@ -443,6 +486,100 @@ export default function VaultView({ currentRole }) {
           )}
         </section>
       </div>
+
+      {showBulkImport && (
+        <Modal title="批量导入密码凭据" onClose={() => setShowBulkImport(false)} width="max-w-5xl">
+          <form onSubmit={submitBulkImport} className="space-y-4">
+            <div className="grid gap-3 lg:grid-cols-[1fr_220px]">
+              <label className="space-y-1.5 text-sm font-semibold text-slate-700">
+                CSV 内容
+                <textarea
+                  value={bulkText}
+                  onChange={(event) => setBulkText(event.target.value)}
+                  className="min-h-[260px] w-full rounded-lg border border-slate-200 bg-slate-950 px-3 py-3 font-mono text-xs leading-5 text-slate-100 outline-none focus:border-blue-500"
+                  placeholder={BULK_IMPORT_PLACEHOLDER}
+                  spellCheck={false}
+                />
+              </label>
+              <div className="space-y-3">
+                <label className="block space-y-1.5 text-sm font-semibold text-slate-700">
+                  冲突策略
+                  <select
+                    value={bulkConflictMode}
+                    onChange={(event) => setBulkConflictMode(event.target.value)}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2.5"
+                  >
+                    <option value="update">同资产同账号则更新</option>
+                    <option value="skip">同资产同账号则跳过</option>
+                    <option value="create">始终新增记录</option>
+                  </select>
+                </label>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600">
+                  <div className="font-bold text-slate-800">支持字段</div>
+                  <div className="mt-1">name、management_ip、username、password、owner_team、credential_type、environment、sensitivity、rotation_days、notes</div>
+                  <div className="mt-2">系统会优先用 management_ip 匹配机柜设备，其次匹配 IP 地址。</div>
+                </div>
+                <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-xs leading-5 text-blue-800">
+                  已填写 {Math.max(bulkText.split(/\r?\n/).filter(Boolean).length - 1, 0)} 行待导入数据。
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button type="button" onClick={() => setBulkText(BULK_IMPORT_TEMPLATE)} className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700">恢复模板</button>
+              <button type="button" onClick={() => setShowBulkImport(false)} className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700">关闭</button>
+              <button disabled={busy} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50">
+                {busy && <Loader2 size={16} className="animate-spin" />}
+                开始导入
+              </button>
+            </div>
+          </form>
+
+          {bulkResult && (
+            <div className="mt-5 space-y-3">
+              <div className="grid gap-2 sm:grid-cols-5">
+                {[
+                  ['总行数', bulkResult.total],
+                  ['新增', bulkResult.created],
+                  ['更新', bulkResult.updated],
+                  ['跳过', bulkResult.skipped],
+                  ['失败', bulkResult.failed],
+                ].map(([title, value]) => (
+                  <div key={title} className="rounded-lg border border-slate-200 bg-white p-3">
+                    <div className="text-xs font-bold text-slate-500">{title}</div>
+                    <div className="mt-1 text-xl font-black text-slate-900">{value || 0}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="max-h-[320px] overflow-auto rounded-lg border border-slate-200">
+                <table className="min-w-[980px] w-full text-left text-xs">
+                  <thead className="sticky top-0 bg-slate-100 text-slate-500">
+                    <tr>
+                      {['行', '状态', '动作', '名称', '管理 IP', '绑定对象', '结果'].map((head) => (
+                        <th key={head} className="border-b border-r border-slate-200 px-3 py-2 font-bold">{head}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(bulkResult.results || []).map((item) => (
+                      <tr key={`${item.row}-${item.name}-${item.action}`} className="hover:bg-slate-50">
+                        <td className="border-b border-r border-slate-100 px-3 py-2 text-slate-500">{item.row}</td>
+                        <td className="border-b border-r border-slate-100 px-3 py-2">
+                          <StatusPill value={item.status === 'success' ? 'success' : item.status === 'skipped' ? 'pending' : 'error'} />
+                        </td>
+                        <td className="border-b border-r border-slate-100 px-3 py-2">{item.action}</td>
+                        <td className="border-b border-r border-slate-100 px-3 py-2 font-semibold text-slate-800">{item.name || '-'}</td>
+                        <td className="border-b border-r border-slate-100 px-3 py-2 font-mono">{item.management_ip || '-'}</td>
+                        <td className="border-b border-r border-slate-100 px-3 py-2">{item.target || '-'}</td>
+                        <td className="border-b border-slate-100 px-3 py-2">{item.detail || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </Modal>
+      )}
 
       {showEditor && (
         <Modal title={editing ? '编辑密码台账' : '新增密码台账'} onClose={() => setShowEditor(false)} width="max-w-4xl">

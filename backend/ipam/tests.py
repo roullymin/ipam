@@ -255,6 +255,56 @@ class SecretVaultApiTests(BaseApiTestCase):
         self.assertEqual(response.status_code, 503)
         self.assertFalse(SecretRecord.objects.exists())
 
+    @patch('ipam.views.vault_write_secret')
+    def test_bulk_import_binds_credentials_by_management_ip_and_updates_conflicts(self, write_secret):
+        client = self.make_authenticated_client(self.admin)
+        datacenter = Datacenter.objects.create(name='Bulk DC')
+        rack = Rack.objects.create(datacenter=datacenter, code='BULK-01', height=42)
+        device = RackDevice.objects.create(
+            rack=rack,
+            name='Bulk Firewall',
+            position=10,
+            u_height=1,
+            device_type='firewall',
+            mgmt_ip='10.66.0.1',
+        )
+        csv_text = (
+            'name,management_ip,username,password,owner_team\n'
+            'Bulk Firewall Login,10.66.0.1,admin,InitialSecret!,NOC\n'
+        )
+
+        response = client.post(
+            '/api/secrets/bulk-import/',
+            {'csv_text': csv_text, 'conflict_mode': 'update'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['created'], 1)
+        self.assertEqual(response.data['failed'], 0)
+        self.assertNotIn('InitialSecret!', json.dumps(response.data, ensure_ascii=False))
+        record = SecretRecord.objects.get()
+        self.assertEqual(record.target_type, 'device')
+        self.assertEqual(record.rack_device, device)
+        self.assertEqual(record.username_hint, 'admin')
+        self.assertEqual(write_secret.call_args.args[2], 'InitialSecret!')
+        self.assertFalse(SecretAuditEvent.objects.filter(reason__contains='InitialSecret!').exists())
+
+        update_response = client.post(
+            '/api/secrets/bulk-import/',
+            {
+                'csv_text': csv_text.replace('InitialSecret!', 'RotatedSecret!'),
+                'conflict_mode': 'update',
+            },
+            format='json',
+        )
+
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(update_response.data['updated'], 1)
+        self.assertEqual(SecretRecord.objects.count(), 1)
+        self.assertEqual(write_secret.call_count, 2)
+        self.assertEqual(write_secret.call_args.args[2], 'RotatedSecret!')
+
     @patch('ipam.views.vault_read_secret')
     def test_operator_can_directly_reveal_secret(self, read_secret):
         read_secret.return_value = {'username': 'netadmin', 'secret_value': 'vault-secret'}

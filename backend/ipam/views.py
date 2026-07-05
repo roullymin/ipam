@@ -1,5 +1,6 @@
 ﻿import gzip
 import io
+import csv
 import ipaddress
 import json
 import logging
@@ -21,6 +22,7 @@ from django.db import transaction
 from django.http import FileResponse, HttpResponse
 from django.middleware.csrf import get_token
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -1639,6 +1641,210 @@ def record_secret_audit(request, secret, action, result='success', reason=''):
     )
 
 
+SECRET_BULK_FIELD_ALIASES = {
+    'name': {'name', '名称', '凭据名称', '密码名称'},
+    'management_ip': {'management_ip', 'mgmt_ip', 'ip', '管理ip', '管理IP', '设备IP', '目标IP', '地址'},
+    'device_name': {'device_name', '设备名称', '资产名称', '主机名'},
+    'username': {'username', 'secret_username', '账号', '用户名', '登录账号'},
+    'password': {'password', 'secret_value', '密码', '口令', '密钥'},
+    'credential_type': {'credential_type', '凭据类型', '类型'},
+    'owner_team': {'owner_team', '责任团队', '团队', '部门', '负责人'},
+    'environment': {'environment', '环境'},
+    'sensitivity': {'sensitivity', '敏感级别', '密级'},
+    'rotation_days': {'rotation_days', '轮换周期', '轮换天数'},
+    'expires_at': {'expires_at', '到期时间', '过期时间'},
+    'status': {'status', '状态'},
+    'notes': {'notes', '备注', '说明'},
+}
+
+SECRET_BULK_CHOICE_ALIASES = {
+    'credential_type': {
+        'ssh': 'ssh',
+        'SSH': 'ssh',
+        '设备账号': 'device',
+        'device': 'device',
+        '数据库': 'database',
+        'database': 'database',
+        'web': 'web',
+        'Web 后台': 'web',
+        'api_key': 'api_key',
+        'API Key': 'api_key',
+        'other': 'other',
+        '其他': 'other',
+    },
+    'environment': {
+        'production': 'production',
+        '生产': 'production',
+        'test': 'test',
+        '测试': 'test',
+        'development': 'development',
+        '开发': 'development',
+        'other': 'other',
+        '其他': 'other',
+    },
+    'sensitivity': {
+        'internal': 'internal',
+        '内部': 'internal',
+        'confidential': 'confidential',
+        '机密': 'confidential',
+        'restricted': 'restricted',
+        '严格受限': 'restricted',
+    },
+    'status': {
+        'active': 'active',
+        '有效': 'active',
+        'disabled': 'disabled',
+        '停用': 'disabled',
+    },
+}
+
+
+def _canonical_secret_bulk_field(name):
+    raw = str(name or '').strip()
+    lowered = raw.lower().replace(' ', '_')
+    for field_name, aliases in SECRET_BULK_FIELD_ALIASES.items():
+        if raw in aliases or lowered in {str(alias).lower().replace(' ', '_') for alias in aliases}:
+            return field_name
+    return lowered
+
+
+def _parse_secret_bulk_rows(csv_text):
+    content = str(csv_text or '').lstrip('\ufeff').strip()
+    if not content:
+        raise ValueError('请粘贴 CSV 内容。')
+    try:
+        dialect = csv.Sniffer().sniff(content[:2048], delimiters=',;\t')
+    except csv.Error:
+        dialect = csv.excel
+    reader = csv.DictReader(io.StringIO(content), dialect=dialect)
+    if not reader.fieldnames:
+        raise ValueError('CSV 需要包含表头。')
+    rows = []
+    for row in reader:
+        normalized = {}
+        for key, value in (row or {}).items():
+            field_name = _canonical_secret_bulk_field(key)
+            if field_name not in SECRET_BULK_FIELD_ALIASES:
+                continue
+            normalized[field_name] = str(value or '') if field_name == 'password' else str(value or '').strip()
+        if any(str(value or '').strip() for value in normalized.values()):
+            rows.append(normalized)
+    if not rows:
+        raise ValueError('CSV 中没有可导入的数据行。')
+    return rows
+
+
+def _normalize_secret_bulk_choice(field_name, value, default):
+    raw = str(value or '').strip()
+    if not raw:
+        return default
+    aliases = SECRET_BULK_CHOICE_ALIASES.get(field_name, {})
+    return aliases.get(raw) or aliases.get(raw.lower()) or raw
+
+
+def _parse_secret_bulk_datetime(value):
+    raw = str(value or '').strip()
+    if not raw:
+        return None
+    parsed = parse_datetime(raw)
+    if parsed is None:
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except ValueError:
+            return raw
+    if timezone.is_naive(parsed):
+        parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+    return parsed.isoformat()
+
+
+def _resolve_secret_bulk_target(row):
+    management_ip = _extract_management_host(row.get('management_ip'))
+    device_name = str(row.get('device_name') or '').strip()
+    rack_device = None
+    ip_asset = None
+    if management_ip:
+        rack_device = RackDevice.objects.filter(mgmt_ip__iexact=management_ip).select_related(
+            'rack',
+            'rack__datacenter',
+        ).first()
+        ip_asset = IPAddress.objects.filter(ip_address=management_ip).first()
+    if rack_device is None and device_name:
+        rack_device = RackDevice.objects.filter(name__iexact=device_name).select_related(
+            'rack',
+            'rack__datacenter',
+        ).first()
+    if rack_device is not None:
+        return {
+            'target_type': 'device',
+            'rack_device': rack_device.pk,
+            'ip_address': None,
+            'target_label': f'{rack_device.rack.datacenter.name} / {rack_device.rack.code} / {rack_device.name}',
+            'management_ip': management_ip or rack_device.mgmt_ip or '',
+        }
+    if ip_asset is not None:
+        return {
+            'target_type': 'ip',
+            'rack_device': None,
+            'ip_address': ip_asset.pk,
+            'target_label': ip_asset.ip_address,
+            'management_ip': management_ip,
+        }
+    return {
+        'target_type': 'general',
+        'rack_device': None,
+        'ip_address': None,
+        'target_label': management_ip or device_name or '通用凭据',
+        'management_ip': management_ip,
+    }
+
+
+def _build_secret_bulk_payload(row):
+    username = str(row.get('username') or '').strip()
+    secret_value = str(row.get('password') or '')
+    if not username:
+        raise ValueError('账号不能为空。')
+    if secret_value == '':
+        raise ValueError('密码不能为空。')
+
+    target = _resolve_secret_bulk_target(row)
+    rotation_days = row.get('rotation_days') or 90
+    try:
+        rotation_days = int(rotation_days)
+    except (TypeError, ValueError) as exc:
+        raise ValueError('轮换周期必须是数字。') from exc
+    display_name = str(row.get('name') or '').strip() or f'{target["target_label"]} {username}'
+    payload = {
+        'name': display_name[:160],
+        'credential_type': _normalize_secret_bulk_choice('credential_type', row.get('credential_type'), 'ssh'),
+        'target_type': target['target_type'],
+        'rack_device': target['rack_device'],
+        'ip_address': target['ip_address'],
+        'datacenter': None,
+        'rack': None,
+        'secret_username': username,
+        'secret_value': secret_value,
+        'owner_team': str(row.get('owner_team') or '').strip(),
+        'environment': _normalize_secret_bulk_choice('environment', row.get('environment'), 'production'),
+        'sensitivity': _normalize_secret_bulk_choice('sensitivity', row.get('sensitivity'), 'confidential'),
+        'expires_at': _parse_secret_bulk_datetime(row.get('expires_at')),
+        'rotation_days': rotation_days,
+        'status': _normalize_secret_bulk_choice('status', row.get('status'), 'active'),
+        'notes': str(row.get('notes') or '').strip(),
+    }
+    return payload, target
+
+
+def _find_secret_bulk_conflict(payload):
+    username = payload.get('secret_username') or ''
+    queryset = SecretRecord.objects.filter(username_hint=username).order_by('-updated_at', '-id')
+    target_type = payload.get('target_type')
+    if target_type == 'device' and payload.get('rack_device'):
+        return queryset.filter(target_type='device', rack_device_id=payload['rack_device']).first()
+    if target_type == 'ip' and payload.get('ip_address'):
+        return queryset.filter(target_type='ip', ip_address_id=payload['ip_address']).first()
+    return queryset.filter(target_type='general', name__iexact=payload.get('name') or '').first()
+
+
 class SecretRecordViewSet(OptionalPaginationMixin, BaseViewSet):
     audit_module = 'secret_record'
     permission_classes = [SecretRecordPermission]
@@ -1703,6 +1909,145 @@ class SecretRecordViewSet(OptionalPaginationMixin, BaseViewSet):
             reason='轮换密码' if payload else '更新密码台账',
         )
         record_audit(self.request, self.audit_module, 'update', instance, '更新密码台账')
+
+    @action(detail=False, methods=['post'], url_path='bulk-import')
+    def bulk_import(self, request):
+        conflict_mode = str(request.data.get('conflict_mode') or 'update').strip().lower()
+        if conflict_mode not in {'update', 'skip', 'create'}:
+            return Response({'detail': '冲突策略只能是 update、skip 或 create。'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            rows = _parse_secret_bulk_rows(request.data.get('csv_text') or request.data.get('content') or '')
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        results = []
+        counters = {'created': 0, 'updated': 0, 'skipped': 0, 'failed': 0}
+        for index, row in enumerate(rows, start=2):
+            management_ip = _extract_management_host(row.get('management_ip'))
+            try:
+                payload, target = _build_secret_bulk_payload(row)
+            except ValueError as exc:
+                counters['failed'] += 1
+                results.append(
+                    {
+                        'row': index,
+                        'status': 'failed',
+                        'action': 'validate',
+                        'name': row.get('name') or '',
+                        'management_ip': management_ip,
+                        'target': '-',
+                        'detail': str(exc),
+                    }
+                )
+                continue
+
+            existing = None if conflict_mode == 'create' else _find_secret_bulk_conflict(payload)
+            if existing is not None and conflict_mode == 'skip':
+                counters['skipped'] += 1
+                results.append(
+                    {
+                        'row': index,
+                        'status': 'skipped',
+                        'action': 'skip',
+                        'id': existing.pk,
+                        'name': existing.name,
+                        'management_ip': target['management_ip'],
+                        'target': target['target_label'],
+                        'detail': '已存在同一资产和账号的凭据。',
+                    }
+                )
+                continue
+
+            serializer = self.get_serializer(existing, data=payload, partial=existing is not None)
+            if not serializer.is_valid():
+                counters['failed'] += 1
+                field_errors = []
+                for field_name, messages in serializer.errors.items():
+                    if isinstance(messages, (list, tuple)):
+                        field_errors.append(f'{field_name}: {"; ".join(str(message) for message in messages)}')
+                    else:
+                        field_errors.append(f'{field_name}: {messages}')
+                results.append(
+                    {
+                        'row': index,
+                        'status': 'failed',
+                        'action': 'validate',
+                        'name': payload.get('name') or '',
+                        'management_ip': target['management_ip'],
+                        'target': target['target_label'],
+                        'detail': '；'.join(field_errors) or '数据校验失败。',
+                    }
+                )
+                continue
+
+            action_name = 'updated' if existing is not None else 'created'
+            try:
+                with transaction.atomic():
+                    if existing is not None:
+                        instance = serializer.save()
+                    else:
+                        instance = serializer.save(created_by=request.user)
+                    pending_payload = getattr(instance, '_pending_secret_payload', None)
+                    if not pending_payload:
+                        raise VaultError('没有可写入 OpenBao 的密文内容。')
+                    vault_write_secret(
+                        instance.vault_path,
+                        pending_payload['username'],
+                        pending_payload['secret_value'],
+                        {'record_id': instance.pk, 'name': instance.name, 'source': 'bulk_import'},
+                    )
+                    instance.last_rotated_at = timezone.now()
+                    instance.save(update_fields=['last_rotated_at', 'updated_at'])
+                    record_secret_audit(
+                        request,
+                        instance,
+                        'rotate' if existing is not None else 'create',
+                        reason='批量导入密码台账',
+                    )
+                    record_audit(
+                        request,
+                        self.audit_module,
+                        'bulk_update' if existing is not None else 'bulk_create',
+                        instance,
+                        '批量导入密码台账（密文存储于 OpenBao）',
+                    )
+            except VaultError as exc:
+                counters['failed'] += 1
+                results.append(
+                    {
+                        'row': index,
+                        'status': 'failed',
+                        'action': action_name,
+                        'name': payload.get('name') or '',
+                        'management_ip': target['management_ip'],
+                        'target': target['target_label'],
+                        'detail': str(exc),
+                    }
+                )
+                continue
+
+            counters[action_name] += 1
+            results.append(
+                {
+                    'row': index,
+                    'status': 'success',
+                    'action': action_name,
+                    'id': instance.pk,
+                    'name': instance.name,
+                    'management_ip': target['management_ip'],
+                    'target': target['target_label'],
+                    'detail': '已更新 OpenBao 密文。' if existing is not None else '已写入 OpenBao 密文。',
+                }
+            )
+
+        return Response(
+            {
+                'status': 'success' if counters['failed'] == 0 else 'partial',
+                'total': len(rows),
+                **counters,
+                'results': results,
+            }
+        )
 
     @transaction.atomic
     def destroy(self, request, *args, **kwargs):
