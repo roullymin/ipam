@@ -63,36 +63,62 @@ body {
 
 .login-cyber-stage {
   background:
-    radial-gradient(circle at 50% 78%, rgba(16, 185, 255, 0.42), transparent 30%),
-    radial-gradient(circle at 18% 20%, rgba(39, 122, 255, 0.22), transparent 30%),
-    linear-gradient(180deg, #020817 0%, #06224a 48%, #020817 100%);
+    radial-gradient(circle at 62% 58%, rgba(14, 165, 233, 0.26), transparent 22%),
+    radial-gradient(circle at 22% 18%, rgba(70, 109, 255, 0.32), transparent 30%),
+    linear-gradient(135deg, #020617 0%, #08204a 42%, #031226 72%, #01040d 100%);
+}
+
+.login-aurora-layer {
+  position: absolute;
+  inset: -20%;
+  opacity: 0.7;
+  background:
+    conic-gradient(from 145deg at 42% 40%, transparent 0deg, rgba(34, 211, 238, 0.18) 64deg, transparent 138deg, rgba(99, 102, 241, 0.24) 210deg, transparent 300deg),
+    radial-gradient(circle at 70% 32%, rgba(59, 130, 246, 0.34), transparent 24%),
+    radial-gradient(circle at 30% 74%, rgba(20, 184, 166, 0.22), transparent 24%);
+  filter: blur(22px);
 }
 
 .login-matrix-layer {
   position: absolute;
   inset: 0;
-  opacity: 0.62;
+  opacity: 0.42;
   background-image:
-    linear-gradient(180deg, rgba(77, 217, 255, 0.18) 0 1px, transparent 1px 100%),
-    repeating-linear-gradient(90deg, transparent 0 24px, rgba(77, 217, 255, 0.16) 25px, transparent 26px),
-    repeating-linear-gradient(180deg, transparent 0 18px, rgba(34, 211, 238, 0.18) 19px, transparent 20px);
-  background-size: 120px 100%, 120px 100%, 64px 128px;
-  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.92), rgba(0, 0, 0, 0.22) 68%, transparent 100%);
+    linear-gradient(rgba(125, 211, 252, 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(125, 211, 252, 0.1) 1px, transparent 1px),
+    repeating-linear-gradient(90deg, transparent 0 36px, rgba(77, 217, 255, 0.12) 37px, transparent 38px);
+  background-size: 72px 72px, 72px 72px, 156px 100%;
+  mask-image: radial-gradient(circle at 56% 54%, rgba(0, 0, 0, 0.95), rgba(0, 0, 0, 0.25) 58%, transparent 86%);
 }
 
 .login-grid-layer {
   position: absolute;
   left: -10%;
   right: -10%;
-  bottom: -18%;
-  height: 46%;
-  transform: perspective(640px) rotateX(60deg);
+  bottom: -16%;
+  height: 44%;
+  transform: perspective(760px) rotateX(62deg);
   transform-origin: bottom;
   background-image:
-    linear-gradient(rgba(64, 196, 255, 0.32) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(64, 196, 255, 0.24) 1px, transparent 1px);
-  background-size: 42px 42px;
-  box-shadow: inset 0 30px 80px rgba(15, 134, 255, 0.26);
+    linear-gradient(rgba(56, 189, 248, 0.28) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.22) 1px, transparent 1px);
+  background-size: 56px 56px;
+  box-shadow: inset 0 36px 90px rgba(14, 165, 233, 0.24);
+}
+
+.login-orbit-layer {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  height: min(82vw, 860px);
+  width: min(82vw, 860px);
+  transform: translate(-50%, -50%) rotate(-18deg);
+  border-radius: 999px;
+  border: 1px solid rgba(125, 211, 252, 0.1);
+  box-shadow:
+    inset 0 0 80px rgba(14, 165, 233, 0.08),
+    0 0 120px rgba(56, 189, 248, 0.08);
+  mask-image: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.9), transparent);
 }
 
 .login-light-line {
@@ -106,15 +132,24 @@ body {
 }
 
 .login-glass-card {
-  border-radius: 1rem;
-  border: 1px solid rgba(125, 211, 252, 0.24);
+  border-radius: 1.35rem;
+  border: 1px solid rgba(125, 211, 252, 0.26);
   background:
-    linear-gradient(180deg, rgba(9, 30, 60, 0.88) 0%, rgba(4, 20, 43, 0.82) 100%);
+    linear-gradient(180deg, rgba(11, 31, 63, 0.9) 0%, rgba(3, 17, 39, 0.84) 100%);
   box-shadow:
-    0 24px 80px rgba(0, 0, 0, 0.42),
-    0 0 46px rgba(14, 165, 233, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(16px);
+    0 32px 110px rgba(0, 0, 0, 0.5),
+    0 0 70px rgba(14, 165, 233, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(20px);
+}
+
+.login-feature-card {
+  min-height: 6rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(125, 211, 252, 0.14);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+  padding: 1rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .login-brand-orb {
@@ -154,6 +189,37 @@ body {
   background:
     linear-gradient(135deg, rgba(34, 211, 238, 0.15), rgba(59, 130, 246, 0.28)),
     repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.22) 0 2px, transparent 2px 8px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 0 20px rgba(34, 211, 238, 0.08);
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.login-captcha:hover {
+  border-color: rgba(103, 232, 249, 0.58);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 0 26px rgba(34, 211, 238, 0.16);
+  transform: translateY(-1px);
+}
+
+@media (max-width: 639px) {
+  .login-stage {
+    padding-left: 0.875rem;
+    padding-right: 0.875rem;
+  }
+
+  .login-stage > main {
+    max-width: min(22rem, calc(100vw - 1.75rem)) !important;
+    width: min(22rem, calc(100vw - 1.75rem)) !important;
+  }
+
+  .login-stage .login-glass-card {
+    max-width: min(22rem, calc(100vw - 1.75rem)) !important;
+    width: min(22rem, calc(100vw - 1.75rem)) !important;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .login-stage .login-captcha {
+    letter-spacing: 0.14em;
+  }
 }
 
 .login-button {
