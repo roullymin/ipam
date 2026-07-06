@@ -78,8 +78,8 @@ const DEFAULT_OPTIONS = {
 };
 
 const ROLE_DEFINITIONS = {
-  admin: { label: '\u8d85\u7ea7\u7ba1\u7406\u5458', permissions: ['dashboard', 'assets', 'list', 'dcim', 'changes', 'resident', 'vault', 'security', 'backup', 'users'] },
-  dc_operator: { label: '\u673a\u623f\u8fd0\u7ef4', permissions: ['dashboard', 'assets', 'dcim', 'changes', 'resident', 'vault'] },
+  admin: { label: '\u8d85\u7ea7\u7ba1\u7406\u5458', permissions: ['dashboard', 'assets', 'list', 'dcim', 'changes', 'resident', 'vault', 'backup', 'ansible', 'security', 'users'] },
+  dc_operator: { label: '\u673a\u623f\u8fd0\u7ef4', permissions: ['dashboard', 'assets', 'dcim', 'changes', 'resident', 'vault', 'backup', 'ansible'] },
   ip_manager: { label: 'IP \u7ba1\u7406\u5458', permissions: ['dashboard', 'assets', 'list', 'vault'] },
   auditor: { label: '\u5ba1\u8ba1\u5458', permissions: ['dashboard', 'assets', 'changes', 'security', 'resident', 'vault'] },
   guest: { label: '\u8bbf\u5ba2', permissions: ['dashboard', 'assets', 'list', 'dcim'] },
@@ -95,6 +95,7 @@ const TAB_CONFIG = {
   vault: { icon: KeyRound, label: '密码本' },
   security: { icon: ShieldCheck, label: BRAND.navigation.security },
   backup: { icon: DatabaseBackup, label: BRAND.navigation.backup },
+  ansible: { icon: Code, label: 'Ansible中心' },
   users: { icon: UserCog, label: BRAND.navigation.users }
 };
 

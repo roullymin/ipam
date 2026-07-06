@@ -84,7 +84,11 @@ const labels = {
 async function readError(response, fallback) {
   const payload = await response.json().catch(() => ({}));
   const fieldMessage = Object.values(payload || {}).flat().find(Boolean);
-  return payload.detail || payload.message || fieldMessage || fallback;
+  const message = payload.detail || payload.message || fieldMessage || fallback;
+  if (response.status === 405 && String(message || '').includes('POST')) {
+    return `${message} 当前后端可能还没有更新到支持该动作的版本，请在服务器重新拉取代码并重建容器。`;
+  }
+  return message;
 }
 
 function Modal({ title, children, onClose, width = 'max-w-2xl' }) {

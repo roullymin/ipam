@@ -6,7 +6,7 @@ import { BRAND } from '../lib/brand';
 
 const NAV_GROUPS = [
   { label: '总览', keys: ['dashboard', 'assets'] },
-  { label: '资产资源', keys: ['list', 'dcim', 'vault', 'backup'] },
+  { label: '资产资源', keys: ['list', 'dcim', 'vault', 'backup', 'ansible'] },
   { label: '流程协同', keys: ['changes', 'resident'] },
   { label: '治理', keys: ['security', 'users'] },
 ];

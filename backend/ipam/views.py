@@ -2616,6 +2616,477 @@ def _coerce_bool(value, default=True):
     return str(value).strip().lower() not in {'0', 'false', 'no', 'off', 'disabled'}
 
 
+ANSIBLE_MANAGE_ROLES = {'admin', 'dc_operator'}
+ANSIBLE_DEVICE_KEYWORDS = {
+    'server',
+    'switch',
+    'router',
+    'firewall',
+    'load_balancer',
+    'storage',
+    'security',
+    'network',
+    '交换',
+    '路由',
+    '防火',
+    '服务器',
+}
+
+
+def _ansible_token(value, fallback='default'):
+    token = re.sub(r'[^A-Za-z0-9]+', '_', str(value or '').strip().lower()).strip('_')
+    return token or fallback
+
+
+def _ansible_inventory_name(name, management_ip):
+    source = name or management_ip or 'host'
+    token = re.sub(r'[^A-Za-z0-9_.-]+', '_', str(source).strip()).strip('_')
+    if token and token[0].isdigit():
+        token = f'host_{token}'
+    return token or f'host_{_ansible_token(management_ip, "unknown")}'
+
+
+def _is_ansible_asset_type(value):
+    normalized = str(value or '').strip().lower()
+    if not normalized:
+        return False
+    return any(marker in normalized for marker in ANSIBLE_DEVICE_KEYWORDS)
+
+
+def _normalize_ansible_device_type(value):
+    normalized = str(value or '').strip().lower()
+    if not normalized:
+        return 'unknown'
+    if 'firewall' in normalized or '防火' in normalized or normalized == 'fw':
+        return 'firewall'
+    if 'router' in normalized or '路由' in normalized:
+        return 'router'
+    if 'switch' in normalized or '交换' in normalized:
+        return 'switch'
+    if 'server' in normalized or '服务器' in normalized:
+        return 'server'
+    if 'storage' in normalized or '存储' in normalized:
+        return 'storage'
+    return _ansible_token(normalized, 'unknown')
+
+
+def _config_backup_device_type_for_ansible(value):
+    normalized = str(value or '').strip().lower()
+    if 'server' in normalized or '服务器' in normalized or 'storage' in normalized or '存储' in normalized:
+        return 'other'
+    return _normalize_backup_device_type(value)
+
+
+def _ansible_location_for_device(device):
+    if not device or not device.rack_id:
+        return ''
+    datacenter = device.rack.datacenter.name if device.rack.datacenter_id else ''
+    return ' / '.join(part for part in [datacenter, device.rack.code, device.name] if part)
+
+
+def _ansible_groups(datacenter='', device_type='', vendor='', managed=False):
+    groups = ['managed' if managed else 'unmanaged']
+    if datacenter:
+        groups.append(f'dc_{_ansible_token(datacenter)}')
+    if device_type:
+        groups.append(f'type_{_ansible_token(device_type)}')
+    if vendor:
+        groups.append(f'vendor_{_ansible_token(vendor)}')
+    return groups
+
+
+def _ansible_target_queryset():
+    return ConfigBackupTarget.objects.select_related(
+        'rack_device',
+        'rack_device__rack',
+        'rack_device__rack__datacenter',
+        'ip_address',
+        'credential',
+    ).prefetch_related('versions')
+
+
+def _ansible_row_from_target(target):
+    device = target.rack_device if target.rack_device_id else None
+    ip_asset = target.ip_address if target.ip_address_id else None
+    latest = None
+    versions = list(target.versions.all())
+    if versions:
+        latest = versions[0]
+    datacenter = device.rack.datacenter.name if device and device.rack_id and device.rack.datacenter_id else ''
+    rack_code = device.rack.code if device and device.rack_id else ''
+    vendor = device.brand if device else ''
+    raw_type = target.device_type or (device.device_type if device else '') or (ip_asset.device_type if ip_asset else '')
+    credential = target.credential if target.credential_id else _find_backup_credential(rack_device=device, ip_asset=ip_asset)
+    management_ip = _extract_management_host(target.management_ip)
+    managed = bool(target.enabled and management_ip and credential)
+    location = _ansible_location_for_device(device) or (ip_asset.ip_address if ip_asset else '')
+    return {
+        'id': f'target-{target.id}',
+        'source': 'target',
+        'asset_id': f'device-{device.id}' if device else (f'ip-{ip_asset.id}' if ip_asset else f'target-{target.id}'),
+        'target_id': target.id,
+        'rack_device_id': device.id if device else None,
+        'ip_address_id': ip_asset.id if ip_asset else None,
+        'name': target.name or (device.name if device else '') or (ip_asset.device_name if ip_asset else '') or management_ip,
+        'management_ip': management_ip,
+        'device_type': _normalize_ansible_device_type(raw_type),
+        'raw_device_type': raw_type,
+        'vendor': vendor,
+        'datacenter': datacenter,
+        'rack_code': rack_code,
+        'location': location,
+        'inventory_name': _ansible_inventory_name(target.name or (device.name if device else ''), management_ip),
+        'groups': _ansible_groups(datacenter, raw_type or target.device_type, vendor, managed),
+        'managed': managed,
+        'enabled': bool(target.enabled),
+        'credential_id': credential.id if credential else None,
+        'credential_name': credential.name if credential else '',
+        'username_hint': credential.username_hint if credential else '',
+        'credential_status': credential.status if credential else 'missing',
+        'backup_target_id': target.id,
+        'backup_status': target.last_status,
+        'backup_status_label': dict(ConfigBackupTarget.STATUS_CHOICES).get(target.last_status, target.last_status),
+        'backup_enabled': bool(target.enabled),
+        'version_count': len(versions),
+        'latest_version': latest.filename if latest else '',
+        'latest_version_time': (latest.finished_at or latest.started_at).isoformat() if latest else '',
+        'ssh_port': target.ssh_port or 22,
+        'timeout_seconds': target.timeout_seconds or 30,
+        'command_profile': target.command_profile,
+        'last_job_status': dict(ConfigBackupTarget.STATUS_CHOICES).get(target.last_status, target.last_status),
+        'last_job_detail': target.last_error or '',
+        'readiness': {
+            'management_ip': bool(management_ip),
+            'credential': bool(credential),
+            'backup_target': True,
+            'template': bool(target.command_profile),
+        },
+    }
+
+
+def _ansible_row_from_device(device):
+    management_ip = _extract_management_host(device.mgmt_ip)
+    credential = _find_backup_credential(rack_device=device)
+    datacenter = device.rack.datacenter.name if device.rack_id and device.rack.datacenter_id else ''
+    rack_code = device.rack.code if device.rack_id else ''
+    raw_type = device.device_type or ''
+    return {
+        'id': f'device-{device.id}',
+        'source': 'device',
+        'asset_id': f'device-{device.id}',
+        'target_id': None,
+        'rack_device_id': device.id,
+        'ip_address_id': None,
+        'name': device.name or management_ip,
+        'management_ip': management_ip,
+        'device_type': _normalize_ansible_device_type(raw_type),
+        'raw_device_type': raw_type,
+        'vendor': device.brand or '',
+        'datacenter': datacenter,
+        'rack_code': rack_code,
+        'location': _ansible_location_for_device(device),
+        'inventory_name': _ansible_inventory_name(device.name, management_ip),
+        'groups': _ansible_groups(datacenter, raw_type, device.brand, False),
+        'managed': False,
+        'enabled': False,
+        'credential_id': credential.id if credential else None,
+        'credential_name': credential.name if credential else '',
+        'username_hint': credential.username_hint if credential else '',
+        'credential_status': credential.status if credential else 'missing',
+        'backup_target_id': None,
+        'backup_status': 'missing',
+        'backup_status_label': '未接入',
+        'backup_enabled': False,
+        'version_count': 0,
+        'latest_version': '',
+        'latest_version_time': '',
+        'ssh_port': 22,
+        'timeout_seconds': 30,
+        'command_profile': 'huawei_vrp',
+        'last_job_status': '未执行',
+        'last_job_detail': '',
+        'readiness': {
+            'management_ip': bool(management_ip),
+            'credential': bool(credential),
+            'backup_target': False,
+            'template': bool(raw_type),
+        },
+    }
+
+
+def _ansible_row_from_ip(ip_asset):
+    management_ip = _extract_management_host(ip_asset.ip_address)
+    credential = _find_backup_credential(ip_asset=ip_asset)
+    raw_type = ip_asset.device_type or ''
+    return {
+        'id': f'ip-{ip_asset.id}',
+        'source': 'ip',
+        'asset_id': f'ip-{ip_asset.id}',
+        'target_id': None,
+        'rack_device_id': None,
+        'ip_address_id': ip_asset.id,
+        'name': ip_asset.device_name or management_ip,
+        'management_ip': management_ip,
+        'device_type': _normalize_ansible_device_type(raw_type),
+        'raw_device_type': raw_type,
+        'vendor': '',
+        'datacenter': '',
+        'rack_code': '',
+        'location': management_ip,
+        'inventory_name': _ansible_inventory_name(ip_asset.device_name, management_ip),
+        'groups': _ansible_groups('', raw_type, '', False),
+        'managed': False,
+        'enabled': False,
+        'credential_id': credential.id if credential else None,
+        'credential_name': credential.name if credential else '',
+        'username_hint': credential.username_hint if credential else '',
+        'credential_status': credential.status if credential else 'missing',
+        'backup_target_id': None,
+        'backup_status': 'missing',
+        'backup_status_label': '未接入',
+        'backup_enabled': False,
+        'version_count': 0,
+        'latest_version': '',
+        'latest_version_time': '',
+        'ssh_port': 22,
+        'timeout_seconds': 30,
+        'command_profile': 'huawei_vrp',
+        'last_job_status': '未执行',
+        'last_job_detail': '',
+        'readiness': {
+            'management_ip': bool(management_ip),
+            'credential': bool(credential),
+            'backup_target': False,
+            'template': bool(raw_type),
+        },
+    }
+
+
+def _build_ansible_hosts():
+    hosts = []
+    used_device_ids = set()
+    used_ip_ids = set()
+    used_management_ips = set()
+
+    for target in _ansible_target_queryset().order_by('management_ip', 'id'):
+        row = _ansible_row_from_target(target)
+        hosts.append(row)
+        if row['rack_device_id']:
+            used_device_ids.add(row['rack_device_id'])
+        if row['ip_address_id']:
+            used_ip_ids.add(row['ip_address_id'])
+        if row['management_ip']:
+            used_management_ips.add(row['management_ip'])
+
+    device_queryset = RackDevice.objects.select_related('rack', 'rack__datacenter').all().order_by('name', 'id')
+    for device in device_queryset:
+        management_ip = _extract_management_host(device.mgmt_ip)
+        if device.id in used_device_ids or not management_ip or management_ip in used_management_ips:
+            continue
+        if not _is_ansible_asset_type(device.device_type):
+            continue
+        row = _ansible_row_from_device(device)
+        hosts.append(row)
+        used_device_ids.add(device.id)
+        used_management_ips.add(management_ip)
+
+    ip_queryset = IPAddress.objects.exclude(device_name='').order_by('ip_address', 'id')
+    for ip_asset in ip_queryset:
+        management_ip = _extract_management_host(ip_asset.ip_address)
+        if ip_asset.id in used_ip_ids or not management_ip or management_ip in used_management_ips:
+            continue
+        if not _is_ansible_asset_type(ip_asset.device_type):
+            continue
+        row = _ansible_row_from_ip(ip_asset)
+        hosts.append(row)
+        used_ip_ids.add(ip_asset.id)
+        used_management_ips.add(management_ip)
+
+    return hosts
+
+
+def _build_ansible_inventory(hosts):
+    grouped = {}
+    for row in hosts:
+        if not row.get('managed') or not row.get('management_ip') or not row.get('credential_id'):
+            continue
+        group = row['groups'][0] if row.get('groups') else 'managed'
+        grouped.setdefault(group, []).append(row)
+    lines = []
+    for group in sorted(grouped):
+        lines.append(f'[{group}]')
+        for row in sorted(grouped[group], key=lambda item: item.get('inventory_name') or ''):
+            user_part = f" ansible_user={row['username_hint']}" if row.get('username_hint') else ''
+            lines.append(
+                f"{row['inventory_name']} ansible_host={row['management_ip']} ansible_port={row.get('ssh_port') or 22}{user_part}"
+            )
+        lines.append('')
+    return '\n'.join(lines).strip()
+
+
+def _ansible_host_selection(hosts, payload):
+    host_ids = []
+    for key in ('host_ids', 'asset_ids'):
+        value = payload.get(key)
+        if isinstance(value, str):
+            host_ids.extend(item.strip() for item in value.split(',') if item.strip())
+        elif isinstance(value, (list, tuple, set)):
+            host_ids.extend(str(item).strip() for item in value if str(item).strip())
+    target_ids = payload.get('target_ids')
+    if target_ids:
+        try:
+            host_ids.extend(f'target-{item}' for item in _parse_id_list(target_ids))
+        except ValueError:
+            host_ids.extend(str(item).strip() for item in target_ids if str(item).strip())
+    if not host_ids:
+        return [row for row in hosts if row.get('managed')]
+    selected = set(host_ids)
+    return [row for row in hosts if row.get('id') in selected or row.get('asset_id') in selected]
+
+
+def _ansible_summary_payload():
+    hosts = _build_ansible_hosts()
+    managed = [row for row in hosts if row.get('managed')]
+    credential_missing = [row for row in hosts if not row.get('credential_id')]
+    backup_missing = [row for row in hosts if not row.get('backup_target_id')]
+    failed = [row for row in hosts if row.get('backup_status') == 'failed' or row.get('last_job_detail')]
+    groups = {}
+    for row in hosts:
+        for group in row.get('groups') or []:
+            groups.setdefault(group, {'name': group, 'count': 0, 'managed': 0})
+            groups[group]['count'] += 1
+            if row.get('managed'):
+                groups[group]['managed'] += 1
+    return {
+        'stats': {
+            'total_hosts': len(hosts),
+            'managed_hosts': len(managed),
+            'unmanaged_hosts': len(hosts) - len(managed),
+            'credential_missing': len(credential_missing),
+            'backup_missing': len(backup_missing),
+            'failed_hosts': len(failed),
+        },
+        'hosts': hosts,
+        'groups': sorted(groups.values(), key=lambda item: (-item['managed'], item['name'])),
+        'inventory': _build_ansible_inventory(hosts),
+    }
+
+
+@api_view(['GET'])
+@authentication_classes((SessionAuthentication, BasicAuthentication))
+@permission_classes([DcimAccessPermission])
+def ansible_summary(request):
+    return Response(_ansible_summary_payload())
+
+
+@api_view(['POST'])
+@authentication_classes((SessionAuthentication, BasicAuthentication))
+@permission_classes([DcimAccessPermission])
+def ansible_test(request):
+    if get_user_role(request.user) not in ANSIBLE_MANAGE_ROLES:
+        raise PermissionDenied('当前角色无权执行 Ansible 登录测试。')
+    hosts = _build_ansible_hosts()
+    selected_hosts = _ansible_host_selection(hosts, request.data)
+    results = []
+    counters = {'total': len(selected_hosts), 'success': 0, 'failed': 0, 'skipped': 0}
+    for row in selected_hosts:
+        credential = SecretRecord.objects.filter(pk=row.get('credential_id'), status='active').first()
+        if not row.get('management_ip'):
+            counters['skipped'] += 1
+            results.append({**row, 'status': 'skipped', 'category': 'missing_ip', 'detail': '缺少管理 IP。'})
+            continue
+        if credential is None:
+            counters['skipped'] += 1
+            results.append({**row, 'status': 'skipped', 'category': 'credential_missing', 'detail': '缺少可用登录凭据。'})
+            continue
+        try:
+            payload = test_secret_login(
+                credential=credential,
+                management_ip=row['management_ip'],
+                read_secret=vault_read_secret,
+                ssh_port=row.get('ssh_port') or 22,
+                timeout_seconds=row.get('timeout_seconds') or 30,
+            )
+            counters['success'] += 1
+            results.append({**row, 'status': 'success', 'category': 'success', 'detail': payload.get('message') or 'SSH 登录测试成功。', 'duration_seconds': payload.get('duration_seconds', 0)})
+        except (ConfigBackupConnectionError, ConfigBackupError, VaultError) as exc:
+            category, label = _classify_login_failure(str(exc))
+            counters['failed'] += 1
+            results.append({**row, 'status': 'failed', 'category': category, 'category_label': label, 'detail': str(exc)})
+    record_audit(request, 'ansible', 'test', detail=f'批量测试 Ansible 登录：成功 {counters["success"]}，失败 {counters["failed"]}，跳过 {counters["skipped"]}')
+    return Response({'summary': counters, 'results': results})
+
+
+def _provision_ansible_host(row, request, defaults):
+    management_ip = _extract_management_host(row.get('management_ip'))
+    if not management_ip:
+        return None, False, '缺少管理 IP。'
+    rack_device = RackDevice.objects.filter(pk=row.get('rack_device_id')).first() if row.get('rack_device_id') else None
+    ip_asset = IPAddress.objects.filter(pk=row.get('ip_address_id')).first() if row.get('ip_address_id') else None
+    credential = SecretRecord.objects.filter(pk=row.get('credential_id'), status='active').first()
+    if credential is None:
+        credential = _find_backup_credential(rack_device=rack_device, ip_asset=ip_asset)
+    if credential is None:
+        return None, False, '缺少可用登录凭据。'
+    target, created = ConfigBackupTarget.objects.update_or_create(
+        management_ip=management_ip,
+        defaults={
+            'name': row.get('name') or management_ip,
+            'rack_device': rack_device,
+            'ip_address': ip_asset,
+            'device_type': _config_backup_device_type_for_ansible(row.get('raw_device_type') or row.get('device_type')),
+            'command_profile': defaults['command_profile'],
+            'ssh_port': defaults['ssh_port'],
+            'timeout_seconds': defaults['timeout_seconds'],
+            'save_before_backup': defaults['save_before_backup'],
+            'retention_count': defaults['retention_count'],
+            'credential': credential,
+            'enabled': True,
+            'created_by': request.user if request.user.is_authenticated else None,
+        },
+    )
+    return target, created, ''
+
+
+@api_view(['POST'])
+@authentication_classes((SessionAuthentication, BasicAuthentication))
+@permission_classes([DcimAccessPermission])
+def ansible_provision(request):
+    if get_user_role(request.user) not in ANSIBLE_MANAGE_ROLES:
+        raise PermissionDenied('当前角色无权纳入 Ansible Inventory。')
+    defaults = {
+        'command_profile': request.data.get('command_profile') or 'huawei_vrp',
+        'ssh_port': _parse_positive_int(request.data.get('ssh_port'), 22, minimum=1, maximum=65535, field_name='SSH 端口'),
+        'timeout_seconds': _parse_positive_int(request.data.get('timeout_seconds'), 30, minimum=5, maximum=600, field_name='连接超时'),
+        'save_before_backup': _coerce_bool(request.data.get('save_before_backup'), True),
+        'retention_count': _parse_positive_int(request.data.get('retention_count'), 12, minimum=1, maximum=200, field_name='保留版本'),
+    }
+    hosts = _build_ansible_hosts()
+    selected_hosts = _ansible_host_selection(hosts, request.data)
+    results = []
+    counters = {'total': len(selected_hosts), 'created': 0, 'updated': 0, 'failed': 0}
+    for row in selected_hosts:
+        target, created, error = _provision_ansible_host(row, request, defaults)
+        if error:
+            counters['failed'] += 1
+            results.append({**row, 'status': 'failed', 'detail': error})
+            continue
+        if created:
+            counters['created'] += 1
+        else:
+            counters['updated'] += 1
+        results.append(
+            {
+                **row,
+                'status': 'created' if created else 'updated',
+                'detail': '已纳入 Ansible Inventory。',
+                'target': ConfigBackupTargetSerializer(target, context={'request': request}).data,
+            }
+        )
+    record_audit(request, 'ansible', 'provision', detail=f'纳入 Ansible Inventory：新增 {counters["created"]}，更新 {counters["updated"]}，失败 {counters["failed"]}')
+    return Response({'summary': counters, 'results': results})
+
+
 class ConfigBackupTargetViewSet(OptionalPaginationMixin, BaseViewSet):
     audit_module = 'config_backup_target'
     permission_classes = [DcimAccessPermission]

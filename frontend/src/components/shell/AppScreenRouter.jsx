@@ -11,6 +11,7 @@ const ResidentManagementView = lazy(
   () => import('../../modules/resident/views/ResidentManagementView'),
 );
 const BackupView = lazy(() => import('../../modules/backup/views/BackupView'));
+const AnsibleCenterView = lazy(() => import('../../modules/ansible/views/AnsibleCenterView'));
 const SecurityCenterView = lazy(
   () => import('../../modules/security/views/SecurityCenterView'),
 );
@@ -44,6 +45,7 @@ export default function AppScreenRouter(props) {
   if (activeTab === 'resident') screen = <ResidentManagementView {...residentProps} />;
   if (activeTab === 'vault') screen = <VaultView currentRole={currentRole} />;
   if (activeTab === 'backup') screen = <BackupView {...backupProps} />;
+  if (activeTab === 'ansible') screen = <AnsibleCenterView />;
   if (activeTab === 'users') screen = <UserManagementView {...usersProps} />;
 
   return (

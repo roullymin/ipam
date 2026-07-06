@@ -414,6 +414,28 @@ function EmptyState() {
   );
 }
 
+function buildAutomationState(asset, backup, credential) {
+  const hasCredential = credential.status === 'active' && credential.count > 0;
+  const managed = Boolean(asset.managementIp && backup.targetId && backup.targetEnabled && (backup.targetCredentialId || hasCredential));
+  const groups = [
+    managed ? 'managed' : 'unmanaged',
+    asset.datacenterName ? `dc_${inventoryToken(asset.datacenterName)}` : null,
+    asset.type ? `type_${inventoryToken(asset.type)}` : null,
+    asset.vendor ? `vendor_${inventoryToken(asset.vendor)}` : null,
+  ].filter(Boolean);
+
+  return {
+    managed,
+    label: managed ? '已纳管' : backup.targetId ? '待绑定凭据' : '未纳管',
+    inventoryName: asset.managementIp || asset.name || '',
+    groups,
+    lastJobStatus: backup.targetStatusLabel || backup.lastResult || '未执行',
+    targetId: backup.targetId,
+    sshPort: backup.targetSshPort || 22,
+    commandProfile: backup.targetCommandProfile || 'huawei_vrp',
+  };
+}
+
 function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBackups, secretsLoaded }) {
   const datacenterMap = new Map(asArray(datacenters).map((item) => [String(item.id), item]));
   const rackMap = new Map(asArray(racks).map((item) => [String(item.id), item]));
@@ -528,20 +550,34 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
     const status = device.status || 'unknown';
     const managementIp = device.mgmt_ip || relatedIps[0]?.ip_address || '';
     const backup = getConfigBackupState(managementIp);
+    const assetName = safeText(device.name, `Device ${device.id}`);
+    const assetType = device.device_type || 'unknown';
+    const assetVendor = device.brand || '';
+    const automation = buildAutomationState(
+      {
+        name: assetName,
+        managementIp,
+        type: assetType,
+        vendor: assetVendor,
+        datacenterName: datacenter?.name || '',
+      },
+      backup,
+      credential,
+    );
     const riskCodes = [];
     if (['offline', 'unknown'].includes(status)) riskCodes.push('offline');
     if (credential.status === 'missing') riskCodes.push('credential');
     if (backup.versionCount === 0 && backup.status !== 'ready') riskCodes.push('backup');
-    riskCodes.push('automation');
+    if (!automation.managed) riskCodes.push('automation');
 
     return {
       id: `device-${device.id}`,
       source: 'device',
       deviceId: device.id,
-      name: safeText(device.name, `设备 ${device.id}`),
-      type: device.device_type || 'unknown',
-      typeLabel: DEVICE_TYPE_LABELS[device.device_type] || device.device_type || DEVICE_TYPE_LABELS.unknown,
-      vendor: device.brand || '',
+      name: assetName,
+      type: assetType,
+      typeLabel: DEVICE_TYPE_LABELS[assetType] || assetType || DEVICE_TYPE_LABELS.unknown,
+      vendor: assetVendor,
       model: device.model || '',
       osVersion: device.os_version || '',
       serialNumber: device.sn || '',
@@ -560,13 +596,7 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
       relatedIps,
       credential,
       backup,
-      automation: {
-        managed: false,
-        label: '未纳管',
-        inventoryName: device.mgmt_ip || device.name || '',
-        groups: [],
-        lastJobStatus: '未执行',
-      },
+      automation,
       riskCodes,
       updatedAt: device.updated_at || device.created_at || '',
     };
@@ -584,19 +614,32 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
       const credential = getSecretState(assetIpIds, null);
       const status = ip.status || 'unknown';
       const backup = getConfigBackupState(ip.ip_address);
+      const assetName = safeText(ip.device_name, ip.ip_address);
+      const assetType = ip.device_type || 'unknown';
+      const automation = buildAutomationState(
+        {
+          name: assetName,
+          managementIp: ip.ip_address || '',
+          type: assetType,
+          vendor: '',
+          datacenterName: '',
+        },
+        backup,
+        credential,
+      );
       const riskCodes = [];
       if (['offline', 'unknown'].includes(status)) riskCodes.push('offline');
       if (credential.status === 'missing') riskCodes.push('credential');
       if (backup.versionCount === 0 && backup.status !== 'ready') riskCodes.push('backup');
-      riskCodes.push('automation');
+      if (!automation.managed) riskCodes.push('automation');
 
       return {
         id: `ip-${ip.id}`,
         source: 'ip',
         deviceId: null,
-        name: safeText(ip.device_name, ip.ip_address),
-        type: ip.device_type || 'unknown',
-        typeLabel: DEVICE_TYPE_LABELS[ip.device_type] || ip.device_type || DEVICE_TYPE_LABELS.unknown,
+        name: assetName,
+        type: assetType,
+        typeLabel: DEVICE_TYPE_LABELS[assetType] || assetType || DEVICE_TYPE_LABELS.unknown,
         vendor: '',
         model: '',
         osVersion: '',
@@ -616,13 +659,7 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
         relatedIps: [ip],
         credential,
         backup,
-        automation: {
-          managed: false,
-          label: '未纳管',
-          inventoryName: ip.ip_address || ip.device_name || '',
-          groups: [],
-          lastJobStatus: '未执行',
-        },
+        automation,
         riskCodes,
         updatedAt: ip.last_online || '',
       };
@@ -1353,15 +1390,18 @@ function getAnsibleReadiness(asset) {
 }
 
 function buildInventoryPreview(asset) {
-  const groups = getInventoryGroups(asset);
-  const hostName = inventoryToken(asset.name, inventoryToken(asset.id, 'asset'));
+  const groups = asset.automation.groups?.length ? asset.automation.groups : getInventoryGroups(asset);
+  const hostName = inventoryToken(asset.automation.inventoryName || asset.name, inventoryToken(asset.id, 'asset'));
+  const primaryCredential = asset.credential.items?.[0] || null;
+  const userPart = primaryCredential?.username_hint ? ` ansible_user=${primaryCredential.username_hint}` : '';
   return [
     `[${groups[0] || 'unmanaged_assets'}]`,
-    `${hostName} ansible_host=${asset.managementIp || '0.0.0.0'}`,
+    `${hostName} ansible_host=${asset.managementIp || '0.0.0.0'} ansible_port=${asset.automation.sshPort || asset.backup.targetSshPort || 22}${userPart}`,
     '',
     `[${groups[0] || 'unmanaged_assets'}:vars]`,
     `device_type=${asset.type || 'unknown'}`,
-    `credential_ref=${asset.credential.count > 0 ? `asset-${asset.id}` : 'missing'}`,
+    `credential_ref=${primaryCredential ? `secret-${primaryCredential.id}` : 'missing'}`,
+    `command_profile=${asset.automation.commandProfile || asset.backup.targetCommandProfile || 'huawei_vrp'}`,
   ].join('\n');
 }
 
@@ -1374,10 +1414,14 @@ function AssetDetail({
   onTestCredential,
   onOpenBackupSettings,
   onTestBackupTarget,
+  onProvisionAnsible,
+  onTestAnsible,
   backupActionAssetId,
   backupTestAssetId,
   credentialTestAssetId,
   managementIpActionAssetId,
+  ansibleActionAssetId,
+  ansibleTestAssetId,
 }) {
   const [activeTab, setActiveTab] = useState('basic');
   const [isEditingManagementIp, setIsEditingManagementIp] = useState(false);
@@ -1406,6 +1450,8 @@ function AssetDetail({
   const credentialTestBusy = credentialTestAssetId === asset.id;
   const primaryCredential = asset.credential.items?.[0] || null;
   const managementIpBusy = managementIpActionAssetId === asset.id;
+  const ansibleBusy = ansibleActionAssetId === asset.id;
+  const ansibleTestBusy = ansibleTestAssetId === asset.id;
   const normalizedManagementIp = extractManagementHost(asset.managementIp);
   const hasManagementIpFormatHint = asset.managementIp && normalizedManagementIp && normalizedManagementIp !== asset.managementIp;
 
@@ -1763,6 +1809,34 @@ function AssetDetail({
 
       {activeTab === 'ansible' ? (
       <DetailBlock icon={Terminal} title="自动化">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+          <div>
+            <div className="text-xs font-black text-slate-700">Ansible Inventory</div>
+            <div className="mt-0.5 text-xs text-slate-500">
+              {asset.automation.managed ? '当前资产已具备自动化纳管条件。' : '补齐管理 IP、凭据和备份目标后即可纳入 Inventory。'}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => onTestAnsible(asset)}
+              disabled={ansibleTestBusy || (!asset.automation.managed && !asset.credential.count)}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <CheckCircle2 className={`h-3.5 w-3.5 ${ansibleTestBusy ? 'animate-pulse' : ''}`} />
+              测试连接
+            </button>
+            <button
+              type="button"
+              onClick={() => onProvisionAnsible(asset)}
+              disabled={ansibleBusy}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-blue-600 px-2.5 text-xs font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Terminal className={`h-3.5 w-3.5 ${ansibleBusy ? 'animate-pulse' : ''}`} />
+              {asset.automation.managed ? '更新纳管' : '纳入 Inventory'}
+            </button>
+          </div>
+        </div>
         <InfoRow label="Ansible" value={asset.automation.label} />
         <InfoRow label="Inventory" value={asset.automation.inventoryName} />
         <InfoRow label="分组" value={(asset.automation.groups.length ? asset.automation.groups : inventoryGroups).join(', ')} />
@@ -1862,6 +1936,8 @@ export default function AssetCenterView({
   const [credentialActionAssetId, setCredentialActionAssetId] = useState(null);
   const [credentialTestAssetId, setCredentialTestAssetId] = useState(null);
   const [backupTestAssetId, setBackupTestAssetId] = useState(null);
+  const [ansibleActionAssetId, setAnsibleActionAssetId] = useState(null);
+  const [ansibleTestAssetId, setAnsibleTestAssetId] = useState(null);
   const [credentialModal, setCredentialModal] = useState(null);
   const [credentialForm, setCredentialForm] = useState(null);
   const [backupSettingsModal, setBackupSettingsModal] = useState(null);
@@ -2221,6 +2297,72 @@ export default function AssetCenterView({
     }
   };
 
+  const getAnsibleHostId = (asset) => (asset?.backup?.targetId ? `target-${asset.backup.targetId}` : asset?.id);
+
+  const handleProvisionAnsible = async (asset) => {
+    if (!extractManagementHost(asset?.managementIp)) {
+      window.alert('请先为该资产补充管理 IP。');
+      return;
+    }
+    if (!asset?.credential?.count) {
+      window.alert('请先在资产右侧“密码”标签绑定登录凭据。');
+      return;
+    }
+    setAnsibleActionAssetId(asset.id);
+    try {
+      const response = await safeFetch('/api/ansible/provision/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          host_ids: [getAnsibleHostId(asset)],
+          command_profile: asset.backup.targetCommandProfile || 'huawei_vrp',
+          ssh_port: asset.backup.targetSshPort || 22,
+          timeout_seconds: asset.backup.targetTimeoutSeconds || 30,
+          save_before_backup: asset.backup.targetSaveBeforeBackup ?? true,
+          retention_count: asset.backup.targetRetentionCount || 12,
+        }),
+      });
+      if (!response.ok) {
+        window.alert(await readApiError(response, '纳入 Ansible Inventory 失败。'));
+        return;
+      }
+      const payload = await response.json().catch(() => ({}));
+      const summary = payload.summary || {};
+      window.alert(`已处理：新增 ${summary.created || 0}，更新 ${summary.updated || 0}，失败 ${summary.failed || 0}。`);
+      await refreshAssets();
+    } finally {
+      setAnsibleActionAssetId(null);
+    }
+  };
+
+  const handleTestAnsible = async (asset) => {
+    if (!extractManagementHost(asset?.managementIp)) {
+      window.alert('请先为该资产补充管理 IP。');
+      return;
+    }
+    if (!asset?.credential?.count) {
+      window.alert('请先绑定登录凭据后再测试。');
+      return;
+    }
+    setAnsibleTestAssetId(asset.id);
+    try {
+      const response = await safeFetch('/api/ansible/test/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host_ids: [getAnsibleHostId(asset)] }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        window.alert(payload.detail || payload.message || 'Ansible 登录测试失败。');
+        return;
+      }
+      const result = payload.results?.[0];
+      window.alert(result?.detail || (payload.summary?.success ? 'Ansible 登录测试成功。' : '没有可测试的主机。'));
+    } finally {
+      setAnsibleTestAssetId(null);
+    }
+  };
+
 
   const typeOptions = useMemo(() => {
     const entries = new Map();
@@ -2403,10 +2545,14 @@ export default function AssetCenterView({
               onTestCredential={handleTestCredential}
               onOpenBackupSettings={openBackupSettings}
               onTestBackupTarget={handleTestBackupTarget}
+              onProvisionAnsible={handleProvisionAnsible}
+              onTestAnsible={handleTestAnsible}
               backupActionAssetId={backupActionAssetId}
               backupTestAssetId={backupTestAssetId}
               credentialTestAssetId={credentialTestAssetId}
               managementIpActionAssetId={managementIpActionAssetId}
+              ansibleActionAssetId={ansibleActionAssetId}
+              ansibleTestAssetId={ansibleTestAssetId}
             />
           </aside>
         </section>
