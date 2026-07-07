@@ -755,6 +755,7 @@ function filterAssets(assets, filters) {
   return assets.filter((asset) => {
     if (filters.status !== 'all' && asset.status !== filters.status) return false;
     if (filters.type !== 'all' && asset.type !== filters.type) return false;
+    if (filters.datacenter !== 'all' && (asset.datacenterName || '未标注机房') !== filters.datacenter) return false;
     if (filters.risk !== 'all' && !asset.riskCodes.includes(filters.risk)) return false;
     if (filters.credential !== 'all' && asset.credential.status !== filters.credential) return false;
     if (filters.backup !== 'all') {
@@ -854,6 +855,193 @@ function buildGroupSummary(assets) {
     types: countBy(assets, (asset) => asset.typeLabel || '未分类'),
     risks: riskRows,
   };
+}
+
+function buildOverviewTypeCards(assets, typeOptions) {
+  const preferredTypes = [
+    'firewall',
+    'switch_core',
+    'switch_access',
+    'switch',
+    'router',
+    'security',
+    'server',
+    'video_conference',
+  ];
+  const available = new Map(typeOptions.map(([key, label]) => [key, label]));
+  preferredTypes.forEach((key) => {
+    if (!available.has(key) && DEVICE_TYPE_LABELS[key]) available.set(key, DEVICE_TYPE_LABELS[key]);
+  });
+  return Array.from(available.entries())
+    .map(([key, label]) => {
+      const scopedAssets = assets.filter((asset) => asset.type === key);
+      return {
+        key,
+        label,
+        count: scopedAssets.length,
+        online: scopedAssets.filter((asset) => ['active', 'online'].includes(asset.status)).length,
+        risk: scopedAssets.filter((asset) => asset.riskCodes.length > 0).length,
+      };
+    })
+    .filter((item) => item.count > 0)
+    .sort((left, right) => {
+      const leftOrder = preferredTypes.indexOf(left.key);
+      const rightOrder = preferredTypes.indexOf(right.key);
+      const normalizedLeft = leftOrder === -1 ? 999 : leftOrder;
+      const normalizedRight = rightOrder === -1 ? 999 : rightOrder;
+      return normalizedLeft - normalizedRight || right.count - left.count;
+    })
+    .slice(0, 10);
+}
+
+function AssetOverview({ assets, summary, groupSummary, typeOptions, onNavigate, onRefresh, isDataLoading }) {
+  const typeCards = useMemo(() => buildOverviewTypeCards(assets, typeOptions), [assets, typeOptions]);
+  const priorityCards = [
+    { key: 'backup', label: '配置未接入', count: assets.filter((asset) => asset.riskCodes.includes('backup')).length, tone: 'amber', icon: Database },
+    { key: 'credential', label: '密码未受控', count: assets.filter((asset) => asset.riskCodes.includes('credential')).length, tone: 'rose', icon: KeyRound },
+    { key: 'automation', label: '未纳管', count: assets.filter((asset) => asset.riskCodes.includes('automation')).length, tone: 'blue', icon: Terminal },
+    { key: 'offline', label: '不可达', count: assets.filter((asset) => asset.riskCodes.includes('offline')).length, tone: 'slate', icon: AlertTriangle },
+  ];
+  const toneClasses = {
+    amber: 'border-amber-200 bg-amber-50 text-amber-800',
+    rose: 'border-rose-200 bg-rose-50 text-rose-800',
+    blue: 'border-blue-200 bg-blue-50 text-blue-800',
+    slate: 'border-slate-200 bg-slate-50 text-slate-800',
+  };
+
+  return (
+    <div className="space-y-3">
+      <section className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-6">
+        <IconTile icon={HardDrive} label="资产总数" value={summary.total} subtext="纳管资产范围" tone="text-blue-600" />
+        <IconTile icon={CheckCircle2} label="在线运行" value={summary.healthy} subtext={`${summary.offline} 条离线或未检测`} tone="text-emerald-600" />
+        <IconTile icon={Database} label="配置备份" value={`${summary.backupRate}%`} subtext="设备配置采集" tone="text-amber-600" />
+        <IconTile icon={KeyRound} label="密码受控" value={`${summary.credentialRate}%`} subtext="按绑定凭据统计" tone="text-violet-600" />
+        <IconTile icon={Terminal} label="自动化纳管" value={`${summary.automationRate}%`} subtext="Ansible Inventory" tone="text-blue-600" />
+        <IconTile icon={AlertTriangle} label="风险资产" value={summary.riskAssets} subtext="需要优先处理" tone="text-rose-600" />
+      </section>
+
+      <section className="grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.65fr)]">
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-xs font-black uppercase text-blue-700">Asset Workspace</div>
+              <h2 className="mt-1 text-xl font-black text-slate-950">按资产类型进入工作区</h2>
+              <div className="mt-1 text-sm text-slate-500">先看总量和风险，再跳到防火墙、交换机、服务器等清单处理。</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigate({})}
+              className="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-bold text-white transition hover:bg-blue-700"
+            >
+              查看全部资产
+              <ArrowUpDown className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 2xl:grid-cols-5">
+            {typeCards.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => onNavigate({ type: item.key })}
+                className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-left transition hover:border-blue-200 hover:bg-blue-50"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-sm font-black text-slate-900">{item.label}</span>
+                  <Network className="h-4 w-4 text-blue-600" />
+                </div>
+                <div className="mt-3 text-2xl font-black text-slate-950">{item.count}</div>
+                <div className="mt-1 text-xs font-semibold text-slate-500">在线 {item.online} · 风险 {item.risk}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-black text-slate-950">今日优先事项</div>
+              <div className="mt-1 text-xs text-slate-500">点击卡片直接进入对应风险清单。</div>
+            </div>
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={isDataLoading}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-700 transition hover:border-blue-200 hover:text-blue-700 disabled:opacity-60"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isDataLoading ? 'animate-spin' : ''}`} />
+              刷新
+            </button>
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+            {priorityCards.map(({ key, label, count, tone, icon: Icon }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => onNavigate({ risk: key })}
+                className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left transition hover:brightness-95 ${toneClasses[tone]}`}
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <Icon className="h-4 w-4 shrink-0" />
+                  <span className="truncate text-sm font-black">{label}</span>
+                </div>
+                <span className="text-lg font-black">{count}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-3 xl:grid-cols-2">
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-black text-slate-950">机房入口</div>
+              <div className="mt-1 text-xs text-slate-500">按机房跳到资产清单，避免在一个表里迷路。</div>
+            </div>
+            <MapPin className="h-4 w-4 text-blue-600" />
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {groupSummary.datacenters.slice(0, 8).map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={() => onNavigate({ datacenter: item.label })}
+                className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left transition hover:border-blue-200 hover:bg-blue-50"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-sm font-black text-slate-900">{item.label}</span>
+                  <span className="text-sm font-black text-blue-700">{item.count}</span>
+                </div>
+                <div className="mt-1 text-xs text-slate-500">{item.offline} 离线/未检测 · {item.credentialMissing} 未绑密码</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-black text-slate-950">资产分布</div>
+              <div className="mt-1 text-xs text-slate-500">用于判断分类是否干净，异常集中在哪里。</div>
+            </div>
+            <BarChart3 className="h-4 w-4 text-blue-600" />
+          </div>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <SummaryColumn icon={HardDrive} title="类型 Top">
+              {groupSummary.types.slice(0, 5).map((item) => (
+                <StatBar key={item.label} label={item.label} count={item.count} total={summary.total} meta={`${item.risk} 个风险标签`} tone="bg-violet-500" />
+              ))}
+            </SummaryColumn>
+            <SummaryColumn icon={AlertTriangle} title="风险分布">
+              {groupSummary.risks.map((item) => (
+                <StatBar key={item.key} label={item.label} count={item.count} total={summary.total} meta={item.count ? '需要处理' : '当前无'} tone="bg-rose-500" />
+              ))}
+            </SummaryColumn>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function SortIcon({ active, direction }) {
@@ -2003,9 +2191,11 @@ export default function AssetCenterView({
   isDataLoading = false,
   onRefresh,
 }) {
+  const [viewMode, setViewMode] = useState('overview');
   const [keyword, setKeyword] = useState('');
   const [status, setStatus] = useState('all');
   const [type, setType] = useState('all');
+  const [datacenterFilter, setDatacenterFilter] = useState('all');
   const [risk, setRisk] = useState('all');
   const [credentialFilter, setCredentialFilter] = useState('all');
   const [backupFilter, setBackupFilter] = useState('all');
@@ -2036,12 +2226,13 @@ export default function AssetCenterView({
       keyword,
       status,
       type,
+      datacenter: datacenterFilter,
       risk,
       credential: credentialFilter,
       backup: backupFilter,
       automation: automationFilter,
     }),
-    [assets, automationFilter, backupFilter, credentialFilter, keyword, risk, status, type],
+    [assets, automationFilter, backupFilter, credentialFilter, datacenterFilter, keyword, risk, status, type],
   );
 
   const sortedAssets = useMemo(
@@ -2049,15 +2240,10 @@ export default function AssetCenterView({
     [filteredAssets, sortConfig],
   );
 
-  const groupSummary = useMemo(
-    () => buildGroupSummary(filteredAssets),
-    [filteredAssets],
-  );
-
   const selectedAsset = useMemo(() => {
     const preferred = sortedAssets.find((asset) => asset.id === selectedAssetId);
-    return preferred || sortedAssets[0] || assets[0] || null;
-  }, [assets, selectedAssetId, sortedAssets]);
+    return preferred || sortedAssets[0] || null;
+  }, [selectedAssetId, sortedAssets]);
 
   const sortOptionValue = `${sortConfig.key}:${sortConfig.direction}`;
   const hasPresetSortOption = SORT_OPTIONS.some((option) => option.value === sortOptionValue);
@@ -2456,6 +2642,36 @@ export default function AssetCenterView({
     });
   }, [assets]);
 
+  const datacenterOptions = useMemo(
+    () => Array.from(new Set(assets.map((asset) => asset.datacenterName || '未标注机房')))
+      .sort((left, right) => left.localeCompare(right, 'zh-CN', { numeric: true })),
+    [assets],
+  );
+
+  const resetListFilters = () => {
+    setKeyword('');
+    setStatus('all');
+    setType('all');
+    setDatacenterFilter('all');
+    setRisk('all');
+    setCredentialFilter('all');
+    setBackupFilter('all');
+    setAutomationFilter('all');
+  };
+
+  const navigateToList = (criteria = {}) => {
+    resetListFilters();
+    setViewMode('list');
+    setSelectedAssetId(null);
+    if (criteria.type) setType(criteria.type);
+    if (criteria.datacenter) setDatacenterFilter(criteria.datacenter);
+    if (criteria.risk) setRisk(criteria.risk);
+    if (criteria.status) setStatus(criteria.status);
+    if (criteria.credential) setCredentialFilter(criteria.credential);
+    if (criteria.backup) setBackupFilter(criteria.backup);
+    if (criteria.automation) setAutomationFilter(criteria.automation);
+  };
+
   const summary = useMemo(() => {
     const healthyStatuses = new Set(['active', 'online']);
     const offlineStatuses = new Set(['offline', 'unknown']);
@@ -2475,7 +2691,7 @@ export default function AssetCenterView({
   }, [assets]);
 
   return (
-    <div className="h-full overflow-auto bg-slate-100 p-3 lg:p-4">
+    <div className="h-full overflow-y-auto overflow-x-hidden bg-slate-100 p-3 lg:p-4">
       <div className="mx-auto max-w-[1920px] space-y-3">
         <section className="flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-0">
@@ -2486,7 +2702,23 @@ export default function AssetCenterView({
             <h1 className="mt-1 text-2xl font-black text-slate-950">资产中心</h1>
             <div className="mt-1 text-sm text-slate-500">设备、配置、密码、自动化的统一资产工作台</div>
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+              <button
+                type="button"
+                onClick={() => setViewMode('overview')}
+                className={`h-8 rounded-md px-3 text-sm font-black transition ${viewMode === 'overview' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+              >
+                总览
+              </button>
+              <button
+                type="button"
+                onClick={() => navigateToList({})}
+                className={`h-8 rounded-md px-3 text-sm font-black transition ${viewMode === 'list' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+              >
+                清单
+              </button>
+            </div>
             <button
               type="button"
               onClick={onRefresh}
@@ -2500,148 +2732,183 @@ export default function AssetCenterView({
           </div>
         </section>
 
-        <section className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-6">
-          <IconTile icon={HardDrive} label="资产总数" value={summary.total} subtext={`${filteredAssets.length} 条可见`} tone="text-blue-600" />
-          <IconTile icon={CheckCircle2} label="在线运行" value={summary.healthy} subtext={`${summary.offline} 条离线或未检测`} tone="text-emerald-600" />
-          <IconTile icon={Database} label="配置备份" value={`${summary.backupRate}%`} subtext="设备配置采集" tone="text-amber-600" />
-          <IconTile icon={KeyRound} label="密码受控" value={`${summary.credentialRate}%`} subtext={dataErrors?.secrets ? '无权限或加载失败' : '按绑定凭据统计'} tone="text-violet-600" />
-          <IconTile icon={Terminal} label="自动化纳管" value={`${summary.automationRate}%`} subtext="Ansible Inventory" tone="text-blue-600" />
-          <IconTile icon={AlertTriangle} label="风险资产" value={summary.riskAssets} subtext="按当前资产状态计算" tone="text-rose-600" />
-        </section>
-
-        <section className="sticky top-0 z-20 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-          <div className="grid gap-2 xl:grid-cols-[minmax(280px,1.1fr)_minmax(0,2fr)]">
-            <label className="relative block">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                value={keyword}
-                onChange={(event) => setKeyword(event.target.value)}
-                className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-10 pr-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-                placeholder="搜索名称、IP、序列号、项目、负责人"
-              />
-            </label>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-[repeat(7,minmax(120px,1fr))_90px]">
-              <select
-                value={status}
-                onChange={(event) => setStatus(event.target.value)}
-                className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-              >
-                <option value="all">全部状态</option>
-                <option value="active">运行中</option>
-                <option value="online">在线</option>
-                <option value="offline">离线</option>
-                <option value="maintenance">维护中</option>
-                <option value="planned">规划中</option>
-                <option value="retired">已退役</option>
-                <option value="unknown">未检测</option>
-              </select>
-              <select
-                value={type}
-                onChange={(event) => setType(event.target.value)}
-                className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-              >
-                <option value="all">全部类型</option>
-                {typeOptions.map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
-              </select>
-              <select
-                value={risk}
-                onChange={(event) => setRisk(event.target.value)}
-                className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-              >
-                <option value="all">全部风险</option>
-                <option value="offline">不可达</option>
-                <option value="credential">密码未受控</option>
-                <option value="backup">配置未接入</option>
-                <option value="automation">未纳管</option>
-              </select>
-              <select
-                value={credentialFilter}
-                onChange={(event) => setCredentialFilter(event.target.value)}
-                className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-              >
-                <option value="all">全部密码</option>
-                <option value="active">已受控</option>
-                <option value="missing">未绑定</option>
-                <option value="expiring">即将过期</option>
-                <option value="expired">已过期</option>
-                <option value="disabled">已停用</option>
-                <option value="unavailable">未加载</option>
-              </select>
-              <select
-                value={backupFilter}
-                onChange={(event) => setBackupFilter(event.target.value)}
-                className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-              >
-                <option value="all">全部备份</option>
-                <option value="ready">已接入</option>
-                <option value="missing">未接入</option>
-                <option value="pending">待接入</option>
-                <option value="failed">失败</option>
-              </select>
-              <select
-                value={automationFilter}
-                onChange={(event) => setAutomationFilter(event.target.value)}
-                className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-              >
-                <option value="all">全部纳管</option>
-                <option value="managed">已纳管</option>
-                <option value="unmanaged">未纳管</option>
-              </select>
-              <select
-                value={sortOptionValue}
-                onChange={handleSortOptionChange}
-                className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-                title="排序方式"
-              >
-                {hasPresetSortOption ? null : <option value={sortOptionValue}>{currentSortLabel}</option>}
-                {SORT_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-              <div className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-600">
-                <Filter className="h-4 w-4 text-slate-400" />
-                {filteredAssets.length}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <GroupSummary summary={groupSummary} total={filteredAssets.length} />
-
-        <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_390px]">
-          <AssetTable
-            assets={sortedAssets}
-            selectedAssetId={selectedAsset?.id}
-            onSelect={setSelectedAssetId}
-            sort={sortConfig}
-            onSort={handleSort}
-            sortLabel={sortDisplayLabel}
-            visibleColumns={visibleColumns}
-            onToggleColumn={handleToggleColumn}
+        {viewMode === 'overview' ? (
+          <AssetOverview
+            assets={assets}
+            summary={summary}
+            groupSummary={buildGroupSummary(assets)}
+            typeOptions={typeOptions}
+            onNavigate={navigateToList}
+            onRefresh={onRefresh}
+            isDataLoading={isDataLoading}
           />
-          <aside className="xl:sticky xl:top-4 xl:self-start">
-            <AssetDetail
-              asset={selectedAsset}
-              onProvisionBackup={handleProvisionBackup}
-              onRunBackup={handleRunBackup}
-              onUpdateManagementIp={handleUpdateManagementIp}
-              onOpenCredentialModal={openCredentialModal}
-              onTestCredential={handleTestCredential}
-              onOpenBackupSettings={openBackupSettings}
-              onTestBackupTarget={handleTestBackupTarget}
-              onProvisionAnsible={handleProvisionAnsible}
-              onTestAnsible={handleTestAnsible}
-              backupActionAssetId={backupActionAssetId}
-              backupTestAssetId={backupTestAssetId}
-              credentialTestAssetId={credentialTestAssetId}
-              managementIpActionAssetId={managementIpActionAssetId}
-              ansibleActionAssetId={ansibleActionAssetId}
-              ansibleTestAssetId={ansibleTestAssetId}
-            />
-          </aside>
-        </section>
+        ) : (
+          <>
+            <section className="sticky top-0 z-20 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-slate-500">
+                  <span className="rounded-md bg-blue-50 px-2.5 py-1 text-blue-700">资产清单</span>
+                  {datacenterFilter !== 'all' ? <span className="rounded-md bg-slate-100 px-2.5 py-1">机房：{datacenterFilter}</span> : null}
+                  {type !== 'all' ? <span className="rounded-md bg-slate-100 px-2.5 py-1">类型：{DEVICE_TYPE_LABELS[type] || type}</span> : null}
+                  {risk !== 'all' ? <span className="rounded-md bg-slate-100 px-2.5 py-1">风险：{RISK_LABELS[risk] || risk}</span> : null}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('overview')}
+                    className="h-8 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-600 hover:border-blue-200 hover:text-blue-700"
+                  >
+                    返回总览
+                  </button>
+                  <button
+                    type="button"
+                    onClick={resetListFilters}
+                    className="h-8 rounded-md border border-slate-200 bg-slate-50 px-2.5 text-xs font-bold text-slate-600 hover:bg-white"
+                  >
+                    清除筛选
+                  </button>
+                </div>
+              </div>
+              <div className="grid gap-2 xl:grid-cols-[minmax(260px,1fr)_minmax(0,2.5fr)]">
+                <label className="relative block">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    value={keyword}
+                    onChange={(event) => setKeyword(event.target.value)}
+                    className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-10 pr-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                    placeholder="搜索名称、IP、序列号、项目、负责人"
+                  />
+                </label>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-[repeat(8,minmax(112px,1fr))_90px]">
+                  <select
+                    value={status}
+                    onChange={(event) => setStatus(event.target.value)}
+                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                  >
+                    <option value="all">全部状态</option>
+                    <option value="active">运行中</option>
+                    <option value="online">在线</option>
+                    <option value="offline">离线</option>
+                    <option value="maintenance">维护中</option>
+                    <option value="planned">规划中</option>
+                    <option value="retired">已退役</option>
+                    <option value="unknown">未检测</option>
+                  </select>
+                  <select
+                    value={datacenterFilter}
+                    onChange={(event) => setDatacenterFilter(event.target.value)}
+                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                  >
+                    <option value="all">全部机房</option>
+                    {datacenterOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+                  </select>
+                  <select
+                    value={type}
+                    onChange={(event) => setType(event.target.value)}
+                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                  >
+                    <option value="all">全部类型</option>
+                    {typeOptions.map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={risk}
+                    onChange={(event) => setRisk(event.target.value)}
+                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                  >
+                    <option value="all">全部风险</option>
+                    <option value="offline">不可达</option>
+                    <option value="credential">密码未受控</option>
+                    <option value="backup">配置未接入</option>
+                    <option value="automation">未纳管</option>
+                  </select>
+                  <select
+                    value={credentialFilter}
+                    onChange={(event) => setCredentialFilter(event.target.value)}
+                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                  >
+                    <option value="all">全部密码</option>
+                    <option value="active">已受控</option>
+                    <option value="missing">未绑定</option>
+                    <option value="expiring">即将过期</option>
+                    <option value="expired">已过期</option>
+                    <option value="disabled">已停用</option>
+                    <option value="unavailable">未加载</option>
+                  </select>
+                  <select
+                    value={backupFilter}
+                    onChange={(event) => setBackupFilter(event.target.value)}
+                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                  >
+                    <option value="all">全部备份</option>
+                    <option value="ready">已接入</option>
+                    <option value="missing">未接入</option>
+                    <option value="pending">待接入</option>
+                    <option value="failed">失败</option>
+                  </select>
+                  <select
+                    value={automationFilter}
+                    onChange={(event) => setAutomationFilter(event.target.value)}
+                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                  >
+                    <option value="all">全部纳管</option>
+                    <option value="managed">已纳管</option>
+                    <option value="unmanaged">未纳管</option>
+                  </select>
+                  <select
+                    value={sortOptionValue}
+                    onChange={handleSortOptionChange}
+                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                    title="排序方式"
+                  >
+                    {hasPresetSortOption ? null : <option value={sortOptionValue}>{currentSortLabel}</option>}
+                    {SORT_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                  <div className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-600">
+                    <Filter className="h-4 w-4 text-slate-400" />
+                    {filteredAssets.length}
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="grid min-w-0 items-start gap-3 xl:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_390px]">
+              <AssetTable
+                assets={sortedAssets}
+                selectedAssetId={selectedAsset?.id}
+                onSelect={setSelectedAssetId}
+                sort={sortConfig}
+                onSort={handleSort}
+                sortLabel={sortDisplayLabel}
+                visibleColumns={visibleColumns}
+                onToggleColumn={handleToggleColumn}
+              />
+              <aside className="min-w-0 xl:sticky xl:top-4 xl:self-start">
+                <AssetDetail
+                  asset={selectedAsset}
+                  onProvisionBackup={handleProvisionBackup}
+                  onRunBackup={handleRunBackup}
+                  onUpdateManagementIp={handleUpdateManagementIp}
+                  onOpenCredentialModal={openCredentialModal}
+                  onTestCredential={handleTestCredential}
+                  onOpenBackupSettings={openBackupSettings}
+                  onTestBackupTarget={handleTestBackupTarget}
+                  onProvisionAnsible={handleProvisionAnsible}
+                  onTestAnsible={handleTestAnsible}
+                  backupActionAssetId={backupActionAssetId}
+                  backupTestAssetId={backupTestAssetId}
+                  credentialTestAssetId={credentialTestAssetId}
+                  managementIpActionAssetId={managementIpActionAssetId}
+                  ansibleActionAssetId={ansibleActionAssetId}
+                  ansibleTestAssetId={ansibleTestAssetId}
+                />
+              </aside>
+            </section>
+          </>
+        )}
       </div>
       {credentialModal && credentialForm ? (
         <CredentialEditorModal
