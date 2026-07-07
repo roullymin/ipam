@@ -138,6 +138,7 @@ export default function DcimView({
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedRackFilter, setSelectedRackFilter] = useState('');
   const [showRoomOverview, setShowRoomOverview] = useState(false);
+  const [showRackMatrix, setShowRackMatrix] = useState(false);
 
   const datacenterList = asArray(datacenters);
   const allRacks = asArray(racks);
@@ -729,22 +730,40 @@ export default function DcimView({
             <div>
               <div className="text-sm font-black text-slate-900">机柜矩阵看板</div>
               <div className="mt-0.5 text-xs text-slate-500">
-                点击机柜可过滤下方台账；颜色越暖表示容量或功率越需要关注。
+                默认收起保留一行入口，展开后查看全部机柜；点击机柜可过滤下方台账。
               </div>
             </div>
-            {selectedRackFilter ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-black text-slate-500">
+                共 {rackTiles.length} 个机柜
+              </span>
+              {selectedRackFilter ? (
+                <button
+                  type="button"
+                  onClick={() => setSelectedRackFilter('')}
+                  className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                >
+                  清除机柜过滤
+                </button>
+              ) : null}
               <button
                 type="button"
-                onClick={() => setSelectedRackFilter('')}
+                onClick={() => setShowRackMatrix((current) => !current)}
                 className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100"
               >
-                清除机柜过滤
+                {showRackMatrix ? '收起矩阵' : '展开矩阵'}
               </button>
-            ) : null}
+            </div>
           </div>
 
-          <div className="mt-3 grid max-h-44 grid-cols-[repeat(auto-fill,minmax(118px,1fr))] gap-2 overflow-auto pr-1">
-            {rackTiles.map((tile) => {
+          <div
+            className={
+              showRackMatrix
+                ? 'mt-3 grid max-h-36 grid-cols-[repeat(auto-fill,minmax(118px,1fr))] gap-2 overflow-auto pr-1'
+                : 'custom-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1'
+            }
+          >
+            {(showRackMatrix ? rackTiles : rackTiles.slice(0, 12)).map((tile) => {
               const isSelected = String(selectedRackFilter || '') === String(tile.rack.id);
               const toneClass =
                 tile.tone === 'danger'
@@ -767,7 +786,7 @@ export default function DcimView({
                   key={tile.rack.id}
                   type="button"
                   onClick={() => setSelectedRackFilter(isSelected ? '' : tile.rack.id)}
-                  className={`dcim-rack-tile border p-2.5 text-left ${toneClass} ${
+                  className={`dcim-rack-tile border p-2.5 text-left ${showRackMatrix ? '' : 'min-w-[124px]'} ${toneClass} ${
                     isSelected ? 'dcim-rack-tile--active' : ''
                   }`}
                 >

@@ -747,8 +747,8 @@ function NetworkBackupPanel({ configBackups, onRefresh }) {
         </div>
       </section>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_380px]">
-        <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="min-w-0 space-y-4">
         <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
           <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 xl:flex-row xl:items-center xl:justify-between">
             <div>
@@ -1388,8 +1388,8 @@ export default function BackupView({
   const totalSizeLabel = formatBytes(resolvedSummary.total_bytes, resolvedSummary.total_size || '-');
 
   return (
-    <div className="custom-scrollbar h-full overflow-y-auto bg-slate-100 p-4 animate-in slide-in-from-bottom duration-500 lg:p-5">
-      <div className="mx-auto max-w-[1600px] space-y-4">
+    <div className="ops-page backup-ops-page custom-scrollbar h-full overflow-y-auto p-4 animate-in slide-in-from-bottom duration-500 lg:p-5">
+      <div className="mx-auto max-w-[1880px] space-y-4">
         <div className="flex flex-wrap gap-2">
           <SegmentButton
             active={activePanel === 'network'}

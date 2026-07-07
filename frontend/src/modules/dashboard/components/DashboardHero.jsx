@@ -33,19 +33,19 @@ function MetricBadge({ icon: Icon, label, value, onClick, index }) {
 
 function SummaryTile({ icon: Icon, label, value, helper, index }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 text-sky-700">
-          <Icon className="h-5 w-5" />
+    <div className="rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-700">
+          <Icon className="h-4 w-4" />
         </div>
-        <div className="dashboard-mini-bars" aria-hidden="true">
+        <div className="dashboard-mini-bars dashboard-mini-bars-compact" aria-hidden="true">
           {[0, 1, 2, 3].map((item) => (
-            <span key={item} style={{ height: `${22 + ((index + item) % 4) * 8}px` }} />
+            <span key={item} style={{ height: `${14 + ((index + item) % 4) * 6}px` }} />
           ))}
         </div>
       </div>
-      <div className="mt-4 text-xs font-bold text-slate-500">{label}</div>
-      <div className="mt-1 truncate text-2xl font-black text-slate-950">{value}</div>
+      <div className="mt-3 text-xs font-bold text-slate-500">{label}</div>
+      <div className="mt-1 truncate text-xl font-black text-slate-950">{value}</div>
       <div className="mt-1 truncate text-xs text-slate-500">{helper}</div>
     </div>
   );
@@ -59,20 +59,20 @@ export default function DashboardHero({
   summaryTiles,
 }) {
   return (
-    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="grid gap-0 xl:grid-cols-[minmax(0,0.95fr)_minmax(460px,1.05fr)]">
-        <div className="dashboard-status-panel p-5">
+    <section className="dashboard-compact-hero overflow-hidden rounded-xl border border-slate-200 bg-white/95 p-4 shadow-sm">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-stretch">
+        <div className="dashboard-status-panel rounded-xl border border-slate-100 p-4 xl:w-[42%]">
           <div className="flex items-center gap-2 text-xs font-black text-sky-700">
             <Activity className="h-4 w-4" />
             {eyebrow}
           </div>
-          <h2 className="mt-3 max-w-3xl text-xl font-black leading-snug text-slate-950">
+          <h2 className="mt-2 max-w-3xl text-lg font-black leading-snug text-slate-950">
             {title}
           </h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+          <p className="mt-1.5 max-w-3xl text-xs leading-5 text-slate-600">
             {description}
           </p>
-          <div className="mt-4 space-y-2">
+          <div className="mt-3 grid gap-2 sm:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
             {metricBadges.map((item, index) => (
               <MetricBadge
                 key={item.label}
@@ -86,11 +86,11 @@ export default function DashboardHero({
           </div>
         </div>
 
-        <div className="grid gap-3 border-t border-slate-100 bg-slate-50/70 p-4 sm:grid-cols-2 xl:border-l xl:border-t-0">
-          <div className="col-span-full flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="col-span-full flex min-h-14 items-center justify-between rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 shadow-sm xl:col-span-4">
             <div>
               <div className="text-sm font-black text-slate-900">运行指标概览</div>
-              <div className="mt-0.5 text-xs text-slate-500">容量、地址、设备风险按当前数据实时汇总</div>
+              <div className="mt-0.5 text-xs text-slate-500">容量、地址、设备风险按当前数据实时汇总，点击下方模块进入工作区。</div>
             </div>
             <div className="dashboard-line-chart" aria-hidden="true">
               <BarChart3 className="h-4 w-4 text-amber-500" />

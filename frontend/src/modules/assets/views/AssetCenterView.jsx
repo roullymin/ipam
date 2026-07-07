@@ -5,12 +5,17 @@ import {
   ArrowUp,
   ArrowUpDown,
   BarChart3,
+  Boxes,
+  Cable,
   CheckCircle2,
   ChevronDown,
   Columns3,
   ClipboardList,
+  Cpu,
   Database,
   Filter,
+  GitBranch,
+  Globe2,
   HardDrive,
   KeyRound,
   Link2,
@@ -18,13 +23,19 @@ import {
   Network,
   Pencil,
   Plus,
+  RadioTower,
   RefreshCw,
+  Router,
   Save,
   Search,
   Server,
+  ServerCog,
   Settings2,
+  Shield,
   ShieldCheck,
   Terminal,
+  Video,
+  Wifi,
   X,
 } from 'lucide-react';
 
@@ -896,6 +907,29 @@ function buildOverviewTypeCards(assets, typeOptions) {
     .slice(0, 10);
 }
 
+const TYPE_CARD_VISUALS = {
+  firewall: { icon: Shield, tone: 'rose' },
+  switch_core: { icon: GitBranch, tone: 'blue' },
+  switch_access: { icon: Network, tone: 'cyan' },
+  switch: { icon: Cable, tone: 'sky' },
+  router: { icon: Router, tone: 'indigo' },
+  load_balancer: { icon: GitBranch, tone: 'violet' },
+  waf: { icon: ShieldCheck, tone: 'rose' },
+  ids: { icon: ShieldCheck, tone: 'amber' },
+  ips: { icon: ShieldCheck, tone: 'amber' },
+  wireless_controller: { icon: RadioTower, tone: 'emerald' },
+  ap: { icon: Wifi, tone: 'emerald' },
+  video_conference: { icon: Video, tone: 'purple' },
+  server: { icon: ServerCog, tone: 'slate' },
+  vm: { icon: Cpu, tone: 'slate' },
+  storage: { icon: Database, tone: 'amber' },
+  security: { icon: ShieldCheck, tone: 'rose' },
+  gateway: { icon: Globe2, tone: 'indigo' },
+  odf: { icon: Boxes, tone: 'cyan' },
+};
+
+const getTypeCardVisual = (key) => TYPE_CARD_VISUALS[key] || { icon: HardDrive, tone: 'slate' };
+
 function AssetOverview({ assets, summary, groupSummary, typeOptions, onNavigate, onRefresh, isDataLoading }) {
   const typeCards = useMemo(() => buildOverviewTypeCards(assets, typeOptions), [assets, typeOptions]);
   const priorityCards = [
@@ -940,21 +974,37 @@ function AssetOverview({ assets, summary, groupSummary, typeOptions, onNavigate,
             </button>
           </div>
           <div className="mt-6 grid gap-3 sm:grid-cols-2 2xl:grid-cols-5">
-            {typeCards.map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                onClick={() => onNavigate({ type: item.key })}
-                className="rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50/50 hover:shadow-md"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-sm font-black text-slate-900">{item.label}</span>
-                  <Network className="h-4 w-4 text-blue-600" />
-                </div>
-                <div className="mt-5 text-3xl font-black text-slate-950">{item.count}</div>
-                <div className="mt-1 text-xs font-bold text-slate-500">在线 {item.online} · 风险 {item.risk}</div>
-              </button>
-            ))}
+            {typeCards.map((item) => {
+              const visual = getTypeCardVisual(item.key);
+              const TypeIcon = visual.icon;
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => onNavigate({ type: item.key })}
+                  className={`asset-type-card asset-type-card--${visual.tone} text-left transition hover:-translate-y-0.5 hover:shadow-md`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-black text-slate-950">{item.label}</span>
+                      <span className="mt-1 block text-xs font-semibold text-slate-500">在线 {item.online} · 风险 {item.risk}</span>
+                    </span>
+                    <span className="asset-type-icon">
+                      <TypeIcon className="h-5 w-5" />
+                    </span>
+                  </div>
+                  <div className="mt-5 flex items-end justify-between gap-3">
+                    <div className="text-3xl font-black text-slate-950">{item.count}</div>
+                    <div className="h-1.5 w-16 overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        className="asset-type-progress h-full rounded-full"
+                        style={{ width: `${Math.max(8, Math.min(100, Math.round((item.online / Math.max(item.count, 1)) * 100)))}%` }}
+                      />
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
 
