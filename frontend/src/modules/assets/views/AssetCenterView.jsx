@@ -467,13 +467,15 @@ function Pill({ children, tone = 'bg-slate-100 text-slate-700 ring-slate-200' })
 
 function IconTile({ icon: Icon, label, value, tone = 'text-slate-700', subtext }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3">
+    <div className="asset-metric-card p-4">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-xs font-semibold text-slate-500">{label}</div>
-        <Icon className={`h-4 w-4 ${tone}`} />
+        <div className="text-sm font-black text-slate-500">{label}</div>
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-50">
+          <Icon className={`h-4 w-4 ${tone}`} />
+        </div>
       </div>
-      <div className="mt-2 text-2xl font-black text-slate-950">{value}</div>
-      <div className="mt-1 truncate text-xs text-slate-500">{subtext}</div>
+      <div className="mt-4 text-3xl font-black text-slate-950">{value}</div>
+      <div className="mt-1 truncate text-sm font-semibold text-slate-500">{subtext}</div>
     </div>
   );
 }
@@ -910,8 +912,8 @@ function AssetOverview({ assets, summary, groupSummary, typeOptions, onNavigate,
   };
 
   return (
-    <div className="space-y-3">
-      <section className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-6">
+    <div className="space-y-5">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
         <IconTile icon={HardDrive} label="资产总数" value={summary.total} subtext="纳管资产范围" tone="text-blue-600" />
         <IconTile icon={CheckCircle2} label="在线运行" value={summary.healthy} subtext={`${summary.offline} 条离线或未检测`} tone="text-emerald-600" />
         <IconTile icon={Database} label="配置备份" value={`${summary.backupRate}%`} subtext="设备配置采集" tone="text-amber-600" />
@@ -920,53 +922,53 @@ function AssetOverview({ assets, summary, groupSummary, typeOptions, onNavigate,
         <IconTile icon={AlertTriangle} label="风险资产" value={summary.riskAssets} subtext="需要优先处理" tone="text-rose-600" />
       </section>
 
-      <section className="grid gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.65fr)]">
-        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.65fr)]">
+        <div className="asset-hero-card p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <div className="text-xs font-black uppercase text-blue-700">Asset Workspace</div>
-              <h2 className="mt-1 text-xl font-black text-slate-950">按资产类型进入工作区</h2>
-              <div className="mt-1 text-sm text-slate-500">先看总量和风险，再跳到防火墙、交换机、服务器等清单处理。</div>
+              <div className="ui-eyebrow text-xs font-black uppercase">Asset Workspace</div>
+              <h2 className="mt-2 text-2xl font-black text-slate-950">按资产类型进入工作区</h2>
+              <div className="mt-2 text-sm font-semibold leading-6 text-slate-500">先看总量和风险，再跳到防火墙、交换机、服务器等清单处理。</div>
             </div>
             <button
               type="button"
               onClick={() => onNavigate({})}
-              className="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-bold text-white transition hover:bg-blue-700"
+              className="ui-primary-button inline-flex h-11 items-center gap-2 px-4 text-sm font-black transition"
             >
               查看全部资产
               <ArrowUpDown className="h-4 w-4" />
             </button>
           </div>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2 2xl:grid-cols-5">
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 2xl:grid-cols-5">
             {typeCards.map((item) => (
               <button
                 key={item.key}
                 type="button"
                 onClick={() => onNavigate({ type: item.key })}
-                className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-left transition hover:border-blue-200 hover:bg-blue-50"
+                className="rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50/50 hover:shadow-md"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-sm font-black text-slate-900">{item.label}</span>
                   <Network className="h-4 w-4 text-blue-600" />
                 </div>
-                <div className="mt-3 text-2xl font-black text-slate-950">{item.count}</div>
-                <div className="mt-1 text-xs font-semibold text-slate-500">在线 {item.online} · 风险 {item.risk}</div>
+                <div className="mt-5 text-3xl font-black text-slate-950">{item.count}</div>
+                <div className="mt-1 text-xs font-bold text-slate-500">在线 {item.online} · 风险 {item.risk}</div>
               </button>
             ))}
           </div>
         </div>
 
-        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="ui-card p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-black text-slate-950">今日优先事项</div>
-              <div className="mt-1 text-xs text-slate-500">点击卡片直接进入对应风险清单。</div>
+              <div className="text-base font-black text-slate-950">今日优先事项</div>
+              <div className="mt-1 text-sm font-semibold text-slate-500">点击卡片直接进入对应风险清单。</div>
             </div>
             <button
               type="button"
               onClick={onRefresh}
               disabled={isDataLoading}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-700 transition hover:border-blue-200 hover:text-blue-700 disabled:opacity-60"
+              className="ui-secondary-button inline-flex h-9 items-center gap-1.5 px-3 text-xs font-black transition disabled:opacity-60"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${isDataLoading ? 'animate-spin' : ''}`} />
               刷新
@@ -978,7 +980,7 @@ function AssetOverview({ assets, summary, groupSummary, typeOptions, onNavigate,
                 key={key}
                 type="button"
                 onClick={() => onNavigate({ risk: key })}
-                className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left transition hover:brightness-95 ${toneClasses[tone]}`}
+                className={`flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-left transition hover:brightness-95 ${toneClasses[tone]}`}
               >
                 <div className="flex min-w-0 items-center gap-2">
                   <Icon className="h-4 w-4 shrink-0" />
@@ -991,22 +993,22 @@ function AssetOverview({ assets, summary, groupSummary, typeOptions, onNavigate,
         </div>
       </section>
 
-      <section className="grid gap-3 xl:grid-cols-2">
-        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <section className="grid gap-5 xl:grid-cols-2">
+        <div className="ui-card p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-black text-slate-950">机房入口</div>
-              <div className="mt-1 text-xs text-slate-500">按机房跳到资产清单，避免在一个表里迷路。</div>
+              <div className="text-base font-black text-slate-950">机房入口</div>
+              <div className="mt-1 text-sm font-semibold text-slate-500">按机房跳到资产清单，避免在一个表里迷路。</div>
             </div>
             <MapPin className="h-4 w-4 text-blue-600" />
           </div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {groupSummary.datacenters.slice(0, 8).map((item) => (
               <button
                 key={item.label}
                 type="button"
                 onClick={() => onNavigate({ datacenter: item.label })}
-                className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left transition hover:border-blue-200 hover:bg-blue-50"
+                className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-left transition hover:border-blue-200 hover:bg-blue-50"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-sm font-black text-slate-900">{item.label}</span>
@@ -1018,11 +1020,11 @@ function AssetOverview({ assets, summary, groupSummary, typeOptions, onNavigate,
           </div>
         </div>
 
-        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="ui-card p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-black text-slate-950">资产分布</div>
-              <div className="mt-1 text-xs text-slate-500">用于判断分类是否干净，异常集中在哪里。</div>
+              <div className="text-base font-black text-slate-950">资产分布</div>
+              <div className="mt-1 text-sm font-semibold text-slate-500">用于判断分类是否干净，异常集中在哪里。</div>
             </div>
             <BarChart3 className="h-4 w-4 text-blue-600" />
           </div>
@@ -1640,6 +1642,119 @@ function getAssetReadiness(asset) {
     { key: 'backup', label: '配置备份', ready: hasBackup, value: hasBackup ? `${asset.backup.versionCount} 个版本` : asset.backup.label },
     { key: 'ansible', label: 'Ansible', ready: hasAnsible, value: asset.automation.label },
   ];
+}
+
+function DirectoryStatus({ icon: Icon, label, value, tone = 'text-slate-600', subtext }) {
+  return (
+    <div className="min-w-0 rounded-xl bg-white px-3 py-2.5 ring-1 ring-slate-200/80">
+      <div className="flex items-center gap-1.5 text-[11px] font-black text-slate-500">
+        <Icon className={`h-3.5 w-3.5 ${tone}`} />
+        <span className="truncate">{label}</span>
+      </div>
+      <div className="mt-1 truncate text-sm font-black text-slate-900">{safeText(value)}</div>
+      {subtext ? <div className="mt-0.5 truncate text-[11px] font-semibold text-slate-500">{subtext}</div> : null}
+    </div>
+  );
+}
+
+function AssetDirectory({ assets, selectedAssetId, onSelect, sortLabel, children }) {
+  if (assets.length === 0) return <EmptyState />;
+
+  return (
+    <section className="asset-directory-panel overflow-hidden">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200/80 px-5 py-4">
+        <div>
+          <div className="text-lg font-black text-slate-950">资产目录</div>
+          <div className="mt-1 text-sm font-semibold text-slate-500">用设备卡片承载状态、位置、密码、备份和纳管信息，点击一台设备后在右侧查看完整档案。</div>
+        </div>
+        <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
+          <span className="rounded-lg bg-slate-100 px-3 py-1.5">{assets.length} 条</span>
+          <span className="rounded-lg bg-blue-50 px-3 py-1.5 text-blue-700">{sortLabel}</span>
+        </div>
+      </div>
+
+      <div className="grid min-w-0 xl:grid-cols-[minmax(0,1fr)_440px]">
+        <div className="max-h-[calc(100vh-17rem)] min-w-0 overflow-y-auto bg-white">
+          <div className="space-y-2 p-3">
+            {assets.map((asset) => {
+              const selected = selectedAssetId === asset.id;
+              const hasCredential = asset.credential.status === 'active' && asset.credential.count > 0;
+              const hasBackup = asset.backup.versionCount > 0 || asset.backup.status === 'ready';
+              const hasAnsible = asset.automation.managed;
+              const mainRisk = asset.riskCodes[0];
+              return (
+                <button
+                  key={asset.id}
+                  type="button"
+                  onClick={() => onSelect(asset.id)}
+                  className={`asset-directory-row block w-full min-w-0 px-4 py-4 text-left transition ${
+                    selected
+                      ? 'bg-blue-50 shadow-[inset_4px_0_0_#2557f6,0_12px_28px_rgba(37,87,246,0.08)]'
+                      : 'bg-white hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="grid min-w-0 gap-3 2xl:grid-cols-[minmax(260px,0.95fr)_minmax(0,1.35fr)]">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${selected ? 'bg-blue-600 text-white' : 'bg-slate-950 text-white'}`}>
+                        <HardDrive className="h-5 w-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="truncate text-base font-black text-slate-950">{asset.name}</div>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
+                          <Pill tone="bg-blue-50 text-blue-700 ring-blue-200">{asset.typeLabel}</Pill>
+                          <Pill tone={STATUS_TONES[asset.status] || STATUS_TONES.unknown}>{STATUS_LABELS[asset.status] || asset.status}</Pill>
+                          {mainRisk ? <Pill tone="bg-rose-50 text-rose-700 ring-rose-200">{RISK_LABELS[mainRisk]}</Pill> : null}
+                        </div>
+                        <div className="mt-2 flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs font-semibold text-slate-500">
+                          <span className="min-w-0 truncate font-mono">{safeText(extractManagementHost(asset.managementIp) || asset.managementIp)}</span>
+                          <span className="min-w-0 truncate">{safeText([asset.datacenterName, asset.rackCode, asset.rackPosition].filter(Boolean).join(' / '))}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid min-w-0 grid-cols-2 gap-2 md:grid-cols-4">
+                      <DirectoryStatus
+                        icon={KeyRound}
+                        label="密码"
+                        value={SECRET_LABELS[asset.credential.status]}
+                        subtext={`${asset.credential.count} 条凭据`}
+                        tone={hasCredential ? 'text-emerald-600' : 'text-rose-600'}
+                      />
+                      <DirectoryStatus
+                        icon={Database}
+                        label="配置备份"
+                        value={asset.backup.label}
+                        subtext={`${asset.backup.versionCount} 个版本`}
+                        tone={hasBackup ? 'text-emerald-600' : 'text-amber-600'}
+                      />
+                      <DirectoryStatus
+                        icon={Terminal}
+                        label="自动化"
+                        value={asset.automation.label}
+                        subtext={asset.automation.inventoryName || '-'}
+                        tone={hasAnsible ? 'text-emerald-600' : 'text-slate-500'}
+                      />
+                      <DirectoryStatus
+                        icon={ClipboardList}
+                        label="最近"
+                        value={asset.backup.latestVersion || '-'}
+                        subtext={formatTime(asset.backup.lastBackupAt || asset.updatedAt)}
+                        tone="text-blue-600"
+                      />
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="asset-detail-canvas min-w-0 border-t border-slate-200/80 p-4 xl:max-h-[calc(100vh-17rem)] xl:overflow-y-auto xl:border-l xl:border-t-0">
+          {children}
+        </div>
+      </div>
+    </section>
+  );
 }
 
 function getInventoryGroups(asset) {
@@ -2691,30 +2806,30 @@ export default function AssetCenterView({
   }, [assets]);
 
   return (
-    <div className="h-full overflow-y-auto overflow-x-hidden bg-slate-100 p-3 lg:p-4">
-      <div className="mx-auto max-w-[1920px] space-y-3">
-        <section className="flex flex-wrap items-center justify-between gap-4">
+    <div className="asset-center-page h-full overflow-y-auto overflow-x-hidden p-5 lg:p-7">
+      <div className="mx-auto max-w-[1880px] space-y-6">
+        <section className="asset-hero-card flex flex-wrap items-center justify-between gap-5 p-6">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-xs font-bold text-blue-700">
+            <div className="ui-eyebrow flex items-center gap-2 text-xs font-black uppercase">
               <ShieldCheck className="h-4 w-4" />
               V2 Asset Center
             </div>
-            <h1 className="mt-1 text-2xl font-black text-slate-950">资产中心</h1>
-            <div className="mt-1 text-sm text-slate-500">设备、配置、密码、自动化的统一资产工作台</div>
+            <h1 className="mt-2 text-4xl font-black text-slate-950">资产中心</h1>
+            <div className="mt-2 text-base font-semibold text-slate-500">设备、配置、密码、自动化的统一资产工作台</div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+            <div className="inline-flex rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm">
               <button
                 type="button"
                 onClick={() => setViewMode('overview')}
-                className={`h-8 rounded-md px-3 text-sm font-black transition ${viewMode === 'overview' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+                className={`h-10 rounded-xl px-4 text-sm font-black transition ${viewMode === 'overview' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
               >
                 总览
               </button>
               <button
                 type="button"
                 onClick={() => navigateToList({})}
-                className={`h-8 rounded-md px-3 text-sm font-black transition ${viewMode === 'list' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+                className={`h-10 rounded-xl px-4 text-sm font-black transition ${viewMode === 'list' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
               >
                 清单
               </button>
@@ -2723,7 +2838,7 @@ export default function AssetCenterView({
               type="button"
               onClick={onRefresh}
               disabled={isDataLoading}
-              className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition hover:border-blue-200 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="ui-secondary-button inline-flex h-11 items-center gap-2 px-4 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-60"
               title="刷新资产数据"
             >
               <RefreshCw className={`h-4 w-4 ${isDataLoading ? 'animate-spin' : ''}`} />
@@ -2744,46 +2859,46 @@ export default function AssetCenterView({
           />
         ) : (
           <>
-            <section className="sticky top-0 z-20 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <section className="ui-card sticky top-0 z-20 p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-slate-500">
-                  <span className="rounded-md bg-blue-50 px-2.5 py-1 text-blue-700">资产清单</span>
-                  {datacenterFilter !== 'all' ? <span className="rounded-md bg-slate-100 px-2.5 py-1">机房：{datacenterFilter}</span> : null}
-                  {type !== 'all' ? <span className="rounded-md bg-slate-100 px-2.5 py-1">类型：{DEVICE_TYPE_LABELS[type] || type}</span> : null}
-                  {risk !== 'all' ? <span className="rounded-md bg-slate-100 px-2.5 py-1">风险：{RISK_LABELS[risk] || risk}</span> : null}
+                  <span className="rounded-lg bg-blue-50 px-3 py-1.5 font-black text-blue-700">资产清单</span>
+                  {datacenterFilter !== 'all' ? <span className="rounded-lg bg-slate-100 px-3 py-1.5">机房：{datacenterFilter}</span> : null}
+                  {type !== 'all' ? <span className="rounded-lg bg-slate-100 px-3 py-1.5">类型：{DEVICE_TYPE_LABELS[type] || type}</span> : null}
+                  {risk !== 'all' ? <span className="rounded-lg bg-slate-100 px-3 py-1.5">风险：{RISK_LABELS[risk] || risk}</span> : null}
                 </div>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => setViewMode('overview')}
-                    className="h-8 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-600 hover:border-blue-200 hover:text-blue-700"
+                    className="ui-secondary-button h-9 px-3 text-xs font-black"
                   >
                     返回总览
                   </button>
                   <button
                     type="button"
                     onClick={resetListFilters}
-                    className="h-8 rounded-md border border-slate-200 bg-slate-50 px-2.5 text-xs font-bold text-slate-600 hover:bg-white"
+                    className="ui-secondary-button h-9 px-3 text-xs font-black"
                   >
                     清除筛选
                   </button>
                 </div>
               </div>
-              <div className="grid gap-2 xl:grid-cols-[minmax(260px,1fr)_minmax(0,2.5fr)]">
+              <div className="grid gap-3 xl:grid-cols-[minmax(280px,1fr)_minmax(0,2.5fr)]">
                 <label className="relative block">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <input
                     value={keyword}
                     onChange={(event) => setKeyword(event.target.value)}
-                    className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-10 pr-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                    className="h-11 w-full rounded-2xl border border-slate-200 bg-white pl-10 pr-3 text-sm font-bold text-slate-800 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
                     placeholder="搜索名称、IP、序列号、项目、负责人"
                   />
                 </label>
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-[repeat(8,minmax(112px,1fr))_90px]">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-[repeat(8,minmax(112px,1fr))_90px]">
                   <select
                     value={status}
                     onChange={(event) => setStatus(event.target.value)}
-                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                    className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
                   >
                     <option value="all">全部状态</option>
                     <option value="active">运行中</option>
@@ -2797,7 +2912,7 @@ export default function AssetCenterView({
                   <select
                     value={datacenterFilter}
                     onChange={(event) => setDatacenterFilter(event.target.value)}
-                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                    className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
                   >
                     <option value="all">全部机房</option>
                     {datacenterOptions.map((item) => <option key={item} value={item}>{item}</option>)}
@@ -2805,7 +2920,7 @@ export default function AssetCenterView({
                   <select
                     value={type}
                     onChange={(event) => setType(event.target.value)}
-                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                    className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
                   >
                     <option value="all">全部类型</option>
                     {typeOptions.map(([value, label]) => (
@@ -2815,7 +2930,7 @@ export default function AssetCenterView({
                   <select
                     value={risk}
                     onChange={(event) => setRisk(event.target.value)}
-                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                    className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
                   >
                     <option value="all">全部风险</option>
                     <option value="offline">不可达</option>
@@ -2826,7 +2941,7 @@ export default function AssetCenterView({
                   <select
                     value={credentialFilter}
                     onChange={(event) => setCredentialFilter(event.target.value)}
-                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                    className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
                   >
                     <option value="all">全部密码</option>
                     <option value="active">已受控</option>
@@ -2839,7 +2954,7 @@ export default function AssetCenterView({
                   <select
                     value={backupFilter}
                     onChange={(event) => setBackupFilter(event.target.value)}
-                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                    className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
                   >
                     <option value="all">全部备份</option>
                     <option value="ready">已接入</option>
@@ -2850,7 +2965,7 @@ export default function AssetCenterView({
                   <select
                     value={automationFilter}
                     onChange={(event) => setAutomationFilter(event.target.value)}
-                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                    className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
                   >
                     <option value="all">全部纳管</option>
                     <option value="managed">已纳管</option>
@@ -2859,7 +2974,7 @@ export default function AssetCenterView({
                   <select
                     value={sortOptionValue}
                     onChange={handleSortOptionChange}
-                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                    className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
                     title="排序方式"
                   >
                     {hasPresetSortOption ? null : <option value={sortOptionValue}>{currentSortLabel}</option>}
@@ -2867,7 +2982,7 @@ export default function AssetCenterView({
                       <option key={option.value} value={option.value}>{option.label}</option>
                     ))}
                   </select>
-                  <div className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-600">
+                  <div className="flex h-11 items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm font-black text-slate-600">
                     <Filter className="h-4 w-4 text-slate-400" />
                     {filteredAssets.length}
                   </div>
@@ -2875,38 +2990,31 @@ export default function AssetCenterView({
               </div>
             </section>
 
-            <section className="grid min-w-0 items-start gap-3 xl:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_390px]">
-              <AssetTable
+            <AssetDirectory
                 assets={sortedAssets}
                 selectedAssetId={selectedAsset?.id}
                 onSelect={setSelectedAssetId}
-                sort={sortConfig}
-                onSort={handleSort}
                 sortLabel={sortDisplayLabel}
-                visibleColumns={visibleColumns}
-                onToggleColumn={handleToggleColumn}
+              >
+              <AssetDetail
+                asset={selectedAsset}
+                onProvisionBackup={handleProvisionBackup}
+                onRunBackup={handleRunBackup}
+                onUpdateManagementIp={handleUpdateManagementIp}
+                onOpenCredentialModal={openCredentialModal}
+                onTestCredential={handleTestCredential}
+                onOpenBackupSettings={openBackupSettings}
+                onTestBackupTarget={handleTestBackupTarget}
+                onProvisionAnsible={handleProvisionAnsible}
+                onTestAnsible={handleTestAnsible}
+                backupActionAssetId={backupActionAssetId}
+                backupTestAssetId={backupTestAssetId}
+                credentialTestAssetId={credentialTestAssetId}
+                managementIpActionAssetId={managementIpActionAssetId}
+                ansibleActionAssetId={ansibleActionAssetId}
+                ansibleTestAssetId={ansibleTestAssetId}
               />
-              <aside className="min-w-0 xl:sticky xl:top-4 xl:self-start">
-                <AssetDetail
-                  asset={selectedAsset}
-                  onProvisionBackup={handleProvisionBackup}
-                  onRunBackup={handleRunBackup}
-                  onUpdateManagementIp={handleUpdateManagementIp}
-                  onOpenCredentialModal={openCredentialModal}
-                  onTestCredential={handleTestCredential}
-                  onOpenBackupSettings={openBackupSettings}
-                  onTestBackupTarget={handleTestBackupTarget}
-                  onProvisionAnsible={handleProvisionAnsible}
-                  onTestAnsible={handleTestAnsible}
-                  backupActionAssetId={backupActionAssetId}
-                  backupTestAssetId={backupTestAssetId}
-                  credentialTestAssetId={credentialTestAssetId}
-                  managementIpActionAssetId={managementIpActionAssetId}
-                  ansibleActionAssetId={ansibleActionAssetId}
-                  ansibleTestAssetId={ansibleTestAssetId}
-                />
-              </aside>
-            </section>
+            </AssetDirectory>
           </>
         )}
       </div>

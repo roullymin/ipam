@@ -4,17 +4,26 @@
 
 :root {
   color-scheme: light;
-  --app-bg: #eef3f8;
-  --app-bg-deep: #e4ebf4;
-  --app-panel: rgba(255, 255, 255, 0.92);
-  --app-panel-border: rgba(148, 163, 184, 0.22);
-  --navy-950: #07152e;
-  --navy-900: #0b2f64;
-  --cyan-500: #1687ff;
-  --cyan-300: #4dd9ff;
-  --emerald-400: #34d399;
-  --amber-400: #f59e0b;
-  --ink-900: #0f172a;
+  --app-bg: #f6f8fc;
+  --app-bg-soft: #f8fafc;
+  --app-bg-tint: #eef5ff;
+  --app-panel: rgba(255, 255, 255, 0.96);
+  --app-panel-border: rgba(15, 23, 42, 0.08);
+  --app-border: #e7ecf4;
+  --app-primary: #2557f6;
+  --app-primary-600: #1f4fe8;
+  --app-primary-soft: #eef3ff;
+  --app-blue-100: #dce8ff;
+  --app-mint: #31b89a;
+  --app-orange: #e7783c;
+  --ink-950: #080f1f;
+  --ink-900: #111827;
+  --ink-700: #374151;
+  --ink-500: #667085;
+  --ink-400: #98a2b3;
+  --shadow-soft: 0 18px 45px rgba(15, 23, 42, 0.07);
+  --shadow-card: 0 12px 30px rgba(15, 23, 42, 0.055);
+  --radius-card: 1.35rem;
 }
 
 html,
@@ -24,9 +33,11 @@ body,
 }
 
 body {
-  font-family: "Aptos", "Segoe UI Variable Text", "PingFang SC", "Microsoft YaHei", sans-serif;
-  background: #eef3f8;
+  font-family: Inter, "Aptos", "Segoe UI Variable Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--app-bg);
   color: var(--ink-900);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
 }
 
 .brand-display {
@@ -35,24 +46,24 @@ body {
 
 .app-shell {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.76) 0%, rgba(236, 242, 249, 0.98) 100%),
-    radial-gradient(circle at 72% 10%, rgba(22, 135, 255, 0.12), transparent 28%),
-    #eef3f8;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(247, 250, 255, 0.92) 32%, rgba(242, 247, 253, 1) 100%),
+    radial-gradient(circle at 78% 0%, rgba(37, 87, 246, 0.08), transparent 28%),
+    radial-gradient(circle at 18% 18%, rgba(49, 184, 154, 0.06), transparent 24%),
+    var(--app-bg);
 }
 
 .app-sidebar {
-  background:
-    linear-gradient(180deg, rgba(40, 114, 213, 0.92) 0%, rgba(19, 64, 131, 0.98) 46%, rgba(11, 38, 80, 1) 100%),
-    radial-gradient(circle at 20% 10%, rgba(104, 215, 255, 0.28), transparent 28%);
-  border-right: 1px solid rgba(255, 255, 255, 0.18);
-  box-shadow: 10px 0 28px rgba(15, 60, 126, 0.18);
+  background: rgba(255, 255, 255, 0.92);
+  border-right: 1px solid var(--app-border);
+  box-shadow: 10px 0 28px rgba(15, 23, 42, 0.035);
+  backdrop-filter: blur(18px);
 }
 
 .app-topbar {
-  background: rgba(255, 255, 255, 0.96);
-  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
-  box-shadow: 0 8px 24px rgba(35, 63, 103, 0.06);
-  backdrop-filter: blur(12px);
+  background: rgba(255, 255, 255, 0.88);
+  border-bottom: 1px solid var(--app-border);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.035);
+  backdrop-filter: blur(18px);
 }
 
 .login-stage {
@@ -296,9 +307,103 @@ body {
 }
 
 .topbar-chip {
-  border: 1px solid rgba(148, 163, 184, 0.2);
+  border: 1px solid var(--app-border);
   background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.045);
+}
+
+.ui-card {
+  border: 1px solid var(--app-panel-border);
+  border-radius: var(--radius-card);
+  background: var(--app-panel);
+  box-shadow: var(--shadow-card);
+}
+
+.ui-card-soft {
+  border: 1px solid rgba(37, 87, 246, 0.08);
+  border-radius: var(--radius-card);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(250, 252, 255, 0.95)),
+    radial-gradient(circle at 10% 0%, rgba(37, 87, 246, 0.06), transparent 30%);
+  box-shadow: var(--shadow-card);
+}
+
+.ui-page {
+  background:
+    radial-gradient(circle at 82% 2%, rgba(37, 87, 246, 0.08), transparent 28%),
+    linear-gradient(180deg, #f8fbff 0%, #f4f7fb 100%);
+}
+
+.ui-eyebrow {
+  color: var(--app-primary);
+}
+
+.ui-primary-button {
+  border-radius: 0.9rem;
+  background: linear-gradient(135deg, #2f68ff 0%, #1f4fe8 100%);
+  color: white;
+  box-shadow: 0 16px 30px rgba(37, 87, 246, 0.22);
+}
+
+.ui-primary-button:hover {
+  background: linear-gradient(135deg, #3a72ff 0%, #1d48d7 100%);
+  box-shadow: 0 18px 34px rgba(37, 87, 246, 0.28);
+}
+
+.ui-secondary-button {
+  border: 1px solid var(--app-border);
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ink-700);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.04);
+}
+
+.ui-secondary-button:hover {
+  border-color: rgba(37, 87, 246, 0.22);
+  color: var(--app-primary);
+  background: white;
+}
+
+.asset-center-page {
+  background:
+    radial-gradient(circle at 85% 0%, rgba(37, 87, 246, 0.08), transparent 28%),
+    linear-gradient(180deg, #f8fbff 0%, #f4f7fb 100%);
+}
+
+.asset-hero-card {
+  border: 1px solid rgba(37, 87, 246, 0.08);
+  border-radius: 1.65rem;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(246, 250, 255, 0.94) 100%),
+    radial-gradient(circle at 72% 20%, rgba(37, 87, 246, 0.08), transparent 28%);
+  box-shadow: var(--shadow-soft);
+}
+
+.asset-metric-card {
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  border-radius: 1.2rem;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.045);
+}
+
+.asset-directory-panel {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 1.35rem;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: var(--shadow-soft);
+}
+
+.asset-directory-row {
+  border-radius: 1rem;
+}
+
+.asset-directory-row:hover {
+  background: #f8fbff;
+}
+
+.asset-detail-canvas {
+  background:
+    linear-gradient(180deg, rgba(248, 251, 255, 0.98), rgba(244, 247, 251, 0.96));
 }
 
 .dashboard-status-panel {
