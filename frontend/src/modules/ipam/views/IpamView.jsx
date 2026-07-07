@@ -81,7 +81,7 @@ export default function IpamView(props) {
   };
 
   return (
-    <div className="flex h-full min-h-0 gap-6 overflow-hidden">
+    <div className="ops-page flex h-full min-h-0 gap-6 overflow-hidden">
       <IpamSectionSidebar
         sections={sectionList}
         expandedSections={expandedSections}

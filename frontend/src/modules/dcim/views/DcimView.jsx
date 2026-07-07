@@ -765,22 +765,25 @@ export default function DcimView({
           >
             {(showRackMatrix ? rackTiles : rackTiles.slice(0, 12)).map((tile) => {
               const isSelected = String(selectedRackFilter || '') === String(tile.rack.id);
+              const isAlertTone = tile.tone === 'danger' || tile.tone === 'warn';
               const toneClass =
                 tile.tone === 'danger'
-                  ? 'border-rose-300 bg-rose-50 text-rose-950'
+                  ? 'border-rose-400/70 bg-rose-600 text-white'
                   : tile.tone === 'warn'
-                    ? 'border-amber-300 bg-amber-50 text-amber-950'
+                    ? 'border-amber-400/70 bg-amber-500 text-white'
                     : tile.tone === 'empty'
-                      ? 'border-slate-200 bg-slate-50 text-slate-500'
-                      : 'border-blue-200 bg-blue-50 text-slate-950';
+                      ? 'border-slate-700 bg-slate-900/55 text-slate-400'
+                      : 'border-blue-400/30 bg-blue-500/15 text-slate-100';
               const barClass =
                 tile.tone === 'danger'
-                  ? 'bg-rose-500'
+                  ? 'bg-white'
                   : tile.tone === 'warn'
-                    ? 'bg-amber-500'
+                    ? 'bg-white'
                     : tile.tone === 'empty'
-                      ? 'bg-slate-300'
-                      : 'bg-blue-500';
+                      ? 'bg-slate-600'
+                      : 'bg-blue-400';
+              const trackClass = isAlertTone ? 'bg-white/25' : 'bg-slate-950/30';
+              const badgeClass = isAlertTone ? 'bg-white/20 text-white' : 'bg-white/10 text-slate-100';
               return (
                 <button
                   key={tile.rack.id}
@@ -797,9 +800,9 @@ export default function DcimView({
                         {activeLocation ? tile.rack.name || '标准机柜' : tile.datacenter?.name || '未分配机房'}
                       </div>
                     </div>
-                    <div className="rounded-full bg-white/70 px-1.5 py-0.5 text-[11px] font-black">{tile.devices.length}</div>
+                    <div className={`rounded-full px-1.5 py-0.5 text-[11px] font-black ${badgeClass}`}>{tile.devices.length}</div>
                   </div>
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/70">
+                  <div className={`mt-2 h-1.5 overflow-hidden rounded-full ${trackClass}`}>
                     <div className={`h-full rounded-full ${barClass}`} style={{ width: `${tile.utilization}%` }} />
                   </div>
                   <div className="mt-1.5 flex items-center justify-between text-[11px] font-bold opacity-80">
@@ -807,7 +810,7 @@ export default function DcimView({
                     <span>{tile.ratedPower}W</span>
                   </div>
                   {tile.isPowerOver ? (
-                    <div className="mt-1.5 rounded-lg bg-white/70 px-2 py-0.5 text-[11px] font-bold text-rose-700">功率超限</div>
+                    <div className="mt-1.5 rounded-lg bg-white/20 px-2 py-0.5 text-[11px] font-bold text-white">功率超限</div>
                   ) : null}
                 </button>
               );

@@ -777,7 +777,7 @@ export default function DatacenterChangeRequestView({ initialRequestId, onConsum
   }
 
   return (
-    <div className="custom-scrollbar h-full overflow-y-auto bg-slate-50/70 p-3 lg:p-4">
+    <div className="ops-page custom-scrollbar h-full overflow-y-auto bg-slate-50/70 p-3 lg:p-4">
       <div className="mx-auto max-w-[1600px] space-y-3">
         <section className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">

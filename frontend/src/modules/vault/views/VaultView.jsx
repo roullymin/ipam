@@ -444,7 +444,7 @@ export default function VaultView({ currentRole }) {
   const targetField = { datacenter: 'datacenter', rack: 'rack', device: 'rack_device', ip: 'ip_address' }[form.target_type];
 
   return (
-    <div className="h-full overflow-auto bg-slate-50/70 p-3 lg:p-4">
+    <div className="ops-page h-full overflow-auto bg-slate-50/70 p-3 lg:p-4">
       <div className="mx-auto max-w-[1800px] space-y-3">
         <section className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">

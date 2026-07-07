@@ -726,51 +726,59 @@ body {
 }
 
 .asset-center-page {
+  color: #d7e3f7;
   background:
-    radial-gradient(circle at 88% 0%, rgba(37, 99, 235, 0.08), transparent 24%),
-    radial-gradient(circle at 10% 12%, rgba(14, 165, 233, 0.055), transparent 26%),
-    linear-gradient(180deg, #f8fafc 0%, #eef3f8 100%);
+    radial-gradient(circle at 82% 0%, rgba(59, 130, 246, 0.2), transparent 28%),
+    radial-gradient(circle at 18% 24%, rgba(34, 197, 94, 0.08), transparent 22%),
+    linear-gradient(rgba(96, 165, 250, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(96, 165, 250, 0.035) 1px, transparent 1px),
+    linear-gradient(180deg, #07101f 0%, #0b1426 100%);
+  background-size: auto, auto, 72px 72px, 72px 72px, auto;
 }
 
 .asset-hero-card {
-  border: 1px solid rgba(148, 163, 184, 0.2);
+  border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 1.65rem;
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 251, 255, 0.94) 100%),
-    radial-gradient(circle at 74% 18%, rgba(37, 99, 235, 0.06), transparent 28%);
-  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.07);
+    linear-gradient(135deg, rgba(17, 28, 49, 0.9) 0%, rgba(13, 23, 42, 0.78) 100%),
+    radial-gradient(circle at 74% 18%, rgba(59, 130, 246, 0.16), transparent 28%);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(16px);
 }
 
 .asset-metric-card {
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 1.2rem;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.04);
+  background:
+    linear-gradient(180deg, rgba(17, 28, 49, 0.88), rgba(13, 23, 42, 0.78)),
+    rgba(15, 23, 42, 0.82);
+  box-shadow: var(--shadow-card);
 }
 
 .asset-center-page .ui-card {
   border-color: rgba(148, 163, 184, 0.18) !important;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(248, 251, 255, 0.95)) !important;
-  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.055) !important;
+    linear-gradient(180deg, rgba(17, 28, 49, 0.9), rgba(13, 23, 42, 0.82)),
+    rgba(15, 23, 42, 0.82) !important;
+  box-shadow: var(--shadow-card) !important;
 }
 
 .asset-center-page .ui-secondary-button {
-  border-color: rgba(148, 163, 184, 0.24);
-  background: rgba(255, 255, 255, 0.9);
-  color: #334155;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  border-color: rgba(148, 163, 184, 0.18);
+  background: rgba(15, 25, 45, 0.72);
+  color: #d7e3f7;
+  box-shadow: var(--shadow-card);
 }
 
 .asset-center-page .ui-secondary-button:hover {
-  border-color: rgba(37, 99, 235, 0.28);
-  background: #f8fbff;
-  color: #1d4ed8;
+  border-color: rgba(96, 165, 250, 0.36);
+  background: rgba(37, 99, 235, 0.18);
+  color: #bfdbfe;
 }
 
 .asset-center-page .bg-slate-50\/70,
 .asset-center-page .bg-slate-50 {
-  background-color: rgba(248, 250, 252, 0.82) !important;
+  background-color: rgba(30, 45, 72, 0.62) !important;
 }
 
 .asset-type-card {
@@ -779,9 +787,9 @@ body {
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 1rem;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 251, 255, 0.94));
+    linear-gradient(180deg, rgba(17, 28, 49, 0.9), rgba(13, 23, 42, 0.82));
   padding: 1rem;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.045);
+  box-shadow: var(--shadow-card);
 }
 
 .asset-type-card::after {
@@ -804,8 +812,8 @@ body {
   justify-content: center;
   border-radius: 0.9rem;
   border: 1px solid currentColor;
-  background: rgba(255, 255, 255, 0.78);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), 0 10px 22px rgba(15, 23, 42, 0.06);
+  background: rgba(15, 25, 45, 0.68);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 10px 22px rgba(0, 0, 0, 0.18);
 }
 
 .asset-type-progress {
@@ -815,32 +823,32 @@ body {
 .asset-type-card--blue,
 .asset-type-card--sky,
 .asset-type-card--cyan {
-  color: #2563eb;
+  color: #60a5fa;
 }
 
 .asset-type-card--indigo {
-  color: #4f46e5;
+  color: #818cf8;
 }
 
 .asset-type-card--emerald {
-  color: #059669;
+  color: #34d399;
 }
 
 .asset-type-card--rose {
-  color: #e11d48;
+  color: #fb7185;
 }
 
 .asset-type-card--amber {
-  color: #d97706;
+  color: #fbbf24;
 }
 
 .asset-type-card--violet,
 .asset-type-card--purple {
-  color: #7c3aed;
+  color: #a78bfa;
 }
 
 .asset-type-card--slate {
-  color: #475569;
+  color: #cbd5e1;
 }
 
 .asset-type-card--blue::after,
@@ -875,10 +883,12 @@ body {
 }
 
 .asset-directory-panel {
-  border: 1px solid rgba(15, 23, 42, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 1.35rem;
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow: var(--shadow-soft);
+  background:
+    linear-gradient(180deg, rgba(17, 28, 49, 0.9), rgba(13, 23, 42, 0.82)),
+    rgba(15, 23, 42, 0.82);
+  box-shadow: var(--shadow-card);
 }
 
 .asset-directory-row {
@@ -886,12 +896,110 @@ body {
 }
 
 .asset-directory-row:hover {
-  background: #f8fbff;
+  background: rgba(37, 99, 235, 0.12);
 }
 
 .asset-detail-canvas {
   background:
-    linear-gradient(180deg, rgba(248, 251, 255, 0.98), rgba(244, 247, 251, 0.96));
+    linear-gradient(180deg, rgba(15, 25, 45, 0.84), rgba(12, 22, 40, 0.78));
+}
+
+.asset-center-page .text-slate-950,
+.asset-center-page .text-slate-900,
+.asset-center-page .text-slate-800 {
+  color: #f8fbff !important;
+}
+
+.asset-center-page .text-slate-700,
+.asset-center-page .text-slate-600 {
+  color: #d7e3f7 !important;
+}
+
+.asset-center-page .text-slate-500,
+.asset-center-page .text-slate-400 {
+  color: #8190aa !important;
+}
+
+.asset-center-page .bg-white {
+  background-color: rgba(15, 25, 45, 0.82) !important;
+}
+
+.asset-center-page .bg-slate-100,
+.asset-center-page .bg-slate-50\/80 {
+  background-color: rgba(30, 45, 72, 0.62) !important;
+}
+
+.asset-center-page .bg-blue-50 {
+  background-color: rgba(37, 99, 235, 0.16) !important;
+}
+
+.asset-center-page .bg-emerald-50 {
+  background-color: rgba(16, 185, 129, 0.16) !important;
+}
+
+.asset-center-page .bg-amber-50 {
+  background-color: rgba(245, 158, 11, 0.16) !important;
+}
+
+.asset-center-page .bg-rose-50 {
+  background-color: rgba(244, 63, 94, 0.16) !important;
+}
+
+.asset-center-page .text-blue-700,
+.asset-center-page .text-blue-600 {
+  color: #93c5fd !important;
+}
+
+.asset-center-page .text-emerald-700,
+.asset-center-page .text-emerald-600 {
+  color: #86efac !important;
+}
+
+.asset-center-page .text-amber-700,
+.asset-center-page .text-amber-600 {
+  color: #fde68a !important;
+}
+
+.asset-center-page .text-rose-700,
+.asset-center-page .text-rose-600 {
+  color: #fecdd3 !important;
+}
+
+.asset-center-page .border-slate-100,
+.asset-center-page .border-slate-200,
+.asset-center-page .border-slate-300,
+.asset-center-page .border-blue-100,
+.asset-center-page .border-blue-200,
+.asset-center-page .border-emerald-200,
+.asset-center-page .border-amber-200,
+.asset-center-page .border-rose-200 {
+  border-color: rgba(148, 163, 184, 0.18) !important;
+}
+
+.asset-center-page input,
+.asset-center-page select,
+.asset-center-page textarea {
+  border-color: rgba(148, 163, 184, 0.2) !important;
+  background: rgba(7, 14, 30, 0.78) !important;
+  color: #e8eefc !important;
+}
+
+.asset-center-page input::placeholder,
+.asset-center-page textarea::placeholder {
+  color: #64748b;
+}
+
+.asset-center-page thead {
+  background: rgba(15, 25, 45, 0.96) !important;
+}
+
+.asset-center-page tbody,
+.asset-center-page tr {
+  border-color: rgba(148, 163, 184, 0.12) !important;
+}
+
+.asset-center-page tbody tr:hover {
+  background: rgba(37, 99, 235, 0.12) !important;
 }
 
 .dashboard-status-panel {
