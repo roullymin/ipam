@@ -1,16 +1,26 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  ArrowLeft,
+  Boxes,
+  Building2,
+  ChevronRight,
   Download,
   Edit3,
   FileSpreadsheet,
+  Gauge,
+  HardDrive,
+  LayoutDashboard,
   Loader2,
+  MapPin,
   Plus,
   RefreshCw,
   Search,
   Server,
+  ShieldAlert,
   Trash2,
   Upload,
+  Zap,
 } from 'lucide-react';
 
 const safeInt = (value, fallback = 0) => {
@@ -49,13 +59,42 @@ function ToolbarButton({ icon: Icon, label, onClick, primary = false, busy = fal
       disabled={disabled || busy}
       className={
         primary
-          ? 'inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-cyan-700 disabled:cursor-not-allowed disabled:opacity-50'
-          : 'inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:border-cyan-200 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-50'
+          ? 'ui-primary-button inline-flex items-center gap-2 px-4 py-2.5 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-50'
+          : 'ui-secondary-button inline-flex items-center gap-2 px-4 py-2.5 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-50'
       }
     >
       {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
       {label}
     </button>
+  );
+}
+
+const ICON_TONES = {
+  blue: '',
+  green: 'ui-icon-box--green',
+  amber: 'ui-icon-box--amber',
+  rose: 'ui-icon-box--rose',
+  slate: 'ui-icon-box--slate',
+};
+
+function IconFrame({ icon: Icon, tone = 'blue', className = '' }) {
+  return (
+    <span className={`ui-icon-box ${ICON_TONES[tone] || ''} ${className}`}>
+      <Icon className="h-5 w-5" />
+    </span>
+  );
+}
+
+function DcimMetricCard({ icon, tone = 'blue', label, value, hint }) {
+  return (
+    <div className="dcim-card flex min-h-[128px] items-center justify-between gap-4 p-5">
+      <div>
+        <div className="text-sm font-bold text-slate-500">{label}</div>
+        <div className="mt-3 text-3xl font-black leading-none text-slate-950">{value}</div>
+        <div className="mt-2 text-sm font-semibold text-slate-500">{hint}</div>
+      </div>
+      <IconFrame icon={icon} tone={tone} className="h-12 w-12 shrink-0" />
+    </div>
   );
 }
 
@@ -215,6 +254,7 @@ export default function DcimView({
       racks: allRacks.length,
       devices: allDevices.length,
       utilization: totalU ? Math.round((usedU / totalU) * 100) : 0,
+      ratedPower: allDevices.reduce((sum, device) => sum + safeInt(device.power_usage), 0),
     };
   }, [allDevices, allRacks, datacenterList.length]);
 
@@ -249,6 +289,17 @@ export default function DcimView({
         return String(a.rack.code || a.rack.name || '').localeCompare(String(b.rack.code || b.rack.name || ''), 'zh-Hans-CN', { numeric: true });
       });
   }, [datacenterMap, devicesByRack, visibleRacks]);
+
+  const focusRackTiles = useMemo(() => {
+    return rackTiles
+      .filter((tile) => tile.devices.length > 0)
+      .slice()
+      .sort((a, b) => {
+        if (b.utilization !== a.utilization) return b.utilization - a.utilization;
+        return b.ratedPower - a.ratedPower;
+      })
+      .slice(0, 8);
+  }, [rackTiles]);
 
   const openCreateDatacenter = () => {
     setCurrentDcForm({ name: '', location: '', contact_phone: '' });
@@ -299,8 +350,222 @@ export default function DcimView({
     openEditRack(rack);
   };
 
+  if (!activeLocation) {
+    return (
+      <div className="dcim-page custom-scrollbar h-full overflow-y-auto p-5 lg:p-6">
+        <div className="mx-auto max-w-[1880px] space-y-5">
+          {dcimErrors.length > 0 || hasCountMismatch || reportsEmptyDatabase ? (
+            <div
+              className={`flex flex-wrap items-center justify-between gap-4 rounded-2xl border px-5 py-4 ${
+                reportsEmptyDatabase
+                  ? 'border-amber-200 bg-amber-50 text-amber-950'
+                  : 'border-rose-200 bg-rose-50 text-rose-950'
+              }`}
+            >
+              <div className="flex min-w-0 items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0" />
+                <div>
+                  <div className="font-black">机房数据需要确认</div>
+                  <div className="mt-1 text-sm leading-6 opacity-80">
+                    {dcimErrors.length > 0
+                      ? dcimErrors
+                          .map((error) => `${error.url}: HTTP ${error.status || '连接失败'} ${error.message}`)
+                          .join('；')
+                      : hasCountMismatch
+                        ? `系统总览报告 ${databaseDatacenterCount} 个机房，但列表接口未返回数据。`
+                        : '当前数据库报告机房数量为 0，请先核对数据挂载。'}
+                  </div>
+                </div>
+              </div>
+              <ToolbarButton icon={RefreshCw} label="重新读取" onClick={onRefresh} busy={isDataLoading} />
+            </div>
+          ) : null}
+
+          <section className="dcim-card overflow-hidden p-6 lg:p-7">
+            <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+              <div className="max-w-3xl">
+                <div className="flex items-center gap-3 text-sm font-black text-blue-600">
+                  <IconFrame icon={LayoutDashboard} className="h-10 w-10" />
+                  机房设备总览
+                </div>
+                <h2 className="mt-5 text-3xl font-black leading-tight text-slate-950">
+                  先看全局容量，再进入单个机房维护资产
+                </h2>
+                <p className="mt-3 text-base font-semibold leading-7 text-slate-500">
+                  总页只保留机房入口、容量使用和风险提示；进入机房后再处理机柜、设备和导入导出，页面会更聚焦。
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <ToolbarButton icon={RefreshCw} label="刷新" onClick={onRefresh} busy={isDataLoading} />
+                <ToolbarButton icon={Plus} label="新增机房" onClick={openCreateDatacenter} primary />
+              </div>
+            </div>
+          </section>
+
+          <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
+            <DcimMetricCard
+              icon={Building2}
+              label="机房总数"
+              value={globalSummary.datacenters}
+              hint={`${globalSummary.racks} 个机柜`}
+            />
+            <DcimMetricCard
+              icon={HardDrive}
+              tone="green"
+              label="纳管设备"
+              value={globalSummary.devices}
+              hint="来自机房资产台账"
+            />
+            <DcimMetricCard
+              icon={Gauge}
+              tone="amber"
+              label="U 位利用率"
+              value={`${globalSummary.utilization}%`}
+              hint="按所有机柜容量汇总"
+            />
+            <DcimMetricCard
+              icon={Zap}
+              tone="rose"
+              label="额定功率"
+              value={`${globalSummary.ratedPower} W`}
+              hint="设备额定功率合计"
+            />
+          </section>
+
+          <section className="dcim-card p-5 lg:p-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-xl font-black text-slate-950">机房入口</h3>
+                <p className="mt-1 text-sm font-semibold text-slate-500">
+                  每个机房作为一个工作区，点击进入后再查看机柜矩阵和设备明细。
+                </p>
+              </div>
+              <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-black text-blue-700">
+                {datacenterSummaries.length} 个机房
+              </span>
+            </div>
+
+            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              {datacenterSummaries.map(({ datacenter, racks: rackCount, devices: deviceCount, ratedPower, utilization }) => (
+                <button
+                  key={datacenter.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedRackFilter('');
+                    setActiveLocation(datacenter.id);
+                  }}
+                  className="dcim-room-card group p-5 text-left"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <IconFrame icon={Building2} className="h-11 w-11 shrink-0" />
+                    <ChevronRight className="mt-2 h-5 w-5 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-blue-500" />
+                  </div>
+                  <div className="mt-5 min-w-0">
+                    <div className="truncate text-xl font-black text-slate-950">{datacenter.name}</div>
+                    <div className="mt-1 flex items-center gap-1.5 text-sm font-semibold text-slate-500">
+                      <MapPin className="h-4 w-4" />
+                      <span className="truncate">{datacenter.location || '未填写位置'}</span>
+                    </div>
+                  </div>
+                  <div className="mt-5 grid grid-cols-3 gap-2">
+                    <div className="rounded-xl bg-slate-50 px-3 py-2">
+                      <div className="text-xs font-bold text-slate-400">机柜</div>
+                      <div className="mt-1 text-lg font-black text-slate-950">{rackCount}</div>
+                    </div>
+                    <div className="rounded-xl bg-slate-50 px-3 py-2">
+                      <div className="text-xs font-bold text-slate-400">设备</div>
+                      <div className="mt-1 text-lg font-black text-slate-950">{deviceCount}</div>
+                    </div>
+                    <div className="rounded-xl bg-slate-50 px-3 py-2">
+                      <div className="text-xs font-bold text-slate-400">U 位</div>
+                      <div className="mt-1 text-lg font-black text-slate-950">{utilization}%</div>
+                    </div>
+                  </div>
+                  <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className={`h-full rounded-full ${utilization >= 85 ? 'bg-rose-500' : utilization >= 70 ? 'bg-amber-500' : 'bg-blue-500'}`}
+                      style={{ width: `${Math.min(100, utilization)}%` }}
+                    />
+                  </div>
+                  <div className="mt-3 text-sm font-bold text-slate-500">额定功率 {ratedPower} W</div>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+            <div className="dcim-card p-5 lg:p-6">
+              <div className="flex items-center gap-3">
+                <IconFrame icon={ShieldAlert} tone="amber" className="h-11 w-11" />
+                <div>
+                  <h3 className="text-xl font-black text-slate-950">容量关注</h3>
+                  <p className="mt-1 text-sm font-semibold text-slate-500">按 U 位利用率和功率排序，优先看到最需要处理的机柜。</p>
+                </div>
+              </div>
+              <div className="mt-5 grid gap-3 md:grid-cols-2">
+                {focusRackTiles.length > 0 ? (
+                  focusRackTiles.map((tile) => (
+                    <button
+                      key={tile.rack.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedRackFilter(tile.rack.id);
+                        setActiveLocation(tile.rack.datacenter);
+                      }}
+                      className="rounded-2xl border border-slate-200 bg-white p-4 text-left transition hover:border-blue-200 hover:bg-blue-50/40"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-base font-black text-slate-950">
+                            {tile.datacenter?.name || '未分配机房'} / {tile.rack.code || tile.rack.name || '未编号机柜'}
+                          </div>
+                          <div className="mt-1 text-sm font-semibold text-slate-500">
+                            {tile.devices.length} 台设备，{tile.usedU}/{tile.height}U
+                          </div>
+                        </div>
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-600">
+                          {tile.utilization}%
+                        </span>
+                      </div>
+                      <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
+                        <div
+                          className={`h-full rounded-full ${tile.tone === 'danger' ? 'bg-rose-500' : tile.tone === 'warn' ? 'bg-amber-500' : 'bg-blue-500'}`}
+                          style={{ width: `${tile.utilization}%` }}
+                        />
+                      </div>
+                    </button>
+                  ))
+                ) : (
+                  <div className="col-span-full rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-400">
+                    暂无机柜容量数据。
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="dcim-card p-5 lg:p-6">
+              <div className="flex items-center gap-3">
+                <IconFrame icon={Boxes} tone="green" className="h-11 w-11" />
+                <div>
+                  <h3 className="text-xl font-black text-slate-950">资产维护入口</h3>
+                  <p className="mt-1 text-sm font-semibold text-slate-500">常用动作放在总页，批量维护时不用先进入某个机房。</p>
+                </div>
+              </div>
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <ToolbarButton icon={Download} label="下载模板" onClick={() => handleDownloadTemplate('dcim')} />
+                <ToolbarButton icon={Upload} label="导入资产" onClick={() => handleImportClick('dcim')} busy={isImporting} />
+                <ToolbarButton icon={FileSpreadsheet} label="导出 Excel" onClick={() => handleExportExcel('dcim')} />
+                <ToolbarButton icon={RefreshCw} label="刷新数据" onClick={onRefresh} busy={isDataLoading} />
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 bg-slate-50 p-4">
+    <div className="dcim-page flex h-full min-h-0 flex-col gap-4 p-4 lg:p-5">
       {dcimErrors.length > 0 || hasCountMismatch || reportsEmptyDatabase ? (
         <div
           className={`flex flex-wrap items-center justify-between gap-4 rounded-2xl border px-5 py-4 ${
@@ -334,7 +599,7 @@ export default function DcimView({
         </div>
       ) : null}
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+      <section className="dcim-card p-3">
         <div className="flex flex-col gap-2 xl:flex-row xl:items-center">
           <div className="custom-scrollbar flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1">
             <button
@@ -345,10 +610,11 @@ export default function DcimView({
               }}
               className={`flex shrink-0 items-center gap-3 rounded-xl border px-3 py-2 text-left transition ${
                 !activeLocation
-                  ? 'border-cyan-300 bg-cyan-50 text-cyan-950 ring-2 ring-cyan-100'
-                  : 'border-slate-200 bg-white text-slate-700 hover:border-cyan-200 hover:bg-cyan-50/40'
+                  ? 'border-blue-300 bg-blue-50 text-blue-950 ring-2 ring-blue-100'
+                  : 'border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50/40'
               }`}
             >
+              <ArrowLeft className="h-4 w-4 text-blue-500" />
               <span className="text-sm font-black">全部机房</span>
               <span className="text-xs font-bold text-slate-500">
                 {globalSummary.datacenters} 机房 · {globalSummary.racks} 机柜 · {globalSummary.devices} 设备
@@ -367,8 +633,8 @@ export default function DcimView({
                   }}
                   className={`flex shrink-0 items-center gap-3 rounded-xl border px-3 py-2 text-left transition ${
                     isActive
-                      ? 'border-cyan-300 bg-cyan-50 text-cyan-950 ring-2 ring-cyan-100'
-                      : 'border-slate-200 bg-white text-slate-700 hover:border-cyan-200 hover:bg-cyan-50/40'
+                      ? 'border-blue-300 bg-blue-50 text-blue-950 ring-2 ring-blue-100'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50/40'
                   }`}
                 >
                   <span className="max-w-[180px] truncate text-sm font-black">{datacenter.name}</span>
@@ -382,7 +648,7 @@ export default function DcimView({
           <button
             type="button"
             onClick={() => setShowRoomOverview((current) => !current)}
-            className="inline-flex h-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-black text-slate-600 transition hover:border-cyan-200 hover:bg-cyan-50 hover:text-cyan-700"
+            className="inline-flex h-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-black text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
           >
             {showRoomOverview ? '收起概览' : '展开概览'}
           </button>
@@ -390,8 +656,8 @@ export default function DcimView({
 
         {showRoomOverview ? (
           <div className="mt-3 grid gap-2 md:grid-cols-2 2xl:grid-cols-4">
-            <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2">
-              <div className="text-xs font-black text-cyan-700">全部资源</div>
+            <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2">
+              <div className="text-xs font-black text-blue-700">全部资源</div>
               <div className="mt-1 text-lg font-black text-slate-950">{globalSummary.racks} 机柜 / {globalSummary.devices} 设备</div>
               <div className="text-xs text-slate-500">U 位利用 {globalSummary.utilization}%</div>
             </div>
@@ -410,10 +676,10 @@ export default function DcimView({
         ) : null}
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <section className="dcim-card px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="flex items-center gap-2 text-sm font-bold text-cyan-700">
+            <div className="flex items-center gap-2 text-sm font-bold text-blue-700">
               <FileSpreadsheet className="h-4 w-4" />
               机房资产台账
             </div>
@@ -470,7 +736,7 @@ export default function DcimView({
               <button
                 type="button"
                 onClick={() => setSelectedRackFilter('')}
-                className="rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-bold text-cyan-700 hover:bg-cyan-100"
+                className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100"
               >
                 清除机柜过滤
               </button>
@@ -487,7 +753,7 @@ export default function DcimView({
                     ? 'border-amber-300 bg-amber-50 text-amber-950'
                     : tile.tone === 'empty'
                       ? 'border-slate-200 bg-slate-50 text-slate-500'
-                      : 'border-cyan-200 bg-cyan-50 text-slate-950';
+                      : 'border-blue-200 bg-blue-50 text-slate-950';
               const barClass =
                 tile.tone === 'danger'
                   ? 'bg-rose-500'
@@ -495,14 +761,14 @@ export default function DcimView({
                     ? 'bg-amber-500'
                     : tile.tone === 'empty'
                       ? 'bg-slate-300'
-                      : 'bg-cyan-500';
+                      : 'bg-blue-500';
               return (
                 <button
                   key={tile.rack.id}
                   type="button"
                   onClick={() => setSelectedRackFilter(isSelected ? '' : tile.rack.id)}
-                  className={`rounded-xl border p-2.5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${toneClass} ${
-                    isSelected ? 'ring-2 ring-cyan-500' : ''
+                  className={`dcim-rack-tile border p-2.5 text-left ${toneClass} ${
+                    isSelected ? 'dcim-rack-tile--active' : ''
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -531,7 +797,7 @@ export default function DcimView({
         </div>
       </section>
 
-      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <section className="dcim-table-shell flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
           <select
             value={activeLocation || ''}
@@ -539,7 +805,7 @@ export default function DcimView({
               setSelectedRackFilter('');
               setActiveLocation(event.target.value || null);
             }}
-            className="min-w-52 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 outline-none focus:border-cyan-500"
+            className="min-w-52 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 outline-none focus:border-blue-500"
           >
             <option value="">全部机房总览</option>
             {datacenterList.map((datacenter) => (
@@ -555,14 +821,14 @@ export default function DcimView({
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="搜索机柜、设备、IP、项目、负责人、资产编号..."
-              className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-cyan-500"
+              className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-blue-500"
             />
           </div>
 
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
-            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 outline-none focus:border-cyan-500"
+            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 outline-none focus:border-blue-500"
           >
             <option value="all">全部状态</option>
             <option value="active">运行中</option>
@@ -574,14 +840,14 @@ export default function DcimView({
           </select>
 
           <div className="text-sm font-semibold text-slate-500">显示 {filteredRows.length} 行</div>
-          <div className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-bold text-cyan-700">
+          <div className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
             双击行编辑；右侧操作栏始终固定
           </div>
         </div>
 
         <div className="custom-scrollbar min-h-0 flex-1 overflow-auto">
           <table className="min-w-[2420px] border-separate border-spacing-0 text-sm">
-            <thead className="sticky top-0 z-20 bg-slate-100 text-left text-xs font-black uppercase tracking-wide text-slate-600">
+            <thead className="sticky top-0 z-20 bg-slate-100 text-left text-xs font-black text-slate-600">
               <tr>
                 {[
                   '序号', '机房', '机柜编号', '机柜名称', '高度(U)', 'PDU数', 'PDU实测(W)',
@@ -617,20 +883,20 @@ export default function DcimView({
               {filteredRows.map(({ rack, device }, index) => (
                 <tr
                   key={`${rack.id}-${device?.id || 'empty'}`}
-                  className="group cursor-pointer hover:bg-cyan-50/50"
+                  className="group cursor-pointer hover:bg-blue-50/50"
                   title={device ? '双击编辑设备' : '双击编辑机柜'}
                   onDoubleClick={() => openRowEditor(rack, device)}
                 >
-                  <td className="sticky left-0 z-10 w-14 border-b border-r border-slate-200 bg-white px-3 py-2.5 text-center text-slate-400 group-hover:bg-cyan-50">
+                  <td className="sticky left-0 z-10 w-14 border-b border-r border-slate-200 bg-white px-3 py-2.5 text-center text-slate-400 group-hover:bg-blue-50">
                     {index + 1}
                   </td>
-                  <td className="sticky left-14 z-10 w-28 border-b border-r border-slate-200 bg-white px-3 py-2.5 font-semibold text-slate-700 group-hover:bg-cyan-50">
+                  <td className="sticky left-14 z-10 w-28 border-b border-r border-slate-200 bg-white px-3 py-2.5 font-semibold text-slate-700 group-hover:bg-blue-50">
                     {datacenterMap.get(String(rack.datacenter))?.name || '-'}
                   </td>
-                  <td className="sticky left-[168px] z-10 w-28 border-b border-r border-slate-200 bg-white px-3 py-2.5 font-black text-slate-800 group-hover:bg-cyan-50">
+                  <td className="sticky left-[168px] z-10 w-28 border-b border-r border-slate-200 bg-white px-3 py-2.5 font-black text-slate-800 group-hover:bg-blue-50">
                     {rack.code || '-'}
                   </td>
-                  <td className="sticky left-[280px] z-10 w-44 border-b border-r border-slate-200 bg-white px-3 py-2.5 font-semibold text-slate-700 group-hover:bg-cyan-50">
+                  <td className="sticky left-[280px] z-10 w-44 border-b border-r border-slate-200 bg-white px-3 py-2.5 font-semibold text-slate-700 group-hover:bg-blue-50">
                     {rack.name || '-'}
                   </td>
                   <td className="border-b border-r border-slate-200 px-3 py-2.5 text-right">{safeInt(rack.height, 42)}</td>
@@ -654,13 +920,13 @@ export default function DcimView({
                   <td className="border-b border-r border-slate-200 px-3 py-2.5 text-right">{device ? safeInt(device.typical_power) : '-'}</td>
                   <td className="border-b border-r border-slate-200 px-3 py-2.5">{device?.asset_tag || '-'}</td>
                   <td className="border-b border-r border-slate-200 px-3 py-2.5">{device?.sn || '-'}</td>
-                  <td className="sticky right-0 z-20 border-b border-l border-slate-200 bg-white px-2 py-2.5 shadow-[-8px_0_16px_-14px_rgba(15,23,42,0.45)] group-hover:bg-cyan-50">
+                  <td className="sticky right-0 z-20 border-b border-l border-slate-200 bg-white px-2 py-2.5 shadow-[-8px_0_16px_-14px_rgba(15,23,42,0.45)] group-hover:bg-blue-50">
                     <div className="flex items-center justify-center gap-1">
                       <button
                         type="button"
                         onClick={() => openEditRack(rack)}
                         title="编辑机柜"
-                        className="rounded-lg p-2 text-slate-500 hover:bg-white hover:text-cyan-700"
+                        className="rounded-lg p-2 text-slate-500 hover:bg-white hover:text-blue-700"
                       >
                         <Edit3 className="h-4 w-4" />
                       </button>
