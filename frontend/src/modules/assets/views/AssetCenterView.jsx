@@ -478,15 +478,17 @@ function Pill({ children, tone = 'bg-slate-100 text-slate-700 ring-slate-200' })
 
 function IconTile({ icon: Icon, label, value, tone = 'text-slate-700', subtext }) {
   return (
-    <div className="asset-metric-card p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-sm font-black text-slate-500">{label}</div>
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-50">
+    <div className="asset-metric-card">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-xs font-black text-slate-500">{label}</div>
+          <div className="mt-2 text-2xl font-black leading-none text-slate-950">{value}</div>
+          <div className="mt-1 truncate text-xs font-semibold text-slate-500">{subtext}</div>
+        </div>
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-50">
           <Icon className={`h-4 w-4 ${tone}`} />
         </div>
       </div>
-      <div className="mt-4 text-3xl font-black text-slate-950">{value}</div>
-      <div className="mt-1 truncate text-sm font-semibold text-slate-500">{subtext}</div>
     </div>
   );
 }
@@ -939,15 +941,15 @@ function AssetOverview({ assets, summary, groupSummary, typeOptions, onNavigate,
     { key: 'offline', label: '不可达', count: assets.filter((asset) => asset.riskCodes.includes('offline')).length, tone: 'slate', icon: AlertTriangle },
   ];
   const toneClasses = {
-    amber: 'border-amber-200 bg-amber-50 text-amber-800',
-    rose: 'border-rose-200 bg-rose-50 text-rose-800',
-    blue: 'border-blue-200 bg-blue-50 text-blue-800',
-    slate: 'border-slate-200 bg-slate-50 text-slate-800',
+    amber: 'asset-priority-card--amber',
+    rose: 'asset-priority-card--rose',
+    blue: 'asset-priority-card--blue',
+    slate: 'asset-priority-card--slate',
   };
 
   return (
-    <div className="space-y-5">
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+    <div className="space-y-4">
+      <section className="asset-kpi-strip">
         <IconTile icon={HardDrive} label="资产总数" value={summary.total} subtext="纳管资产范围" tone="text-blue-600" />
         <IconTile icon={CheckCircle2} label="在线运行" value={summary.healthy} subtext={`${summary.offline} 条离线或未检测`} tone="text-emerald-600" />
         <IconTile icon={Database} label="配置备份" value={`${summary.backupRate}%`} subtext="设备配置采集" tone="text-amber-600" />
@@ -956,8 +958,8 @@ function AssetOverview({ assets, summary, groupSummary, typeOptions, onNavigate,
         <IconTile icon={AlertTriangle} label="风险资产" value={summary.riskAssets} subtext="需要优先处理" tone="text-rose-600" />
       </section>
 
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.65fr)]">
-        <div className="asset-hero-card p-6">
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.55fr)]">
+        <div className="asset-hero-card p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <div className="ui-eyebrow text-xs font-black uppercase">Asset Workspace</div>
@@ -973,7 +975,7 @@ function AssetOverview({ assets, summary, groupSummary, typeOptions, onNavigate,
               <ArrowUpDown className="h-4 w-4" />
             </button>
           </div>
-          <div className="mt-6 grid gap-3 sm:grid-cols-2 2xl:grid-cols-5">
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-5">
             {typeCards.map((item) => {
               const visual = getTypeCardVisual(item.key);
               const TypeIcon = visual.icon;
@@ -1030,7 +1032,7 @@ function AssetOverview({ assets, summary, groupSummary, typeOptions, onNavigate,
                 key={key}
                 type="button"
                 onClick={() => onNavigate({ risk: key })}
-                className={`flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-left transition hover:brightness-95 ${toneClasses[tone]}`}
+                className={`asset-priority-card ${toneClasses[tone]} flex items-center justify-between gap-3 px-4 py-3 text-left transition hover:border-blue-300/40`}
               >
                 <div className="flex min-w-0 items-center gap-2">
                   <Icon className="h-4 w-4 shrink-0" />
@@ -2856,15 +2858,15 @@ export default function AssetCenterView({
   }, [assets]);
 
   return (
-    <div className="asset-center-page h-full overflow-y-auto overflow-x-hidden p-5 lg:p-7">
-      <div className="mx-auto max-w-[1880px] space-y-6">
-        <section className="asset-hero-card flex flex-wrap items-center justify-between gap-5 p-6">
+    <div className="asset-center-page h-full overflow-y-auto overflow-x-hidden p-4 lg:p-5">
+      <div className="mx-auto max-w-[1880px] space-y-4">
+        <section className="asset-hero-card flex flex-wrap items-center justify-between gap-4 p-5">
           <div className="min-w-0">
             <div className="ui-eyebrow flex items-center gap-2 text-xs font-black uppercase">
               <ShieldCheck className="h-4 w-4" />
               V2 Asset Center
             </div>
-            <h1 className="mt-2 text-4xl font-black text-slate-950">资产中心</h1>
+            <h1 className="mt-2 text-3xl font-black text-slate-950">资产中心</h1>
             <div className="mt-2 text-base font-semibold text-slate-500">设备、配置、密码、自动化的统一资产工作台</div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2">

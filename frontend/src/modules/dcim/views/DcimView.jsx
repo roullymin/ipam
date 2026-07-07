@@ -600,7 +600,7 @@ export default function DcimView({
         </div>
       ) : null}
 
-      <section className="dcim-card p-3">
+      <section className="dcim-compact-bar p-3">
         <div className="flex flex-col gap-2 xl:flex-row xl:items-center">
           <div className="custom-scrollbar flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1">
             <button
@@ -609,10 +609,8 @@ export default function DcimView({
                 setSelectedRackFilter('');
                 setActiveLocation(null);
               }}
-              className={`flex shrink-0 items-center gap-3 rounded-xl border px-3 py-2 text-left transition ${
-                !activeLocation
-                  ? 'border-blue-300 bg-blue-50 text-blue-950 ring-2 ring-blue-100'
-                  : 'border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50/40'
+              className={`dcim-room-tab flex shrink-0 items-center gap-3 px-3 py-2 text-left transition ${
+                !activeLocation ? 'dcim-room-tab--active' : 'hover:border-blue-300/40 hover:text-blue-100'
               }`}
             >
               <ArrowLeft className="h-4 w-4 text-blue-500" />
@@ -632,10 +630,8 @@ export default function DcimView({
                     setSelectedRackFilter('');
                     setActiveLocation(datacenter.id);
                   }}
-                  className={`flex shrink-0 items-center gap-3 rounded-xl border px-3 py-2 text-left transition ${
-                    isActive
-                      ? 'border-blue-300 bg-blue-50 text-blue-950 ring-2 ring-blue-100'
-                      : 'border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50/40'
+                  className={`dcim-room-tab flex shrink-0 items-center gap-3 px-3 py-2 text-left transition ${
+                    isActive ? 'dcim-room-tab--active' : 'hover:border-blue-300/40 hover:text-blue-100'
                   }`}
                 >
                   <span className="max-w-[180px] truncate text-sm font-black">{datacenter.name}</span>
@@ -649,7 +645,7 @@ export default function DcimView({
           <button
             type="button"
             onClick={() => setShowRoomOverview((current) => !current)}
-            className="inline-flex h-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-black text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+            className="ui-secondary-button inline-flex h-9 shrink-0 items-center justify-center px-3 text-xs font-black transition"
           >
             {showRoomOverview ? '收起概览' : '展开概览'}
           </button>
@@ -677,7 +673,7 @@ export default function DcimView({
         ) : null}
       </section>
 
-      <section className="dcim-card px-4 py-3">
+      <section className="dcim-card shrink-0 px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2 text-sm font-bold text-blue-700">
@@ -706,26 +702,21 @@ export default function DcimView({
           </div>
         </div>
 
-        <div className="mt-3 grid grid-cols-2 divide-x divide-slate-200 rounded-xl border border-slate-200 bg-slate-50 md:grid-cols-4">
-          <div className="px-4 py-2.5">
-            <div className="text-xs font-bold text-slate-400">机柜</div>
-            <div className="mt-0.5 text-lg font-black text-slate-900">{summary.racks}</div>
-          </div>
-          <div className="px-4 py-2.5">
-            <div className="text-xs font-bold text-slate-400">设备</div>
-            <div className="mt-0.5 text-lg font-black text-slate-900">{summary.devices}</div>
-          </div>
-          <div className="px-4 py-2.5">
-            <div className="text-xs font-bold text-slate-400">额定功率</div>
-            <div className="mt-0.5 text-lg font-black text-slate-900">{summary.ratedPower} W</div>
-          </div>
-          <div className="px-4 py-2.5">
-            <div className="text-xs font-bold text-slate-400">典型功率</div>
-            <div className="mt-0.5 text-lg font-black text-slate-900">{summary.typicalPower} W</div>
-          </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {[
+            ['机柜', summary.racks],
+            ['设备', summary.devices],
+            ['额定功率', `${summary.ratedPower} W`],
+            ['典型功率', `${summary.typicalPower} W`],
+          ].map(([label, value]) => (
+            <span key={label} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-400">
+              {label}
+              <span className="ml-2 text-sm font-black text-slate-900">{value}</span>
+            </span>
+          ))}
         </div>
 
-        <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+        <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/60 p-2.5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="text-sm font-black text-slate-900">机柜矩阵看板</div>
@@ -741,7 +732,7 @@ export default function DcimView({
                 <button
                   type="button"
                   onClick={() => setSelectedRackFilter('')}
-                  className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                  className="ui-secondary-button rounded-xl px-3 py-2 text-xs font-bold"
                 >
                   清除机柜过滤
                 </button>
@@ -749,7 +740,7 @@ export default function DcimView({
               <button
                 type="button"
                 onClick={() => setShowRackMatrix((current) => !current)}
-                className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                className="ui-secondary-button rounded-xl px-3 py-2 text-xs font-bold"
               >
                 {showRackMatrix ? '收起矩阵' : '展开矩阵'}
               </button>
@@ -759,13 +750,43 @@ export default function DcimView({
           <div
             className={
               showRackMatrix
-                ? 'mt-3 grid max-h-36 grid-cols-[repeat(auto-fill,minmax(118px,1fr))] gap-2 overflow-auto pr-1'
+                ? 'mt-3 grid max-h-44 grid-cols-[repeat(auto-fill,minmax(118px,1fr))] gap-2 overflow-auto pr-1'
                 : 'custom-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1'
             }
           >
             {(showRackMatrix ? rackTiles : rackTiles.slice(0, 12)).map((tile) => {
               const isSelected = String(selectedRackFilter || '') === String(tile.rack.id);
               const isAlertTone = tile.tone === 'danger' || tile.tone === 'warn';
+              if (!showRackMatrix) {
+                return (
+                  <button
+                    key={tile.rack.id}
+                    type="button"
+                    onClick={() => setSelectedRackFilter(isSelected ? '' : tile.rack.id)}
+                    className={`dcim-rack-chip flex min-w-[166px] items-center justify-between gap-3 px-3 py-2 text-left text-xs font-bold transition ${
+                      isSelected ? 'dcim-rack-chip--active' : ''
+                    }`}
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-black text-slate-100">{tile.rack.code || tile.rack.name || '未编号机柜'}</span>
+                      <span className="mt-0.5 block truncate text-[11px] text-slate-500">
+                        {tile.devices.length} 台 · {tile.usedU}/{tile.height}U
+                      </span>
+                    </span>
+                    <span
+                      className={`rounded-full px-2 py-1 text-[11px] font-black ${
+                        tile.tone === 'danger'
+                          ? 'bg-rose-500/20 text-rose-100'
+                          : tile.tone === 'warn'
+                            ? 'bg-amber-500/20 text-amber-100'
+                            : 'bg-blue-500/15 text-blue-100'
+                      }`}
+                    >
+                      {tile.utilization}%
+                    </span>
+                  </button>
+                );
+              }
               const toneClass =
                 tile.tone === 'danger'
                   ? 'border-rose-400/70 bg-rose-600 text-white'
