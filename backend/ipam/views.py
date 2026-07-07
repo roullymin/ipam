@@ -1883,6 +1883,8 @@ def _backup_device_type_with_template_state(value):
     device_type = _normalize_backup_device_type(raw)
     known_markers = {
         'switch': ('switch', '交换'),
+        'switch_core': ('switch', '交换', 'core', '核心'),
+        'switch_access': ('switch', '交换', 'access', '接入'),
         'router': ('router', 'route', '路由'),
         'firewall': ('firewall', 'fw', '防火'),
     }
@@ -2470,6 +2472,7 @@ class SecretRecordViewSet(OptionalPaginationMixin, BaseViewSet):
                         'ssh_port': ssh_port,
                         'timeout_seconds': timeout_seconds,
                         'save_before_backup': _coerce_bool(request.data.get('save_before_backup'), True),
+                        'retention_count': 1,
                         'credential': secret,
                         'enabled': True,
                         'created_by': request.user if request.user.is_authenticated else None,
@@ -2588,13 +2591,39 @@ def _find_backup_credential(rack_device=None, ip_asset=None):
 
 def _normalize_backup_device_type(value):
     normalized = str(value or '').strip().lower()
+    compact = re.sub(r'[\s_\-/]+', '', normalized)
     if 'firewall' in normalized or '防火' in normalized or 'fw' == normalized:
         return 'firewall'
     if 'router' in normalized or '路由' in normalized:
         return 'router'
-    if 'switch' in normalized or '交换' in normalized or normalized in {'switch_core', 'switch_access'}:
+    if 'core' in normalized or '核心交换' in normalized or '内网核心交换' in normalized or compact == 'switchcore':
+        return 'switch_core'
+    if 'access' in normalized or '接入交换' in normalized or compact == 'switchaccess':
+        return 'switch_access'
+    if 'switch' in normalized or '交换' in normalized:
         return 'switch'
-    return normalized if normalized in {'switch', 'router', 'firewall'} else 'switch'
+    if 'load' in normalized or '负载均衡' in normalized or normalized == 'slb':
+        return 'load_balancer'
+    if 'waf' in normalized:
+        return 'waf'
+    if 'ids' in normalized or 'ips' in normalized or '入侵' in normalized:
+        return 'ids'
+    if 'wireless' in normalized or '无线控制' in normalized or 'wlc' in normalized:
+        return 'wireless_controller'
+    if normalized == 'ap' or '无线ap' in compact:
+        return 'ap'
+    if 'server' in normalized or '服务器' in normalized:
+        return 'server'
+    if 'storage' in normalized or '存储' in normalized:
+        return 'storage'
+    if 'security' in normalized or '安全' in normalized:
+        return 'security'
+    if '视频' in normalized or '会议' in normalized or '会商' in normalized or 'mcu' in normalized or 'smc' in normalized:
+        return 'video_conference'
+    if 'gateway' in normalized or '网关' in normalized:
+        return 'gateway'
+    valid = {choice[0] for choice in ConfigBackupTarget.DEVICE_TYPE_CHOICES}
+    return normalized if normalized in valid else 'switch'
 
 
 def _extract_management_host(value):
@@ -3059,7 +3088,7 @@ def ansible_provision(request):
         'ssh_port': _parse_positive_int(request.data.get('ssh_port'), 22, minimum=1, maximum=65535, field_name='SSH 端口'),
         'timeout_seconds': _parse_positive_int(request.data.get('timeout_seconds'), 30, minimum=5, maximum=600, field_name='连接超时'),
         'save_before_backup': _coerce_bool(request.data.get('save_before_backup'), True),
-        'retention_count': _parse_positive_int(request.data.get('retention_count'), 12, minimum=1, maximum=200, field_name='保留版本'),
+        'retention_count': _parse_positive_int(request.data.get('retention_count'), 1, minimum=1, maximum=200, field_name='保留版本'),
     }
     hosts = _build_ansible_hosts()
     selected_hosts = _ansible_host_selection(hosts, request.data)
@@ -3120,6 +3149,16 @@ class ConfigBackupTargetViewSet(OptionalPaginationMixin, BaseViewSet):
             management_ip = _extract_management_host(ip_asset.ip_address)
         if not management_ip:
             return Response({'detail': '请先为资产设置管理 IP。'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            retention_count = _parse_positive_int(
+                request.data.get('retention_count'),
+                1,
+                minimum=1,
+                maximum=200,
+                field_name='保留版本',
+            )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         credential_id = request.data.get('credential')
         credential = SecretRecord.objects.filter(pk=credential_id).first() if credential_id else None
@@ -3148,6 +3187,7 @@ class ConfigBackupTargetViewSet(OptionalPaginationMixin, BaseViewSet):
                 'ssh_port': request.data.get('ssh_port') or 22,
                 'timeout_seconds': request.data.get('timeout_seconds') or 30,
                 'save_before_backup': _coerce_bool(request.data.get('save_before_backup'), True),
+                'retention_count': retention_count,
                 'credential': credential,
                 'enabled': True,
                 'created_by': request.user if request.user.is_authenticated else None,
@@ -3262,6 +3302,32 @@ def _resolve_config_backup_version_path(version):
     return backup_dir, file_path
 
 
+def _candidate_config_backup_version_path(version):
+    if not version.relative_path:
+        return None
+    backup_dir = os.path.abspath(get_config_backup_dir(settings.BASE_DIR))
+    relative_path = version.relative_path.replace('/', os.sep)
+    file_path = os.path.abspath(os.path.join(backup_dir, relative_path))
+    if file_path != backup_dir and not file_path.startswith(f'{backup_dir}{os.sep}'):
+        raise PermissionDenied('备份文件路径非法。')
+    return file_path
+
+
+def _refresh_config_backup_target_state(target):
+    latest = target.versions.order_by('-started_at', '-id').first()
+    if latest is None:
+        target.last_status = 'not_run'
+        target.last_error = ''
+        target.last_backup_at = None
+        target.last_duration_seconds = 0
+    else:
+        target.last_status = latest.status
+        target.last_error = latest.error_message if latest.status != 'success' else ''
+        target.last_backup_at = latest.finished_at or latest.started_at
+        target.last_duration_seconds = latest.duration_seconds or 0
+    target.save(update_fields=['last_status', 'last_error', 'last_backup_at', 'last_duration_seconds', 'updated_at'])
+
+
 def _read_config_backup_file(file_path, limit=1024 * 1024):
     opener = gzip.open if file_path.endswith('.gz') else open
     with opener(file_path, 'rb') as handle:
@@ -3272,9 +3338,10 @@ def _read_config_backup_file(file_path, limit=1024 * 1024):
     return content.decode('utf-8', errors='replace'), truncated
 
 
-class ConfigBackupVersionViewSet(OptionalPaginationMixin, viewsets.ReadOnlyModelViewSet):
+class ConfigBackupVersionViewSet(OptionalPaginationMixin, viewsets.ModelViewSet):
     authentication_classes = (SessionAuthentication, BasicAuthentication)
     permission_classes = [DcimAccessPermission]
+    http_method_names = ['get', 'delete', 'head', 'options']
     queryset = ConfigBackupVersion.objects.select_related('target', 'target__rack_device', 'target__ip_address').all()
     serializer_class = ConfigBackupVersionSerializer
     filter_backends = [filters.SearchFilter]
@@ -3309,6 +3376,22 @@ class ConfigBackupVersionViewSet(OptionalPaginationMixin, viewsets.ReadOnlyModel
                 'truncated': truncated,
             }
         )
+
+    def destroy(self, request, *args, **kwargs):
+        version = self.get_object()
+        target = version.target
+        filename = version.filename or f'版本 {version.pk}'
+        file_path = _candidate_config_backup_version_path(version)
+        if file_path:
+            try:
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+            except OSError as exc:
+                return Response({'detail': f'删除配置文件失败：{exc}'}, status=status.HTTP_400_BAD_REQUEST)
+        record_audit(request, 'config_backup_version', 'delete', version, f'删除配置备份版本：{filename}')
+        version.delete()
+        _refresh_config_backup_target_state(target)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class BlocklistViewSet(OptionalPaginationMixin, BaseViewSet):

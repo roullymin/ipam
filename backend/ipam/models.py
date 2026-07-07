@@ -807,9 +807,21 @@ class SecretAuditEvent(models.Model):
 
 class ConfigBackupTarget(models.Model):
     DEVICE_TYPE_CHOICES = [
+        ('switch_core', '核心交换机'),
+        ('switch_access', '接入交换机'),
         ('switch', '交换机'),
         ('router', '路由器'),
         ('firewall', '防火墙'),
+        ('load_balancer', '负载均衡'),
+        ('waf', 'WAF'),
+        ('ids', 'IDS/IPS'),
+        ('wireless_controller', '无线控制器'),
+        ('ap', '无线 AP'),
+        ('server', '服务器'),
+        ('storage', '存储设备'),
+        ('security', '安全设备'),
+        ('video_conference', '会议/视频设备'),
+        ('gateway', '网关'),
         ('other', '其他'),
     ]
     COMMAND_PROFILE_CHOICES = [
@@ -858,7 +870,7 @@ class ConfigBackupTarget(models.Model):
         verbose_name='登录凭据',
     )
     enabled = models.BooleanField('启用备份', default=True)
-    retention_count = models.PositiveSmallIntegerField('保留版本数', default=12)
+    retention_count = models.PositiveSmallIntegerField('保留版本数', default=1)
     schedule_label = models.CharField('计划说明', max_length=120, blank=True, default='每周日凌晨')
     last_status = models.CharField('最近状态', max_length=20, choices=STATUS_CHOICES, default='not_run')
     last_error = models.TextField('最近失败原因', blank=True)
@@ -911,7 +923,7 @@ class ConfigBackupPolicy(models.Model):
     execution_strategy = models.CharField('执行策略', max_length=32, choices=STRATEGY_CHOICES, default='all')
     strategy_device_type = models.CharField('策略设备类型', max_length=32, blank=True, default='')
     strategy_datacenter = models.CharField('策略机房', max_length=120, blank=True, default='')
-    retention_count = models.PositiveSmallIntegerField('默认保留版本数', default=12)
+    retention_count = models.PositiveSmallIntegerField('默认保留版本数', default=1)
     email_enabled = models.BooleanField('启用邮件通知', default=False)
     email_recipients = models.TextField('收件人', blank=True, default='')
     notify_on_success = models.BooleanField('成功时通知', default=False)

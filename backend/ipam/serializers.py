@@ -709,7 +709,7 @@ class ConfigBackupTargetSerializer(serializers.ModelSerializer):
 
         ssh_port = attrs.get('ssh_port', instance.ssh_port if instance else 22)
         timeout_seconds = attrs.get('timeout_seconds', instance.timeout_seconds if instance else 30)
-        retention_count = attrs.get('retention_count', instance.retention_count if instance else 12)
+        retention_count = attrs.get('retention_count', instance.retention_count if instance else 1)
         try:
             ssh_port_value = int(ssh_port)
             timeout_seconds_value = int(timeout_seconds)
@@ -775,7 +775,7 @@ class ConfigBackupPolicySerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
-        retention_count = attrs.get('retention_count', self.instance.retention_count if self.instance else 12)
+        retention_count = attrs.get('retention_count', self.instance.retention_count if self.instance else 1)
         try:
             retention_count_value = int(retention_count)
         except (TypeError, ValueError):

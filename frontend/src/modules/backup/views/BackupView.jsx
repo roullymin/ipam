@@ -20,6 +20,7 @@ import {
   Settings2,
   ShieldCheck,
   Terminal,
+  Trash2,
   X,
 } from 'lucide-react';
 import { safeFetch } from '../../../lib/api';
@@ -90,9 +91,21 @@ const WEEKDAY_OPTIONS = [
 ];
 
 const DEVICE_TYPE_LABELS = {
+  switch_core: '核心交换机',
+  switch_access: '接入交换机',
   switch: '交换机',
   router: '路由器',
   firewall: '防火墙',
+  load_balancer: '负载均衡',
+  waf: 'WAF',
+  ids: 'IDS/IPS',
+  wireless_controller: '无线控制器',
+  ap: '无线 AP',
+  server: '服务器',
+  storage: '存储设备',
+  security: '安全设备',
+  video_conference: '会议/视频设备',
+  gateway: '网关',
   other: '其他',
 };
 
@@ -105,7 +118,7 @@ function createPolicyForm(policy = {}) {
     execution_strategy: policy.execution_strategy || 'all',
     strategy_device_type: policy.strategy_device_type || '',
     strategy_datacenter: policy.strategy_datacenter || '',
-    retention_count: policy.retention_count || 12,
+    retention_count: policy.retention_count || 1,
     email_enabled: !!policy.email_enabled,
     email_recipients: policy.email_recipients || '',
     notify_on_success: !!policy.notify_on_success,
@@ -599,6 +612,26 @@ function NetworkBackupPanel({ configBackups, onRefresh }) {
     window.open(`/api/config-backup-versions/${version.id}/download/`, '_blank', 'noopener,noreferrer');
   };
 
+  const deleteVersion = async (version) => {
+    if (!version?.id) return;
+    const filename = version.filename || version.name || `版本 ${version.id}`;
+    if (!window.confirm(`确定删除配置版本「${filename}」吗？文件和版本记录都会删除。`)) return;
+    setBusyAction(`delete:${version.id}`);
+    try {
+      const response = await safeFetch(`/api/config-backup-versions/${version.id}/`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        window.alert(await readApiError(response, '删除配置版本失败。'));
+        return;
+      }
+      setFallbackConfigBackups(null);
+      await refreshBackupData();
+    } finally {
+      setBusyAction('');
+    }
+  };
+
   const testTarget = async (target) => {
     setBusyAction(`test:${target.id}`);
     try {
@@ -929,6 +962,15 @@ function NetworkBackupPanel({ configBackups, onRefresh }) {
                         >
                           <Download className="h-3.5 w-3.5" />
                           下载
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteVersion(version)}
+                          disabled={busyAction === `delete:${version.id}`}
+                          className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-white px-2.5 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          删除
                         </button>
                       </div>
                     </td>

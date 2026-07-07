@@ -191,17 +191,32 @@ def _write_backup_file(target, config_text, backup_dir, now):
     }
 
 
+def _delete_version_file(version, backup_dir):
+    if not version.relative_path:
+        return
+    file_path = os.path.abspath(os.path.join(backup_dir, version.relative_path.replace('/', os.sep)))
+    backup_root = os.path.abspath(backup_dir)
+    if file_path != backup_root and not file_path.startswith(f'{backup_root}{os.sep}'):
+        return
+    try:
+        if os.path.isfile(file_path):
+            os.remove(file_path)
+    except OSError:
+        pass
+
+
 def _enforce_retention(target, backup_dir):
-    retention_count = max(int(target.retention_count or 0), 1)
+    retention_count = 1
+    if getattr(target, 'retention_count', None):
+        retention_count = min(max(int(target.retention_count or 1), 1), 1)
+
+    for version in target.versions.filter(status='failed'):
+        _delete_version_file(version, backup_dir)
+        version.delete()
+
     versions = list(target.versions.filter(status='success').order_by('-started_at', '-id'))
     for version in versions[retention_count:]:
-        if version.relative_path:
-            file_path = os.path.join(backup_dir, version.relative_path.replace('/', os.sep))
-            try:
-                if os.path.isfile(file_path):
-                    os.remove(file_path)
-            except OSError:
-                pass
+        _delete_version_file(version, backup_dir)
         version.delete()
 
 

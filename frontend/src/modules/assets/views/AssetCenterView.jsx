@@ -189,9 +189,17 @@ const DEVICE_TYPE_LABELS = {
   switch: '交换机',
   router: '路由器',
   firewall: '防火墙',
+  load_balancer: '负载均衡',
+  waf: 'WAF',
+  ids: 'IDS/IPS',
+  ips: 'IDS/IPS',
+  wireless_controller: '无线控制器',
+  ap: '无线 AP',
   storage: '存储',
   storage_device: '存储',
   security: '安全设备',
+  video_conference: '会议/视频设备',
+  gateway: '网关',
   ups: 'UPS',
   pdu: 'PDU',
   odf: 'ODF',
@@ -201,6 +209,71 @@ const DEVICE_TYPE_LABELS = {
   unknown: '未分类',
 };
 
+const CANONICAL_DEVICE_TYPES = [
+  { key: 'firewall', label: DEVICE_TYPE_LABELS.firewall, group: 'network', keywords: ['firewall', 'fw', '防火墙', '出口墙'] },
+  { key: 'switch_core', label: DEVICE_TYPE_LABELS.switch_core, group: 'network', keywords: ['switch_core', 'core switch', '核心交换', '核心交换机', '汇聚交换', '内网核心交换'] },
+  { key: 'switch_access', label: DEVICE_TYPE_LABELS.switch_access, group: 'network', keywords: ['switch_access', 'access switch', '接入交换', '接入交换机'] },
+  { key: 'switch', label: DEVICE_TYPE_LABELS.switch, group: 'network', keywords: ['switch', '交换机', '交换'] },
+  { key: 'router', label: DEVICE_TYPE_LABELS.router, group: 'network', keywords: ['router', 'route', '路由器', '路由'] },
+  { key: 'load_balancer', label: DEVICE_TYPE_LABELS.load_balancer, group: 'network', keywords: ['load_balancer', 'load balancer', '负载均衡', 'slb', 'f5'] },
+  { key: 'waf', label: DEVICE_TYPE_LABELS.waf, group: 'security', keywords: ['waf', 'web应用防火墙'] },
+  { key: 'ids', label: DEVICE_TYPE_LABELS.ids, group: 'security', keywords: ['ids', 'ips', '入侵检测', '入侵防御'] },
+  { key: 'wireless_controller', label: DEVICE_TYPE_LABELS.wireless_controller, group: 'network', keywords: ['wireless_controller', '无线控制器', '无线ac', 'wlc'] },
+  { key: 'ap', label: DEVICE_TYPE_LABELS.ap, group: 'network', keywords: ['wireless ap', '无线ap'] },
+  { key: 'video_conference', label: DEVICE_TYPE_LABELS.video_conference, group: 'collaboration', keywords: ['视频会商', '视频会议', '会商', '会议终端', '媒体融合', 'polycom', 'kedacom', 'mcu', 'smc'] },
+  { key: 'server', label: DEVICE_TYPE_LABELS.server, group: 'compute', keywords: ['server', '服务器'] },
+  { key: 'vm', label: DEVICE_TYPE_LABELS.vm, group: 'compute', keywords: ['vm', '虚拟机'] },
+  { key: 'storage', label: DEVICE_TYPE_LABELS.storage, group: 'storage', keywords: ['storage', '存储', '磁盘阵列'] },
+  { key: 'security', label: DEVICE_TYPE_LABELS.security, group: 'security', keywords: ['security', '安全设备', '安全网关', '网闸'] },
+  { key: 'gateway', label: DEVICE_TYPE_LABELS.gateway, group: 'network', keywords: ['gateway', '网关'] },
+  { key: 'odf', label: DEVICE_TYPE_LABELS.odf, group: 'passive', keywords: ['odf', '配线架', '配线'] },
+  { key: 'ups', label: DEVICE_TYPE_LABELS.ups, group: 'facility', keywords: ['ups'] },
+  { key: 'pdu', label: DEVICE_TYPE_LABELS.pdu, group: 'facility', keywords: ['pdu'] },
+];
+
+const CANONICAL_DEVICE_TYPE_MAP = new Map(
+  CANONICAL_DEVICE_TYPES.map((item) => [item.key, item]),
+);
+
+const DEVICE_TYPE_OPTION_ORDER = new Map(
+  CANONICAL_DEVICE_TYPES.map((item, index) => [item.key, index]),
+);
+
+const TYPE_TEXT_ALIASES = {
+  storage_device: 'storage',
+  meeting_device: 'video_conference',
+  video_gateway: 'video_conference',
+};
+
+const LOW_PRIORITY_TYPE_KEYS = new Set(['odf', 'ups', 'pdu', 'gateway', 'storage', 'security', 'server']);
+
+const normalizeTypeText = (value) => normalize(value).replace(/[\s_\-\\/]+/g, '');
+
+function classifyAssetType(rawType, name = '') {
+  const rawKey = normalize(rawType);
+  const aliasedKey = TYPE_TEXT_ALIASES[rawKey] || rawKey;
+  if (CANONICAL_DEVICE_TYPE_MAP.has(aliasedKey)) {
+    return CANONICAL_DEVICE_TYPE_MAP.get(aliasedKey);
+  }
+
+  const text = normalizeTypeText(`${rawType || ''} ${name || ''}`);
+  const matched = CANONICAL_DEVICE_TYPES.find((item) =>
+    !LOW_PRIORITY_TYPE_KEYS.has(item.key)
+    && item.keywords.some((keyword) => text.includes(normalizeTypeText(keyword))),
+  );
+  if (matched) return matched;
+
+  const secondaryMatched = CANONICAL_DEVICE_TYPES.find((item) =>
+    item.keywords.some((keyword) => text.includes(normalizeTypeText(keyword))),
+  );
+  if (secondaryMatched) return secondaryMatched;
+
+  if (!rawType && !name) {
+    return { key: 'unknown', label: DEVICE_TYPE_LABELS.unknown, group: 'unknown' };
+  }
+  return { key: 'other', label: DEVICE_TYPE_LABELS.other, group: 'other' };
+}
+
 const ASSET_CENTER_INCLUDED_TYPES = new Set([
   'server',
   'vm',
@@ -209,16 +282,17 @@ const ASSET_CENTER_INCLUDED_TYPES = new Set([
   'switch',
   'router',
   'firewall',
-  'storage',
-  'storage_device',
-  'security',
   'load_balancer',
   'waf',
-  'vpn',
   'ids',
   'ips',
   'wireless_controller',
   'ap',
+  'storage',
+  'storage_device',
+  'security',
+  'video_conference',
+  'gateway',
 ]);
 
 const ASSET_CENTER_EXCLUDED_TYPES = new Set([
@@ -283,12 +357,14 @@ const ENDPOINT_TYPE_KEYWORDS = [
 
 function isAssetCenterInfrastructure(record = {}) {
   const rawType = normalize(record.device_type || record.type);
-  const label = normalize(DEVICE_TYPE_LABELS[record.device_type] || record.device_type || record.type || '');
+  const typeInfo = classifyAssetType(record.device_type || record.type, record.name || record.device_name);
+  const label = normalize(typeInfo.label || DEVICE_TYPE_LABELS[record.device_type] || record.device_type || record.type || '');
   const name = normalize(record.name || record.device_name || '');
   const text = `${rawType} ${label} ${name}`;
   if (ASSET_CENTER_INCLUDED_TYPES.has(rawType)) return true;
-  if (ASSET_CENTER_EXCLUDED_TYPES.has(rawType)) return false;
+  if (ASSET_CENTER_EXCLUDED_TYPES.has(rawType) && !['other', 'unknown'].includes(rawType)) return false;
   if (ENDPOINT_TYPE_KEYWORDS.some((keyword) => text.includes(normalize(keyword)))) return false;
+  if (['network', 'security', 'compute', 'storage', 'collaboration'].includes(typeInfo.group)) return true;
   return INFRASTRUCTURE_TYPE_KEYWORDS.some((keyword) => text.includes(normalize(keyword)));
 }
 
@@ -377,7 +453,7 @@ const createBackupTargetForm = (asset) => ({
   ssh_port: asset?.backup?.targetSshPort || 22,
   timeout_seconds: asset?.backup?.targetTimeoutSeconds || 30,
   save_before_backup: asset?.backup?.targetSaveBeforeBackup ?? true,
-  retention_count: asset?.backup?.targetRetentionCount || 12,
+  retention_count: asset?.backup?.targetRetentionCount || 1,
   credential: asset?.backup?.targetCredentialId || asset?.credential?.items?.[0]?.id || '',
 });
 
@@ -504,7 +580,7 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
         targetSshPort: target?.ssh_port || 22,
         targetTimeoutSeconds: target?.timeout_seconds || 30,
         targetSaveBeforeBackup: target?.save_before_backup ?? true,
-        targetRetentionCount: target?.retention_count || 12,
+        targetRetentionCount: target?.retention_count || 1,
         targetError: target?.last_error || '',
       };
     }
@@ -535,7 +611,7 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
       targetSshPort: target?.ssh_port || 22,
       targetTimeoutSeconds: target?.timeout_seconds || 30,
       targetSaveBeforeBackup: target?.save_before_backup ?? true,
-      targetRetentionCount: target?.retention_count || 12,
+      targetRetentionCount: target?.retention_count || 1,
       targetError: target?.last_error || '',
     };
   };
@@ -551,7 +627,8 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
     const managementIp = device.mgmt_ip || relatedIps[0]?.ip_address || '';
     const backup = getConfigBackupState(managementIp);
     const assetName = safeText(device.name, `Device ${device.id}`);
-    const assetType = device.device_type || 'unknown';
+    const assetTypeInfo = classifyAssetType(device.device_type, assetName);
+    const assetType = assetTypeInfo.key;
     const assetVendor = device.brand || '';
     const automation = buildAutomationState(
       {
@@ -576,7 +653,9 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
       deviceId: device.id,
       name: assetName,
       type: assetType,
-      typeLabel: DEVICE_TYPE_LABELS[assetType] || assetType || DEVICE_TYPE_LABELS.unknown,
+      rawType: device.device_type || '',
+      typeLabel: assetTypeInfo.label,
+      typeGroup: assetTypeInfo.group,
       vendor: assetVendor,
       model: device.model || '',
       osVersion: device.os_version || '',
@@ -615,7 +694,8 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
       const status = ip.status || 'unknown';
       const backup = getConfigBackupState(ip.ip_address);
       const assetName = safeText(ip.device_name, ip.ip_address);
-      const assetType = ip.device_type || 'unknown';
+      const assetTypeInfo = classifyAssetType(ip.device_type, assetName);
+      const assetType = assetTypeInfo.key;
       const automation = buildAutomationState(
         {
           name: assetName,
@@ -639,7 +719,9 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
         deviceId: null,
         name: assetName,
         type: assetType,
-        typeLabel: DEVICE_TYPE_LABELS[assetType] || assetType || DEVICE_TYPE_LABELS.unknown,
+        rawType: ip.device_type || '',
+        typeLabel: assetTypeInfo.label,
+        typeGroup: assetTypeInfo.group,
         vendor: '',
         model: '',
         osVersion: '',
@@ -2151,7 +2233,7 @@ export default function AssetCenterView({
         ssh_port: Number(backupTargetForm.ssh_port || 22),
         timeout_seconds: Number(backupTargetForm.timeout_seconds || 30),
         save_before_backup: !!backupTargetForm.save_before_backup,
-        retention_count: Number(backupTargetForm.retention_count || 12),
+        retention_count: Number(backupTargetForm.retention_count || 1),
         credential: backupTargetForm.credential || null,
       };
       const response = await safeFetch(
@@ -2263,7 +2345,7 @@ export default function AssetCenterView({
           ssh_port: 22,
           timeout_seconds: 30,
           save_before_backup: true,
-          retention_count: 12,
+          retention_count: 1,
           credential: asset.credential.items?.[0]?.id || null,
         }),
       });
@@ -2319,7 +2401,7 @@ export default function AssetCenterView({
           ssh_port: asset.backup.targetSshPort || 22,
           timeout_seconds: asset.backup.targetTimeoutSeconds || 30,
           save_before_backup: asset.backup.targetSaveBeforeBackup ?? true,
-          retention_count: asset.backup.targetRetentionCount || 12,
+          retention_count: asset.backup.targetRetentionCount || 1,
         }),
       });
       if (!response.ok) {
@@ -2367,7 +2449,11 @@ export default function AssetCenterView({
   const typeOptions = useMemo(() => {
     const entries = new Map();
     assets.forEach((asset) => entries.set(asset.type, asset.typeLabel));
-    return Array.from(entries.entries()).sort((left, right) => left[1].localeCompare(right[1], 'zh-CN'));
+    return Array.from(entries.entries()).sort((left, right) => {
+      const leftOrder = DEVICE_TYPE_OPTION_ORDER.get(left[0]) ?? 999;
+      const rightOrder = DEVICE_TYPE_OPTION_ORDER.get(right[0]) ?? 999;
+      return leftOrder - rightOrder || left[1].localeCompare(right[1], 'zh-CN');
+    });
   }, [assets]);
 
   const summary = useMemo(() => {

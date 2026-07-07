@@ -98,6 +98,7 @@ export default function DcimView({
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedRackFilter, setSelectedRackFilter] = useState('');
+  const [showRoomOverview, setShowRoomOverview] = useState(false);
 
   const datacenterList = asArray(datacenters);
   const allRacks = asArray(racks);
@@ -333,68 +334,80 @@ export default function DcimView({
         </div>
       ) : null}
 
-      <section className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
-        <button
-          type="button"
-          onClick={() => {
-            setSelectedRackFilter('');
-            setActiveLocation(null);
-          }}
-          className={`rounded-xl border p-3 text-left shadow-sm transition ${
-            !activeLocation
-              ? 'border-cyan-300 bg-cyan-50 ring-2 ring-cyan-100'
-              : 'border-slate-200 bg-white hover:border-cyan-200 hover:bg-cyan-50/40'
-          }`}
-        >
-          <div className="text-[11px] font-black uppercase tracking-[0.16em] text-cyan-700">全部机房</div>
-          <div className="mt-1 text-lg font-black text-slate-950">基础设施总览</div>
-          <div className="mt-0.5 text-xs text-slate-500">
-            {globalSummary.datacenters} 个机房 / {globalSummary.racks} 个机柜
-          </div>
-          <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-            <div className="rounded-lg bg-white/80 px-3 py-1.5">
-              <div className="text-xs text-slate-400">设备</div>
-              <div className="font-black text-slate-900">{globalSummary.devices}</div>
-            </div>
-            <div className="rounded-lg bg-white/80 px-3 py-1.5">
-              <div className="text-xs text-slate-400">U 位利用</div>
-              <div className="font-black text-slate-900">{globalSummary.utilization}%</div>
-            </div>
-          </div>
-        </button>
-
-        {datacenterSummaries.map(({ datacenter, racks: rackCount, devices: deviceCount, ratedPower, utilization }) => {
-          const isActive = String(activeLocation || '') === String(datacenter.id);
-          return (
+      <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="flex flex-col gap-2 xl:flex-row xl:items-center">
+          <div className="custom-scrollbar flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1">
             <button
-              key={datacenter.id}
               type="button"
               onClick={() => {
                 setSelectedRackFilter('');
-                setActiveLocation(datacenter.id);
+                setActiveLocation(null);
               }}
-              className={`rounded-xl border p-3 text-left shadow-sm transition ${
-                isActive
-                  ? 'border-cyan-300 bg-cyan-50 ring-2 ring-cyan-100'
-                  : 'border-slate-200 bg-white hover:border-cyan-200 hover:bg-cyan-50/40'
+              className={`flex shrink-0 items-center gap-3 rounded-xl border px-3 py-2 text-left transition ${
+                !activeLocation
+                  ? 'border-cyan-300 bg-cyan-50 text-cyan-950 ring-2 ring-cyan-100'
+                  : 'border-slate-200 bg-white text-slate-700 hover:border-cyan-200 hover:bg-cyan-50/40'
               }`}
             >
-              <div className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">机房</div>
-              <div className="mt-1 text-lg font-black text-slate-950">{datacenter.name}</div>
-              <div className="mt-0.5 text-xs text-slate-500">{datacenter.location || '未填写位置'}</div>
-              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                <div className="rounded-lg bg-white/80 px-3 py-1.5">
-                  <div className="text-xs text-slate-400">机柜 / 设备</div>
-                  <div className="font-black text-slate-900">{rackCount} / {deviceCount}</div>
-                </div>
-                <div className="rounded-lg bg-white/80 px-3 py-1.5">
-                  <div className="text-xs text-slate-400">功率 / U 位</div>
-                  <div className="font-black text-slate-900">{ratedPower}W / {utilization}%</div>
+              <span className="text-sm font-black">全部机房</span>
+              <span className="text-xs font-bold text-slate-500">
+                {globalSummary.datacenters} 机房 · {globalSummary.racks} 机柜 · {globalSummary.devices} 设备
+              </span>
+            </button>
+
+            {datacenterSummaries.map(({ datacenter, racks: rackCount, devices: deviceCount, utilization }) => {
+              const isActive = String(activeLocation || '') === String(datacenter.id);
+              return (
+                <button
+                  key={datacenter.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedRackFilter('');
+                    setActiveLocation(datacenter.id);
+                  }}
+                  className={`flex shrink-0 items-center gap-3 rounded-xl border px-3 py-2 text-left transition ${
+                    isActive
+                      ? 'border-cyan-300 bg-cyan-50 text-cyan-950 ring-2 ring-cyan-100'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-cyan-200 hover:bg-cyan-50/40'
+                  }`}
+                >
+                  <span className="max-w-[180px] truncate text-sm font-black">{datacenter.name}</span>
+                  <span className="whitespace-nowrap text-xs font-bold text-slate-500">
+                    {rackCount} 机柜 · {deviceCount} 设备 · U {utilization}%
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowRoomOverview((current) => !current)}
+            className="inline-flex h-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-black text-slate-600 transition hover:border-cyan-200 hover:bg-cyan-50 hover:text-cyan-700"
+          >
+            {showRoomOverview ? '收起概览' : '展开概览'}
+          </button>
+        </div>
+
+        {showRoomOverview ? (
+          <div className="mt-3 grid gap-2 md:grid-cols-2 2xl:grid-cols-4">
+            <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2">
+              <div className="text-xs font-black text-cyan-700">全部资源</div>
+              <div className="mt-1 text-lg font-black text-slate-950">{globalSummary.racks} 机柜 / {globalSummary.devices} 设备</div>
+              <div className="text-xs text-slate-500">U 位利用 {globalSummary.utilization}%</div>
+            </div>
+            {datacenterSummaries.map(({ datacenter, racks: rackCount, devices: deviceCount, ratedPower, utilization }) => (
+              <div key={datacenter.id} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="truncate text-xs font-black text-slate-500">{datacenter.location || '未填写位置'}</div>
+                <div className="mt-1 truncate text-lg font-black text-slate-950">{datacenter.name}</div>
+                <div className="mt-1 grid grid-cols-3 gap-2 text-xs font-bold text-slate-600">
+                  <span>{rackCount} 机柜</span>
+                  <span>{deviceCount} 设备</span>
+                  <span>{ratedPower}W / {utilization}%</span>
                 </div>
               </div>
-            </button>
-          );
-        })}
+            ))}
+          </div>
+        ) : null}
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
