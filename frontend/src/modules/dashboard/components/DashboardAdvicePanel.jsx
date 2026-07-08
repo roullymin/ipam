@@ -6,7 +6,7 @@ function AdviceCard({ title, body, onClick }) {
   return (
     <button
       onClick={onClick}
-      className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-left transition hover:border-blue-200 hover:bg-white"
+      className="dashboard-action-button w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-left transition hover:border-blue-200 hover:bg-white"
       type="button"
     >
       <div className="text-sm font-bold text-slate-900">{title}</div>

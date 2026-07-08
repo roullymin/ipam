@@ -4,7 +4,7 @@ import { Activity, BarChart3 } from 'lucide-react';
 function MetricBadge({ icon: Icon, label, value, onClick, index }) {
   const content = (
     <>
-      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/80 text-sky-600 shadow-sm">
+      <span className="dashboard-metric-icon flex h-6 w-6 items-center justify-center rounded-full bg-white/80 text-sky-600 shadow-sm">
         <Icon className="h-3.5 w-3.5" />
       </span>
       <span className="min-w-0 flex-1 truncate text-slate-700">{label}</span>
@@ -33,9 +33,9 @@ function MetricBadge({ icon: Icon, label, value, onClick, index }) {
 
 function SummaryTile({ icon: Icon, label, value, helper, index }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm">
+    <div className="dashboard-summary-tile rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-700">
+        <div className="dashboard-summary-icon flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-700">
           <Icon className="h-4 w-4" />
         </div>
         <div className="dashboard-mini-bars dashboard-mini-bars-compact" aria-hidden="true">
@@ -87,7 +87,7 @@ export default function DashboardHero({
         </div>
 
         <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="col-span-full flex min-h-14 items-center justify-between rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 shadow-sm xl:col-span-4">
+          <div className="dashboard-indicator-header col-span-full flex min-h-14 items-center justify-between rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 shadow-sm xl:col-span-4">
             <div>
               <div className="text-sm font-black text-slate-900">运行指标概览</div>
               <div className="mt-0.5 text-xs text-slate-500">容量、地址、设备风险按当前数据实时汇总，点击下方模块进入工作区。</div>

@@ -11,7 +11,7 @@ export default function DashboardQuickActions({ title, subtitle, actions, onNavi
           <button
             key={action.label}
             onClick={() => onNavigate?.(action.target)}
-            className="flex min-h-11 items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-left text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50/60"
+            className="dashboard-action-button flex min-h-11 items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-left text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50/60"
             type="button"
           >
             <span>{action.label}</span>

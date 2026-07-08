@@ -5,7 +5,7 @@ import DashboardPanel from './DashboardPanel';
 
 function VersionCard({ label, value, helper }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+    <div className="dashboard-version-card rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
       <div className="text-xs font-bold text-slate-500">{label}</div>
       <div className="mt-2 truncate text-base font-black text-slate-900">{value}</div>
       <div className="mt-1 text-sm leading-5 text-slate-500">{helper}</div>
