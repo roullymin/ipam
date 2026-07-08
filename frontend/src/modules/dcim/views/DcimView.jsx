@@ -1,75 +1,17 @@
-﻿import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  AlignJustify,
-  Calculator,
-  Code,
-  Columns,
-  FileText,
-  Folder,
-  HardDrive,
-  Image as ImageIcon,
+  AlertTriangle,
+  Download,
+  Edit3,
+  FileSpreadsheet,
   Loader2,
-  MapPin,
-  Maximize,
   Plus,
+  RefreshCw,
+  Search,
   Server,
+  Trash2,
   Upload,
-  Zap,
 } from 'lucide-react';
-import RackElevation from '../../../components/RackElevation';
-import { DcimRackCard, DcimRackSidebar } from '../components';
-
-const TEXT = {
-  areaTitle: '机房列表',
-  areaHint: '选择一个机房，查看机柜容量和立面详情。',
-  addDatacenter: '新增机房',
-  locationFallback: '未填写位置',
-  overviewEyebrow: '容量与电力总览',
-  cardView: '卡片视图',
-  elevationView: '立面视图',
-  downloadTemplate: '下载模板',
-  importAssets: '导入资产',
-  exportExcel: 'Excel',
-  exportHtml: 'HTML',
-  exportImage: '导出图片',
-  readonlyOverview: '只读总览',
-  elevationWindow: '立面新窗口',
-  addRack: '新增机柜',
-  rackCount: '机柜数',
-  deviceCount: '设备数',
-  plannedPower: '规划功率',
-  actualPower: '实际功率',
-  utilization: '利用率',
-  freeUnits: '剩余 U 位',
-  standardRack: '标准机柜',
-  noDatacenter: '请先选择机房',
-  noDatacenterHint: '选中机房后，这里会展示该机房的总览、机柜卡片和立面布局。',
-  noRacks: '该机房还没有机柜',
-  noRacksHint: '先新增机柜，再继续放置设备和维护位置信息。',
-  rackCodeFallback: '未命名机柜',
-  detail: '查看详情',
-  rackElevation: '机柜立面',
-  rackElevationHint: '这里改成机柜立面的清爽预览，完整立面会在新窗口里单独打开，浏览和滚轮体验更稳定。',
-  elevationWindowHint: '新窗口会隐藏后台操作区，专门用于浏览机柜立面和给他人展示。',
-  closeDetail: '关闭机柜详情',
-  deviceList: '设备列表',
-  deviceListHint: '设备按 U 位从高到低排序。',
-  emptyDevices: '该机柜还没有设备',
-  emptyDevicesHint: '新增设备后即可追踪机柜位置、功率和责任信息。',
-  addDevice: '新增设备',
-  unnamedDevice: '未命名设备',
-  noMgmtIp: '未填写管理 IP',
-  noProject: '未关联项目',
-  noOwner: '未填写责任人',
-  ratedPower: '额定功率',
-  project: '项目',
-  owner: '责任人',
-  editRack: '编辑机柜',
-  deleteRack: '删除机柜',
-  editDevice: '编辑设备',
-  unclassified: '未分类',
-  currentRack: '当前机柜',
-};
 
 const safeInt = (value, fallback = 0) => {
   const parsed = parseInt(value, 10);
@@ -83,53 +25,32 @@ const asArray = (value) => {
   return [];
 };
 
-const resolvePlannedPower = (value) => {
-  if (typeof value === 'number') return value;
-  return safeInt(
-    value?.rated_sum ??
-      value?.total_rated ??
-      value?.planned_power ??
-      value?.power_limit ??
-      0,
-  );
+const STATUS_LABELS = {
+  active: '运行中',
+  offline: '离线',
+  maintenance: '维护中',
+  planned: '规划中',
+  retired: '已退役',
 };
 
-const resolveActualPower = (value) => {
-  if (typeof value === 'number') return value;
-  return safeInt(
-    value?.total_pdu ??
-      value?.actual_power ??
-      value?.pdu_power ??
-      0,
-  );
+const STATUS_STYLES = {
+  active: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  offline: 'bg-slate-100 text-slate-600 ring-slate-200',
+  maintenance: 'bg-amber-50 text-amber-700 ring-amber-200',
+  planned: 'bg-blue-50 text-blue-700 ring-blue-200',
+  retired: 'bg-rose-50 text-rose-700 ring-rose-200',
 };
 
-const extractRackMeta = (rack) => {
-  const raw = rack?.description || '';
-  const match = raw.match(/__PDU_META__:(\{.*\})/m);
-  try {
-    const meta = match ? JSON.parse(match[1]) : {};
-    return {
-      actualPower: safeInt(meta.power ?? rack?.pdu_power ?? rack?.actual_power ?? 0),
-      pduCount: safeInt(meta.count ?? rack?.pdu_count ?? 0),
-    };
-  } catch {
-    return {
-      actualPower: safeInt(rack?.pdu_power ?? rack?.actual_power ?? 0),
-      pduCount: safeInt(rack?.pdu_count ?? 0),
-    };
-  }
-};
-
-function ActionButton({ icon: Icon, label, onClick, primary = false, busy = false }) {
+function ToolbarButton({ icon: Icon, label, onClick, primary = false, busy = false, disabled = false }) {
   return (
     <button
-      onClick={onClick}
       type="button"
+      onClick={onClick}
+      disabled={disabled || busy}
       className={
         primary
-          ? 'inline-flex items-center gap-2 rounded-2xl bg-[linear-gradient(135deg,#0891b2_0%,#0ea5e9_100%)] px-4 py-2.5 text-sm font-bold text-white shadow-[0_14px_30px_rgba(14,165,233,0.24)] transition-all hover:-translate-y-0.5 hover:shadow-[0_18px_36px_rgba(14,165,233,0.3)]'
-          : 'inline-flex items-center gap-2 rounded-2xl border border-slate-200/90 bg-white/92 px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition-all hover:-translate-y-0.5 hover:border-cyan-200 hover:bg-cyan-50/60 hover:text-cyan-800'
+          ? 'inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-cyan-700 disabled:cursor-not-allowed disabled:opacity-50'
+          : 'inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:border-cyan-200 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-50'
       }
     >
       {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
@@ -138,150 +59,208 @@ function ActionButton({ icon: Icon, label, onClick, primary = false, busy = fals
   );
 }
 
-function MetricTile({ icon: Icon, label, value, unit = '', tone = 'default' }) {
-  const toneClass =
-    tone === 'blue'
-      ? 'border-blue-100 bg-[linear-gradient(180deg,#f7fbff_0%,#edf5ff_100%)] text-blue-700'
-      : tone === 'emerald'
-        ? 'border-emerald-100 bg-[linear-gradient(180deg,#f5fffb_0%,#ecfbf3_100%)] text-emerald-700'
-        : 'border-slate-200/90 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] text-slate-900';
-
+function StatusBadge({ status }) {
+  const normalized = status || 'active';
   return (
-    <div className={`rounded-[26px] border px-4 py-4 shadow-[0_16px_36px_rgba(15,23,42,0.05)] ${toneClass}`}>
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white shadow-sm">
-          <Icon className="h-4 w-4" />
-        </div>
-        <div className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">{label}</div>
-      </div>
-      <div className="mt-3 flex items-end gap-1">
-        <span className="text-[24px] font-black leading-none">{value}</span>
-        {unit ? <span className="pb-1 text-sm font-bold opacity-60">{unit}</span> : null}
-      </div>
-    </div>
-  );
-}
-
-function DatacenterListItem({ datacenter, rackCount, active, onSelect }) {
-  return (
-    <button
-      onClick={() => onSelect(datacenter.id)}
-      type="button"
-      className={`w-full rounded-[22px] border px-4 py-4 text-left transition-all ${
-        active
-          ? 'border-cyan-200 bg-[linear-gradient(135deg,#f1fbff_0%,#ecfdf8_100%)] shadow-[0_14px_28px_rgba(8,145,178,0.1)]'
-          : 'border-white/70 bg-white/84 hover:-translate-y-0.5 hover:border-slate-200 hover:bg-white'
+    <span
+      className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-bold ring-1 ring-inset ${
+        STATUS_STYLES[normalized] || STATUS_STYLES.offline
       }`}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate text-[15px] font-black tracking-tight text-slate-900">{datacenter.name}</div>
-          <div className="mt-1.5 text-sm text-slate-500">{datacenter.location || TEXT.locationFallback}</div>
-        </div>
-        <div className="rounded-full border border-slate-100 bg-white px-3 py-1 text-sm font-bold text-slate-500 shadow-sm">
-          {rackCount}
-        </div>
-      </div>
-    </button>
+      {STATUS_LABELS[normalized] || normalized}
+    </span>
   );
 }
 
-function EmptyState({ icon: Icon, title, hint }) {
-  return (
-    <div className="flex h-full min-h-[320px] items-center justify-center rounded-[24px] border border-dashed border-slate-200 bg-white/70 p-10 text-center shadow-sm">
-      <div className="max-w-md">
-        <Icon className="mx-auto h-12 w-12 text-slate-300" />
-        <div className="mt-4 text-2xl font-black text-slate-800">{title}</div>
-        <p className="mt-3 text-sm leading-6 text-slate-500">{hint}</p>
-      </div>
-    </div>
-  );
-}
-
-export default function DcimView(props) {
-  const {
-    datacenters,
-    activeLocation,
-    setActiveLocation,
-    setCurrentDcForm,
-    setIsDcModalOpen,
-    dcimViewMode,
-    setDcimViewMode,
-    handleDownloadTemplate,
-    handleImportClick,
-    isImporting,
-    handleExportExcel,
-    handleExportHtml,
-    handleExportImage,
-    setCurrentRackForm,
-    setIsRackModalOpen,
-    datacenterPowerStats,
-    currentRacks,
-    getRackCalculatedPower,
-    selectedRack,
-    setSelectedRack,
-    handleDeleteRack,
-    setEditingDevice,
-    rackDevices,
-  } = props;
+export default function DcimView({
+  datacenters,
+  activeLocation,
+  setActiveLocation,
+  setCurrentDcForm,
+  setIsDcModalOpen,
+  handleDownloadTemplate,
+  handleImportClick,
+  isImporting,
+  handleExportExcel,
+  setCurrentRackForm,
+  setIsRackModalOpen,
+  racks,
+  currentRacks,
+  setSelectedRack,
+  handleDeleteRack,
+  setEditingDevice,
+  rackDevices,
+  dataErrors = {},
+  isDataLoading = false,
+  systemCounts = null,
+  onRefresh,
+}) {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [selectedRackFilter, setSelectedRackFilter] = useState('');
 
   const datacenterList = asArray(datacenters);
+  const allRacks = asArray(racks);
   const rackList = asArray(currentRacks);
   const allDevices = asArray(rackDevices);
   const currentDatacenter =
     datacenterList.find((item) => String(item.id) === String(activeLocation)) || null;
+  const datacenterMap = useMemo(
+    () => new Map(datacenterList.map((item) => [String(item.id), item])),
+    [datacenterList],
+  );
+  const visibleRacks = activeLocation ? rackList : allRacks;
 
-  const currentDevices = currentDatacenter
-    ? allDevices.filter((item) => rackList.some((rack) => String(rack.id) === String(item.rack)))
-    : [];
+  useEffect(() => {
+    setSelectedRackFilter('');
+  }, [activeLocation]);
 
-  const selectedRackDevices = selectedRack
-    ? [...allDevices]
-        .filter((item) => String(item.rack) === String(selectedRack.id))
-        .sort((a, b) => safeInt(b.position, 0) - safeInt(a.position, 0))
-    : [];
+  const dcimErrors = Object.values(dataErrors).filter(Boolean);
+  const databaseDatacenterCount = safeInt(systemCounts?.datacenters, 0);
+  const hasCountMismatch =
+    dcimErrors.length === 0 &&
+    datacenterList.length === 0 &&
+    databaseDatacenterCount > 0;
+  const reportsEmptyDatabase =
+    dcimErrors.length === 0 &&
+    datacenterList.length === 0 &&
+    systemCounts &&
+    databaseDatacenterCount === 0;
 
-  const metrics = React.useMemo(() => {
-    const fallbackPlanned = safeInt(datacenterPowerStats?.total_rated, 0);
-    const fallbackActual = safeInt(datacenterPowerStats?.total_pdu, 0);
+  const devicesByRack = useMemo(() => {
+    const grouped = new Map();
+    allDevices.forEach((device) => {
+      const rackId = String(device.rack);
+      if (!grouped.has(rackId)) grouped.set(rackId, []);
+      grouped.get(rackId).push(device);
+    });
+    return grouped;
+  }, [allDevices]);
 
-    const totalPlanned = rackList.reduce((sum, rack) => {
-      const computed = getRackCalculatedPower ? getRackCalculatedPower(rack.id) : 0;
-      const rackLevel = resolvePlannedPower(computed || rack.power_limit || rack.planned_power || 0);
-      if (rackLevel > 0) return sum + rackLevel;
-      const rackDevicesList = allDevices.filter((item) => String(item.rack) === String(rack.id));
-      return sum + rackDevicesList.reduce((deviceSum, item) => deviceSum + safeInt(item.power_usage, 0), 0);
-    }, 0);
+  const rows = useMemo(() => {
+    const result = [];
+    visibleRacks.forEach((rack) => {
+      const devices = (devicesByRack.get(String(rack.id)) || [])
+        .sort((a, b) => safeInt(b.position) - safeInt(a.position));
+      if (devices.length === 0) {
+        result.push({ rack, device: null });
+        return;
+      }
+      devices.forEach((device) => result.push({ rack, device }));
+    });
+    return result;
+  }, [devicesByRack, visibleRacks]);
 
-    const totalActual = rackList.reduce((sum, rack) => sum + extractRackMeta(rack).actualPower, 0);
+  const filteredRows = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return rows.filter(({ rack, device }) => {
+      if (selectedRackFilter && String(rack.id) !== String(selectedRackFilter)) {
+        return false;
+      }
+      if (statusFilter !== 'all' && (device?.status || 'empty') !== statusFilter) {
+        return false;
+      }
+      if (!query) return true;
+      return [
+        datacenterMap.get(String(rack.datacenter))?.name,
+        datacenterMap.get(String(rack.datacenter))?.location,
+        rack.code,
+        rack.name,
+        device?.name,
+        device?.device_type,
+        device?.brand,
+        device?.model,
+        device?.mgmt_ip,
+        device?.project,
+        device?.contact,
+        device?.asset_tag,
+        device?.sn,
+      ].some((value) => String(value || '').toLowerCase().includes(query));
+    });
+  }, [datacenterMap, rows, searchQuery, selectedRackFilter, statusFilter]);
 
+  const summary = useMemo(() => {
+    const currentDevices = rows.filter((row) => row.device).map((row) => row.device);
     return {
-      rackCount: rackList.length,
-      deviceCount: currentDevices.length,
-      totalPlanned: totalPlanned || fallbackPlanned,
-      totalActual: totalActual || fallbackActual,
+      racks: visibleRacks.length,
+      devices: currentDevices.length,
+      ratedPower: currentDevices.reduce((sum, device) => sum + safeInt(device.power_usage), 0),
+      typicalPower: currentDevices.reduce((sum, device) => sum + safeInt(device.typical_power), 0),
     };
-  }, [allDevices, currentDevices.length, datacenterPowerStats?.total_pdu, datacenterPowerStats?.total_rated, getRackCalculatedPower, rackList]);
+  }, [rows, visibleRacks.length]);
 
-  const openReadonlyOverview = () => {
-    if (typeof window === 'undefined') return;
-    const url = new URL(window.location.href);
-    url.search = '';
-    url.searchParams.set('dc-overview', '1');
-    if (activeLocation) url.searchParams.set('datacenter', String(activeLocation));
-    window.open(url.toString(), '_blank');
+  const datacenterSummaries = useMemo(() => {
+    return datacenterList.map((datacenter) => {
+      const dcRacks = allRacks.filter((rack) => String(rack.datacenter) === String(datacenter.id));
+      const dcDevices = dcRacks.flatMap((rack) => devicesByRack.get(String(rack.id)) || []);
+      const ratedPower = dcDevices.reduce((sum, device) => sum + safeInt(device.power_usage), 0);
+      const totalU = dcRacks.reduce((sum, rack) => sum + safeInt(rack.height, 42), 0);
+      const usedU = dcDevices.reduce((sum, device) => sum + safeInt(device.u_height, 1), 0);
+      return {
+        datacenter,
+        racks: dcRacks.length,
+        devices: dcDevices.length,
+        ratedPower,
+        utilization: totalU ? Math.round((usedU / totalU) * 100) : 0,
+      };
+    });
+  }, [allRacks, datacenterList, devicesByRack]);
+
+  const globalSummary = useMemo(() => {
+    const totalU = allRacks.reduce((sum, rack) => sum + safeInt(rack.height, 42), 0);
+    const usedU = allDevices.reduce((sum, device) => sum + safeInt(device.u_height, 1), 0);
+    return {
+      datacenters: datacenterList.length,
+      racks: allRacks.length,
+      devices: allDevices.length,
+      utilization: totalU ? Math.round((usedU / totalU) * 100) : 0,
+    };
+  }, [allDevices, allRacks, datacenterList.length]);
+
+  const rackTiles = useMemo(() => {
+    return visibleRacks
+      .map((rack) => {
+        const devices = devicesByRack.get(String(rack.id)) || [];
+        const usedU = devices.reduce((sum, device) => sum + safeInt(device.u_height, 1), 0);
+        const height = safeInt(rack.height, 42);
+        const utilization = height ? Math.min(100, Math.round((usedU / height) * 100)) : 0;
+        const ratedPower = devices.reduce((sum, device) => sum + safeInt(device.power_usage), 0);
+        const powerLimit = safeInt(rack.power_limit, 0);
+        const isPowerOver = powerLimit > 0 && ratedPower > powerLimit;
+        const isHot = utilization >= 85 || isPowerOver;
+        const isWarn = !isHot && utilization >= 70;
+        const datacenter = datacenterMap.get(String(rack.datacenter));
+        return {
+          rack,
+          datacenter,
+          devices,
+          usedU,
+          height,
+          utilization,
+          ratedPower,
+          isPowerOver,
+          tone: isHot ? 'danger' : isWarn ? 'warn' : devices.length ? 'normal' : 'empty',
+        };
+      })
+      .sort((a, b) => {
+        const dcCompare = String(a.datacenter?.name || '').localeCompare(String(b.datacenter?.name || ''), 'zh-Hans-CN', { numeric: true });
+        if (dcCompare !== 0) return dcCompare;
+        return String(a.rack.code || a.rack.name || '').localeCompare(String(b.rack.code || b.rack.name || ''), 'zh-Hans-CN', { numeric: true });
+      });
+  }, [datacenterMap, devicesByRack, visibleRacks]);
+
+  const openCreateDatacenter = () => {
+    setCurrentDcForm({ name: '', location: '', contact_phone: '' });
+    setIsDcModalOpen(true);
   };
 
-  const openElevationWindow = () => {
-    if (typeof window === 'undefined') return;
-    const url = new URL(window.location.href);
-    url.search = '';
-    url.searchParams.set('dc-elevation', '1');
-    if (activeLocation) url.searchParams.set('datacenter', String(activeLocation));
-    window.open(url.toString(), '_blank');
+  const openEditDatacenter = () => {
+    if (!currentDatacenter) return;
+    setCurrentDcForm(currentDatacenter);
+    setIsDcModalOpen(true);
   };
 
-  const handleCreateRack = () => {
+  const openCreateRack = () => {
     if (!activeLocation) return;
     setCurrentRackForm({
       datacenter: activeLocation,
@@ -296,258 +275,426 @@ export default function DcimView(props) {
     setIsRackModalOpen(true);
   };
 
-  const handleCreateDatacenter = () => {
-    setCurrentDcForm({ name: '', location: '', description: '' });
-    setIsDcModalOpen(true);
+  const openEditRack = (rack) => {
+    setCurrentRackForm(rack);
+    setIsRackModalOpen(true);
+  };
+
+  const openCreateDevice = (rack) => {
+    setSelectedRack(rack);
+    setEditingDevice({ rack: rack.id });
+  };
+
+  const openEditDevice = (rack, device) => {
+    setSelectedRack(rack);
+    setEditingDevice(device);
+  };
+
+  const openRowEditor = (rack, device) => {
+    if (device) {
+      openEditDevice(rack, device);
+      return;
+    }
+    openEditRack(rack);
   };
 
   return (
-    <div className="flex h-full min-h-0 gap-5 bg-[radial-gradient(circle_at_top_left,rgba(186,230,253,0.26),transparent_26%),linear-gradient(180deg,#f8fbfe_0%,#f1f5f9_100%)] p-5">
-      <aside className="flex h-full w-[272px] flex-col overflow-hidden rounded-[32px] border border-white/80 bg-white/82 shadow-[0_24px_52px_rgba(15,23,42,0.08)] backdrop-blur">
-        <div className="border-b border-slate-200/80 bg-[linear-gradient(135deg,#f6fcff_0%,#eefaf8_100%)] px-5 py-5">
-          <div className="flex items-start justify-between gap-3">
+    <div className="flex h-full min-h-0 flex-col gap-3 bg-slate-50 p-4">
+      {dcimErrors.length > 0 || hasCountMismatch || reportsEmptyDatabase ? (
+        <div
+          className={`flex flex-wrap items-center justify-between gap-4 rounded-2xl border px-5 py-4 ${
+            reportsEmptyDatabase
+              ? 'border-amber-200 bg-amber-50 text-amber-950'
+              : 'border-rose-200 bg-rose-50 text-rose-950'
+          }`}
+        >
+          <div className="flex min-w-0 items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 flex-shrink-0" />
             <div>
-              <div className="flex items-center gap-2 text-sm font-semibold text-cyan-700">
-                <MapPin className="h-4 w-4" />
-                {TEXT.areaTitle}
+              <div className="font-black">
+                {dcimErrors.length > 0
+                  ? '机房数据接口读取失败'
+                  : hasCountMismatch
+                    ? '数据库计数与机房列表不一致'
+                    : '当前数据库报告机房数量为 0'}
               </div>
-              <div className="mt-3 text-[15px] font-black leading-7 tracking-tight text-slate-900">
-                {TEXT.areaHint}
+              <div className="mt-1 text-sm leading-6 opacity-80">
+                {dcimErrors.length > 0
+                  ? dcimErrors
+                      .map((error) => `${error.url}：HTTP ${error.status || '连接失败'}，${error.message}`)
+                      .join('；')
+                  : hasCountMismatch
+                    ? `系统总览报告 ${databaseDatacenterCount} 个机房，但列表接口未返回数据。`
+                    : '请先核对 Docker 的 data/mysql 挂载，暂时不要新增或覆盖资产。'}
               </div>
             </div>
+          </div>
+          <ToolbarButton icon={RefreshCw} label="重新读取" onClick={onRefresh} busy={isDataLoading} />
+        </div>
+      ) : null}
+
+      <section className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+        <button
+          type="button"
+          onClick={() => {
+            setSelectedRackFilter('');
+            setActiveLocation(null);
+          }}
+          className={`rounded-xl border p-3 text-left shadow-sm transition ${
+            !activeLocation
+              ? 'border-cyan-300 bg-cyan-50 ring-2 ring-cyan-100'
+              : 'border-slate-200 bg-white hover:border-cyan-200 hover:bg-cyan-50/40'
+          }`}
+        >
+          <div className="text-[11px] font-black uppercase tracking-[0.16em] text-cyan-700">全部机房</div>
+          <div className="mt-1 text-lg font-black text-slate-950">基础设施总览</div>
+          <div className="mt-0.5 text-xs text-slate-500">
+            {globalSummary.datacenters} 个机房 / {globalSummary.racks} 个机柜
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+            <div className="rounded-lg bg-white/80 px-3 py-1.5">
+              <div className="text-xs text-slate-400">设备</div>
+              <div className="font-black text-slate-900">{globalSummary.devices}</div>
+            </div>
+            <div className="rounded-lg bg-white/80 px-3 py-1.5">
+              <div className="text-xs text-slate-400">U 位利用</div>
+              <div className="font-black text-slate-900">{globalSummary.utilization}%</div>
+            </div>
+          </div>
+        </button>
+
+        {datacenterSummaries.map(({ datacenter, racks: rackCount, devices: deviceCount, ratedPower, utilization }) => {
+          const isActive = String(activeLocation || '') === String(datacenter.id);
+          return (
             <button
-              onClick={handleCreateDatacenter}
+              key={datacenter.id}
               type="button"
-              title={TEXT.addDatacenter}
-              className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl border border-white/80 bg-white text-cyan-700 shadow-sm transition-colors hover:bg-cyan-50"
+              onClick={() => {
+                setSelectedRackFilter('');
+                setActiveLocation(datacenter.id);
+              }}
+              className={`rounded-xl border p-3 text-left shadow-sm transition ${
+                isActive
+                  ? 'border-cyan-300 bg-cyan-50 ring-2 ring-cyan-100'
+                  : 'border-slate-200 bg-white hover:border-cyan-200 hover:bg-cyan-50/40'
+              }`}
             >
-              <Plus className="h-5 w-5" />
+              <div className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">机房</div>
+              <div className="mt-1 text-lg font-black text-slate-950">{datacenter.name}</div>
+              <div className="mt-0.5 text-xs text-slate-500">{datacenter.location || '未填写位置'}</div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                <div className="rounded-lg bg-white/80 px-3 py-1.5">
+                  <div className="text-xs text-slate-400">机柜 / 设备</div>
+                  <div className="font-black text-slate-900">{rackCount} / {deviceCount}</div>
+                </div>
+                <div className="rounded-lg bg-white/80 px-3 py-1.5">
+                  <div className="text-xs text-slate-400">功率 / U 位</div>
+                  <div className="font-black text-slate-900">{ratedPower}W / {utilization}%</div>
+                </div>
+              </div>
             </button>
+          );
+        })}
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-bold text-cyan-700">
+              <FileSpreadsheet className="h-4 w-4" />
+              机房资产台账
+            </div>
+            <div className="mt-0.5 text-xl font-black text-slate-950">
+              {currentDatacenter?.name || '全部机房总览'}
+            </div>
+            <div className="mt-0.5 text-sm text-slate-500">
+              {currentDatacenter?.location || '先用机柜矩阵看状态，再用下方台账精确维护资产信息'}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <ToolbarButton icon={Plus} label="新增机房" onClick={openCreateDatacenter} />
+            <ToolbarButton
+              icon={Edit3}
+              label="编辑机房"
+              onClick={openEditDatacenter}
+              disabled={!currentDatacenter}
+            />
+            <ToolbarButton icon={Download} label="下载模板" onClick={() => handleDownloadTemplate('dcim')} />
+            <ToolbarButton icon={Upload} label="导入资产" onClick={() => handleImportClick('dcim')} busy={isImporting} />
+            <ToolbarButton icon={FileSpreadsheet} label="导出 Excel" onClick={() => handleExportExcel('dcim')} />
+            <ToolbarButton icon={Plus} label="新增机柜" onClick={openCreateRack} primary disabled={!activeLocation} />
           </div>
         </div>
 
-        <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-4">
-          <div className="mb-4 rounded-[24px] border border-slate-100 bg-slate-50/70 px-4 py-4">
-            <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">{TEXT.overviewEyebrow}</div>
-            <div className="mt-2 text-3xl font-black text-slate-950">{rackList.length}</div>
-            <div className="mt-1 text-sm text-slate-500">{TEXT.rackCount}</div>
+        <div className="mt-3 grid grid-cols-2 divide-x divide-slate-200 rounded-xl border border-slate-200 bg-slate-50 md:grid-cols-4">
+          <div className="px-4 py-2.5">
+            <div className="text-xs font-bold text-slate-400">机柜</div>
+            <div className="mt-0.5 text-lg font-black text-slate-900">{summary.racks}</div>
           </div>
-          <div className="space-y-3">
-            {datacenterList.map((datacenter) => (
-              <DatacenterListItem
-                key={datacenter.id}
-                datacenter={datacenter}
-                rackCount={
-                  String(datacenter.id) === String(activeLocation)
-                    ? rackList.length
-                    : safeInt(datacenter.rack_count, 0)
-                }
-                active={String(datacenter.id) === String(activeLocation)}
-                onSelect={setActiveLocation}
-              />
-            ))}
+          <div className="px-4 py-2.5">
+            <div className="text-xs font-bold text-slate-400">设备</div>
+            <div className="mt-0.5 text-lg font-black text-slate-900">{summary.devices}</div>
+          </div>
+          <div className="px-4 py-2.5">
+            <div className="text-xs font-bold text-slate-400">额定功率</div>
+            <div className="mt-0.5 text-lg font-black text-slate-900">{summary.ratedPower} W</div>
+          </div>
+          <div className="px-4 py-2.5">
+            <div className="text-xs font-bold text-slate-400">典型功率</div>
+            <div className="mt-0.5 text-lg font-black text-slate-900">{summary.typicalPower} W</div>
           </div>
         </div>
-      </aside>
 
-      <section className="flex min-w-0 flex-1 flex-col gap-5">
-        <div className="overflow-hidden rounded-[32px] border border-slate-200/80 bg-white/86 shadow-[0_24px_52px_rgba(15,23,42,0.08)] backdrop-blur">
-          <div className="grid gap-5 p-5 2xl:grid-cols-[minmax(0,1.08fr)_minmax(460px,0.92fr)]">
-            <div className="rounded-[28px] border border-slate-100 bg-[linear-gradient(135deg,#f8fdff_0%,#eef9ff_44%,#eefaf5_100%)] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.95)]">
-              <div className="flex items-center gap-2 text-sm font-semibold text-cyan-700">
-                <MapPin className="h-4 w-4" />
-                {TEXT.overviewEyebrow}
+        <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-black text-slate-900">机柜矩阵看板</div>
+              <div className="mt-0.5 text-xs text-slate-500">
+                点击机柜可过滤下方台账；颜色越暖表示容量或功率越需要关注。
               </div>
-              <div className="mt-4 flex flex-wrap items-end gap-3">
-                <h1 className="text-[30px] font-black leading-none tracking-tight text-slate-950 xl:text-[34px]">
-                  {currentDatacenter?.name || TEXT.noDatacenter}
-                </h1>
-                <span className="pb-1 text-sm font-medium text-slate-500">{currentDatacenter?.location || ''}</span>
-              </div>
-              <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-600">
-                统一查看当前机房的机柜容量、设备规模、电力状态和排位分布，支持卡片视图与立面视图快速切换。
-              </p>
+            </div>
+            {selectedRackFilter ? (
+              <button
+                type="button"
+                onClick={() => setSelectedRackFilter('')}
+                className="rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-bold text-cyan-700 hover:bg-cyan-100"
+              >
+                清除机柜过滤
+              </button>
+            ) : null}
+          </div>
 
-              <div className="mt-5 inline-flex rounded-[22px] border border-white/90 bg-white/84 p-1.5 shadow-sm">
+          <div className="mt-3 grid max-h-44 grid-cols-[repeat(auto-fill,minmax(118px,1fr))] gap-2 overflow-auto pr-1">
+            {rackTiles.map((tile) => {
+              const isSelected = String(selectedRackFilter || '') === String(tile.rack.id);
+              const toneClass =
+                tile.tone === 'danger'
+                  ? 'border-rose-300 bg-rose-50 text-rose-950'
+                  : tile.tone === 'warn'
+                    ? 'border-amber-300 bg-amber-50 text-amber-950'
+                    : tile.tone === 'empty'
+                      ? 'border-slate-200 bg-slate-50 text-slate-500'
+                      : 'border-cyan-200 bg-cyan-50 text-slate-950';
+              const barClass =
+                tile.tone === 'danger'
+                  ? 'bg-rose-500'
+                  : tile.tone === 'warn'
+                    ? 'bg-amber-500'
+                    : tile.tone === 'empty'
+                      ? 'bg-slate-300'
+                      : 'bg-cyan-500';
+              return (
                 <button
-                  onClick={() => setDcimViewMode('card')}
+                  key={tile.rack.id}
                   type="button"
-                  className={`inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-bold ${
-                    dcimViewMode === 'card'
-                      ? 'bg-[linear-gradient(135deg,#0891b2_0%,#0ea5e9_100%)] text-white shadow-md shadow-cyan-600/20'
-                      : 'text-slate-600'
+                  onClick={() => setSelectedRackFilter(isSelected ? '' : tile.rack.id)}
+                  className={`rounded-xl border p-2.5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${toneClass} ${
+                    isSelected ? 'ring-2 ring-cyan-500' : ''
                   }`}
                 >
-                  <Columns className="h-4 w-4" />
-                  {TEXT.cardView}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-black">{tile.rack.code || tile.rack.name || '未编号机柜'}</div>
+                      <div className="mt-0.5 truncate text-xs opacity-70">
+                        {activeLocation ? tile.rack.name || '标准机柜' : tile.datacenter?.name || '未分配机房'}
+                      </div>
+                    </div>
+                    <div className="rounded-full bg-white/70 px-1.5 py-0.5 text-[11px] font-black">{tile.devices.length}</div>
+                  </div>
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/70">
+                    <div className={`h-full rounded-full ${barClass}`} style={{ width: `${tile.utilization}%` }} />
+                  </div>
+                  <div className="mt-1.5 flex items-center justify-between text-[11px] font-bold opacity-80">
+                    <span>{tile.usedU}/{tile.height}U</span>
+                    <span>{tile.ratedPower}W</span>
+                  </div>
+                  {tile.isPowerOver ? (
+                    <div className="mt-1.5 rounded-lg bg-white/70 px-2 py-0.5 text-[11px] font-bold text-rose-700">功率超限</div>
+                  ) : null}
                 </button>
-                <button
-                  onClick={() => setDcimViewMode('elevation')}
-                  type="button"
-                  className={`inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-bold ${
-                    dcimViewMode === 'elevation'
-                      ? 'bg-[linear-gradient(135deg,#0891b2_0%,#0ea5e9_100%)] text-white shadow-md shadow-cyan-600/20'
-                      : 'text-slate-600'
-                  }`}
-                >
-                  <AlignJustify className="h-4 w-4" />
-                  {TEXT.elevationView}
-                </button>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-wrap items-center gap-2.5 rounded-[28px] border border-slate-100 bg-slate-50/80 p-4">
-                <ActionButton icon={Folder} label={TEXT.downloadTemplate} onClick={handleDownloadTemplate} />
-                <ActionButton icon={Upload} label={TEXT.importAssets} onClick={handleImportClick} busy={isImporting} />
-                <ActionButton icon={FileText} label={TEXT.exportExcel} onClick={handleExportExcel} />
-                <ActionButton icon={Code} label={TEXT.exportHtml} onClick={handleExportHtml} />
-                <ActionButton icon={ImageIcon} label={TEXT.exportImage} onClick={handleExportImage} />
-                <ActionButton icon={Maximize} label={TEXT.readonlyOverview} onClick={openReadonlyOverview} />
-                <ActionButton icon={Plus} label={TEXT.addRack} onClick={handleCreateRack} primary />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-                <MetricTile icon={HardDrive} label={TEXT.rackCount} value={metrics.rackCount} tone="blue" />
-                <MetricTile icon={Server} label={TEXT.deviceCount} value={metrics.deviceCount} />
-                <MetricTile icon={Calculator} label={TEXT.plannedPower} value={metrics.totalPlanned} unit="W" />
-                <MetricTile icon={Zap} label={TEXT.actualPower} value={metrics.totalActual} unit="W" tone="emerald" />
-              </div>
-            </div>
+              );
+            })}
           </div>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-hidden">
-          {!currentDatacenter ? (
-            <div className="h-full">
-              <EmptyState icon={MapPin} title={TEXT.noDatacenter} hint={TEXT.noDatacenterHint} />
-            </div>
-          ) : dcimViewMode === 'card' ? (
-            <div className="custom-scrollbar h-full overflow-y-auto rounded-[32px] border border-slate-200/80 bg-white/86 p-5 shadow-[0_24px_52px_rgba(15,23,42,0.08)] backdrop-blur">
-              {rackList.length ? (
-                <div className="mb-5 rounded-[26px] border border-slate-100 bg-[linear-gradient(135deg,#fbfdff_0%,#f3f8fd_100%)] px-5 py-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">Rack Canvas</div>
-                      <div className="mt-2 text-2xl font-black text-slate-950">机柜卡片视图</div>
-                      <div className="mt-1 text-sm text-slate-500">适合快速比较容量、负载和 PDU 状态。</div>
-                    </div>
-                    <div className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm">
-                      当前机柜 {rackList.length} 台
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-              {rackList.length ? (
-                <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
-                  {rackList.map((rack) => {
-                    const devices = allDevices.filter((item) => String(item.rack) === String(rack.id));
-                    const computed = getRackCalculatedPower ? getRackCalculatedPower(rack.id) : 0;
-                    const plannedPower = resolvePlannedPower(computed || rack.power_limit || rack.planned_power || 0);
-                    const actualPower = extractRackMeta(rack).actualPower;
-                    return (
-                      <DcimRackCard
-                        key={rack.id}
-                        rack={rack}
-                        devices={devices}
-                        plannedPower={plannedPower}
-                        actualPower={actualPower}
-                        onSelect={setSelectedRack}
-                        onEdit={(payload) => {
-                          setCurrentRackForm(payload);
-                          setIsRackModalOpen(true);
-                        }}
-                        onDelete={handleDeleteRack}
-                        text={TEXT}
-                      />
-                    );
-                  })}
-                </div>
-              ) : (
-                <EmptyState icon={HardDrive} title={TEXT.noRacks} hint={TEXT.noRacksHint} />
-              )}
-            </div>
-          ) : (
-            <div className="custom-scrollbar h-full overflow-y-auto rounded-[32px] border border-slate-200/80 bg-white/86 p-5 shadow-[0_24px_52px_rgba(15,23,42,0.08)] backdrop-blur">
-              <div className="mb-4 rounded-[26px] border border-slate-100 bg-[linear-gradient(135deg,#fbfdff_0%,#f4f8fe_52%,#eef7ff_100%)] px-5 py-5">
-                <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-                  <div>
-                    <div className="text-base font-black text-slate-900">{TEXT.rackElevation}</div>
-                    <div className="mt-1 text-sm text-slate-500">{TEXT.rackElevationHint}</div>
-                    <div className="mt-3 text-sm leading-6 text-slate-500">{TEXT.elevationWindowHint}</div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <ActionButton icon={Maximize} label={TEXT.elevationWindow} onClick={openElevationWindow} primary />
-                    <ActionButton icon={Columns} label={TEXT.cardView} onClick={() => setDcimViewMode('card')} />
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
-                {rackList.length ? (
-                  rackList.map((rack) => {
-                    const devices = allDevices.filter((item) => String(item.rack) === String(rack.id));
-                    return (
-                      <button
-                        key={rack.id}
-                        onClick={() => setSelectedRack(rack)}
-                        type="button"
-                        className="rounded-[26px] border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-cyan-200 hover:shadow-[0_18px_40px_rgba(15,23,42,0.08)]"
-                      >
-                        <div className="mb-4 flex items-start justify-between gap-3">
-                          <div>
-                            <div className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500">
-                              {rack.code || TEXT.rackCodeFallback}
-                            </div>
-                            <div className="mt-3 text-[22px] font-black text-slate-900">{rack.name}</div>
-                            <div className="mt-1 text-sm text-slate-500">
-                              {safeInt(rack.height, 42)}U · {devices.length} 台设备
-                            </div>
-                          </div>
-                          <div className="rounded-full bg-cyan-50 px-3 py-1 text-sm font-bold text-cyan-700">
-                            {TEXT.detail}
-                          </div>
-                        </div>
-
-                        <div className="overflow-x-auto pb-1">
-                          <RackElevation
-                            rack={rack}
-                            devices={devices}
-                            onSelect={setSelectedRack}
-                            onEdit={setEditingDevice}
-                            readonly
-                            showHeader={false}
-                            unitHeight={18}
-                          />
-                        </div>
-                      </button>
-                    );
-                  })
-                ) : (
-                  <div className="col-span-full flex min-h-[320px] items-center justify-center rounded-[24px] border border-dashed border-slate-200 bg-slate-50 text-center text-slate-400">
-                    <div>
-                      <HardDrive className="mx-auto h-10 w-10 text-slate-300" />
-                      <div className="mt-4 text-xl font-black text-slate-900">{TEXT.noRacks}</div>
-                      <div className="mt-2 text-sm text-slate-500">{TEXT.noRacksHint}</div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
         </div>
       </section>
 
-      <DcimRackSidebar
-        rack={selectedRack}
-        devices={selectedRackDevices}
-        plannedPower={selectedRack ? getRackCalculatedPower?.(selectedRack.id) : 0}
-        onClose={() => setSelectedRack(null)}
-        onAddDevice={() => setEditingDevice({ rack: selectedRack?.id })}
-        onEditDevice={(device) => setEditingDevice(device)}
-        text={TEXT}
-      />
+      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
+          <select
+            value={activeLocation || ''}
+            onChange={(event) => {
+              setSelectedRackFilter('');
+              setActiveLocation(event.target.value || null);
+            }}
+            className="min-w-52 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 outline-none focus:border-cyan-500"
+          >
+            <option value="">全部机房总览</option>
+            {datacenterList.map((datacenter) => (
+              <option key={datacenter.id} value={datacenter.id}>
+                {datacenter.name}
+              </option>
+            ))}
+          </select>
+
+          <div className="relative min-w-64 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="搜索机柜、设备、IP、项目、负责人、资产编号..."
+              className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-cyan-500"
+            />
+          </div>
+
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 outline-none focus:border-cyan-500"
+          >
+            <option value="all">全部状态</option>
+            <option value="active">运行中</option>
+            <option value="maintenance">维护中</option>
+            <option value="offline">离线</option>
+            <option value="planned">规划中</option>
+            <option value="retired">已退役</option>
+            <option value="empty">空机柜</option>
+          </select>
+
+          <div className="text-sm font-semibold text-slate-500">显示 {filteredRows.length} 行</div>
+          <div className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-bold text-cyan-700">
+            双击行编辑；右侧操作栏始终固定
+          </div>
+        </div>
+
+        <div className="custom-scrollbar min-h-0 flex-1 overflow-auto">
+          <table className="min-w-[2420px] border-separate border-spacing-0 text-sm">
+            <thead className="sticky top-0 z-20 bg-slate-100 text-left text-xs font-black uppercase tracking-wide text-slate-600">
+              <tr>
+                {[
+                  '序号', '机房', '机柜编号', '机柜名称', '高度(U)', 'PDU数', 'PDU实测(W)',
+                  '设备名称', '起始U', '占用U', '设备类型', '品牌', '型号', '管理IP',
+                  '项目名称', '负责人', '状态', '额定功率(W)', '典型功率(W)',
+                  '固定资产编号', '序列号(SN)', '操作',
+                ].map((label, index) => (
+                  <th
+                    key={label}
+                    className={`whitespace-nowrap border-b border-r border-slate-200 px-3 py-3 ${
+                      index < 4 ? 'sticky z-30 bg-slate-100' : ''
+                    } ${index === 21 ? 'sticky right-0 z-40 border-l bg-slate-100 text-center shadow-[-8px_0_16px_-14px_rgba(15,23,42,0.45)]' : ''}`}
+                    style={
+                      index === 0
+                        ? { left: 0 }
+                        : index === 1
+                          ? { left: 56 }
+                          : index === 2
+                            ? { left: 168 }
+                            : index === 3
+                              ? { left: 280 }
+                              : index === 21
+                                ? { right: 0 }
+                                : undefined
+                    }
+                  >
+                    {label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filteredRows.map(({ rack, device }, index) => (
+                <tr
+                  key={`${rack.id}-${device?.id || 'empty'}`}
+                  className="group cursor-pointer hover:bg-cyan-50/50"
+                  title={device ? '双击编辑设备' : '双击编辑机柜'}
+                  onDoubleClick={() => openRowEditor(rack, device)}
+                >
+                  <td className="sticky left-0 z-10 w-14 border-b border-r border-slate-200 bg-white px-3 py-2.5 text-center text-slate-400 group-hover:bg-cyan-50">
+                    {index + 1}
+                  </td>
+                  <td className="sticky left-14 z-10 w-28 border-b border-r border-slate-200 bg-white px-3 py-2.5 font-semibold text-slate-700 group-hover:bg-cyan-50">
+                    {datacenterMap.get(String(rack.datacenter))?.name || '-'}
+                  </td>
+                  <td className="sticky left-[168px] z-10 w-28 border-b border-r border-slate-200 bg-white px-3 py-2.5 font-black text-slate-800 group-hover:bg-cyan-50">
+                    {rack.code || '-'}
+                  </td>
+                  <td className="sticky left-[280px] z-10 w-44 border-b border-r border-slate-200 bg-white px-3 py-2.5 font-semibold text-slate-700 group-hover:bg-cyan-50">
+                    {rack.name || '-'}
+                  </td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2.5 text-right">{safeInt(rack.height, 42)}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2.5 text-right">{safeInt(rack.pdu_count, 2)}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2.5 text-right">{safeInt(rack.pdu_power)}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2.5 font-semibold text-slate-800">
+                    {device?.name || <span className="text-slate-400">空机柜</span>}
+                  </td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2.5 text-right">{device ? safeInt(device.position, 1) : '-'}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2.5 text-right">{device ? safeInt(device.u_height, 1) : '-'}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2.5">{device?.device_type || '-'}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2.5">{device?.brand || '-'}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2.5">{device?.model || '-'}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2.5 font-mono text-xs">{device?.mgmt_ip || '-'}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2.5">{device?.project || '-'}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2.5">{device?.contact || '-'}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2.5">
+                    {device ? <StatusBadge status={device.status} /> : <span className="text-slate-400">空</span>}
+                  </td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2.5 text-right">{device ? safeInt(device.power_usage) : '-'}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2.5 text-right">{device ? safeInt(device.typical_power) : '-'}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2.5">{device?.asset_tag || '-'}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2.5">{device?.sn || '-'}</td>
+                  <td className="sticky right-0 z-20 border-b border-l border-slate-200 bg-white px-2 py-2.5 shadow-[-8px_0_16px_-14px_rgba(15,23,42,0.45)] group-hover:bg-cyan-50">
+                    <div className="flex items-center justify-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => openEditRack(rack)}
+                        title="编辑机柜"
+                        className="rounded-lg p-2 text-slate-500 hover:bg-white hover:text-cyan-700"
+                      >
+                        <Edit3 className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openCreateDevice(rack)}
+                        title="新增设备"
+                        className="rounded-lg p-2 text-slate-500 hover:bg-white hover:text-emerald-700"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                      {device ? (
+                        <button
+                          type="button"
+                          onClick={() => openEditDevice(rack, device)}
+                          title="编辑设备"
+                          className="rounded-lg p-2 text-slate-500 hover:bg-white hover:text-blue-700"
+                        >
+                          <Server className="h-4 w-4" />
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={(event) => handleDeleteRack(rack.id, event)}
+                        title="删除机柜"
+                        className="rounded-lg p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {!isDataLoading && currentDatacenter && filteredRows.length === 0 ? (
+            <div className="flex min-h-64 items-center justify-center text-center text-slate-400">
+              <div>
+                <FileSpreadsheet className="mx-auto h-10 w-10 text-slate-300" />
+                <div className="mt-3 font-bold text-slate-600">没有匹配的资产记录</div>
+                <div className="mt-1 text-sm">可调整筛选条件，或新增机柜后导入设备。</div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </section>
     </div>
   );
 }
-

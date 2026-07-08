@@ -2,7 +2,7 @@
 import {
   Server, ShieldCheck, Search, RefreshCw, Folder, Network,
   ChevronRight, ChevronDown, Edit2, Trash2,
-  X, Save, Plus, Upload, Download, Lock,
+  X, Save, Plus, Upload, Download, Lock, KeyRound,
   MapPin, Box, Shield, Activity, Users, Database, Settings,
   AlertTriangle, CheckCircle2, Grid as GridIcon, List as ListIcon, Loader2, 
   ArrowLeftRight,
@@ -38,14 +38,17 @@ import { BRAND } from './lib/brand';
 import { useAuthSession } from './hooks/useAuthSession';
 import { useAppDataLoader } from './hooks/useAppDataLoader';
 import { useImportExportHandlers } from './hooks/useImportExportHandlers';
-import { useAppEntryMode } from './hooks/useAppEntryMode';
+import { useAppRouter } from './hooks/useAppEntryMode';
 import { useAppScreenProps } from './hooks/useAppScreenProps';
 import { useSystemOverview } from './hooks/useSystemOverview';
 import { useUserManagementHandlers } from './hooks/useUserManagementHandlers';
-import { DatacenterChangeIntakePage } from './modules/changeRequests';
-import { DcimElevationPage, DcimOverviewPage, useDcimDerivedData, useDcimViewState } from './modules/dcim';
+import { useDcimDerivedData, useDcimViewState } from './modules/dcim';
 import { useIpamDerivedData, useIpamViewActions, useIpamViewState } from './modules/ipam';
-import { ResidentIntakePage } from './modules/resident';
+
+const DatacenterChangeIntakePage = React.lazy(
+  () => import('./modules/changeRequests/views/DatacenterChangeIntakePage'),
+);
+const ResidentIntakePage = React.lazy(() => import('./modules/resident/views/ResidentIntakePage'));
 
 // ============================================================================
 // 1. Base constants and configuration
@@ -74,19 +77,21 @@ const DEFAULT_OPTIONS = {
 };
 
 const ROLE_DEFINITIONS = {
-  admin: { label: '\u8d85\u7ea7\u7ba1\u7406\u5458', permissions: ['dashboard', 'list', 'dcim', 'changes', 'resident', 'security', 'backup', 'users'] },
-  dc_operator: { label: '\u673a\u623f\u8fd0\u7ef4', permissions: ['dashboard', 'dcim', 'changes', 'resident'] },
-  ip_manager: { label: 'IP \u7ba1\u7406\u5458', permissions: ['dashboard', 'list'] },
-  auditor: { label: '\u5ba1\u8ba1\u5458', permissions: ['dashboard', 'changes', 'security', 'resident'] },
-  guest: { label: '\u8bbf\u5ba2', permissions: ['dashboard', 'list', 'dcim'] },
+  admin: { label: '\u8d85\u7ea7\u7ba1\u7406\u5458', permissions: ['dashboard', 'assets', 'list', 'dcim', 'changes', 'resident', 'vault', 'security', 'backup', 'users'] },
+  dc_operator: { label: '\u673a\u623f\u8fd0\u7ef4', permissions: ['dashboard', 'assets', 'dcim', 'changes', 'resident', 'vault'] },
+  ip_manager: { label: 'IP \u7ba1\u7406\u5458', permissions: ['dashboard', 'assets', 'list', 'vault'] },
+  auditor: { label: '\u5ba1\u8ba1\u5458', permissions: ['dashboard', 'assets', 'changes', 'security', 'resident', 'vault'] },
+  guest: { label: '\u8bbf\u5ba2', permissions: ['dashboard', 'assets', 'list', 'dcim'] },
 };
 
 const TAB_CONFIG = {
   dashboard: { icon: LayoutDashboard, label: BRAND.navigation.dashboard },
+  assets: { icon: HardDrive, label: BRAND.navigation.assets || '资产中心' },
   list: { icon: Server, label: BRAND.navigation.list },
   dcim: { icon: Box, label: BRAND.navigation.dcim },
   changes: { icon: ArrowLeftRight, label: BRAND.navigation.changes || '申请中心' },
   resident: { icon: Users, label: BRAND.navigation.resident },
+  vault: { icon: KeyRound, label: '密码本' },
   security: { icon: Shield, label: BRAND.navigation.security },
   backup: { icon: Database, label: BRAND.navigation.backup },
   users: { icon: Users, label: BRAND.navigation.users }
@@ -168,7 +173,6 @@ function MainApp() {
     completeLogin,
     updateCurrentUserInfo,
   } = useAuthSession();
-  const [activeTab, setActiveTab] = useState('dashboard');
   const [debugLogs, setDebugLogs] = useState([]);
   const [isDebugOpen, setIsDebugOpen] = useState(false);
   const [isSystemStatusOpen, setIsSystemStatusOpen] = useState(false);
@@ -176,11 +180,11 @@ function MainApp() {
   const currentPermissions = ROLE_DEFINITIONS[currentRole]?.permissions || [];
   const currentUserDisplay = currentUserInfo?.display_name || currentUserInfo?.username || currentUser;
   const {
+    activeTab,
+    setActiveTab,
     isResidentIntakeMode,
     isChangeRequestIntakeMode,
-    isDcOverviewMode,
-    isDcElevationMode,
-  } = useAppEntryMode();
+  } = useAppRouter();
 
   useEffect(() => {
     if (currentUserInfo?.must_change_password) {
@@ -192,7 +196,7 @@ function MainApp() {
     if (isLoggedIn && !currentPermissions.includes(activeTab)) {
       const firstAllowed = Object.keys(TAB_CONFIG).find(key => currentPermissions.includes(key));
       if (firstAllowed) {
-        setActiveTab(firstAllowed);
+        setActiveTab(firstAllowed, { replace: true });
       }
     }
   }, [activeTab, currentPermissions, isLoggedIn]);
@@ -378,10 +382,6 @@ function MainApp() {
   } = useIpamViewState();
 
   const {
-    dcimViewMode,
-    setDcimViewMode,
-    elevationLayout,
-    setElevationLayout,
     activeLocation,
     setActiveLocation,
     selectedRack,
@@ -392,16 +392,6 @@ function MainApp() {
     setCurrentDcForm,
     editingDevice,
     setEditingDevice,
-    viewState,
-    elevationScrollRef,
-    elevationContentRef,
-    handleZoomIn,
-    handleZoomOut,
-    handleZoomReset,
-    handleElevationMouseDown,
-    handleElevationMouseLeave,
-    handleElevationMouseUp,
-    handleElevationMouseMove,
     handleJumpToDc,
   } = useDcimViewState();
 
@@ -411,6 +401,7 @@ function MainApp() {
     ips,
     backups,
     backupSummary,
+    secrets,
     users,
     residentStaff,
     loginLogs,
@@ -420,6 +411,7 @@ function MainApp() {
     racks,
     rackDevices,
     isDataLoading,
+    dataErrors,
     refreshData,
   } = useAppDataLoader({
     activeTab,
@@ -935,19 +927,11 @@ function MainApp() {
     handleConfirmImport,
     handleImportClick,
     handleDownloadTemplate,
-    handleExportHtml,
     handleExportExcel,
-    handleExportImage,
     closeImportWizard,
   } = useImportExportHandlers({
-      activeLocation,
-      alert,
-      currentRacks,
-      rackDevices,
-      datacenterPowerStats,
-      datacenters,
-      extractResponseMessage,
-    getRackCalculatedPower,
+    alert,
+    extractResponseMessage,
     refreshData,
   });
 
@@ -1071,23 +1055,15 @@ function MainApp() {
 
     const url = editingIP ? `/api/ips/${editingIP.id}/` : '/api/ips/';
     const method = editingIP ? 'PUT' : 'POST';
-    const cleanDesc = (ipFormData.description || '')
-      .replace(/__TAG__:(.*)$/m, '')
-      .replace(/__LOCKED__:(true|false)/m, '')
-      .trim();
-
-    let hiddenMeta = '';
-    if (ipFormData.tag) hiddenMeta += `\n__TAG__:${ipFormData.tag}`;
-    if (ipFormData.is_locked) hiddenMeta += '\n__LOCKED__:true';
-
     const payload = {
       ...ipFormData,
       subnet: selectedSubnetId,
       nat_type: ipFormData.nat_type || 'none',
       status: ipFormData.is_locked ? 'online' : (ipFormData.status || 'online'),
-      description: cleanDesc + hiddenMeta,
+      description: (ipFormData.description || '').trim(),
+      tag: ipFormData.tag || '',
+      is_locked: Boolean(ipFormData.is_locked),
     };
-    delete payload.is_locked;
 
     try {
       const response = await safeFetch(url, {
@@ -1159,6 +1135,7 @@ function MainApp() {
     racks,
     rackDevices,
     ips,
+    secrets,
     loginLogs,
     residentStaff,
     residentSearchSeed,
@@ -1167,6 +1144,8 @@ function MainApp() {
     consumeChangeRequestSearchSeed: () => setChangeRequestSearchSeed(null),
     systemOverview,
     systemOverviewRefreshedAt,
+    dataErrors,
+    isDataLoading,
     handleJumpToDc,
     navigateToShellTarget,
     setActiveTab,
@@ -1211,13 +1190,7 @@ function MainApp() {
     setCurrentDcForm,
     setIsDcModalOpen,
     handleDeleteDatacenter,
-    dcimViewMode,
-    setDcimViewMode,
-    elevationLayout,
-    setElevationLayout,
     handleExportExcel,
-    handleExportHtml,
-    handleExportImage,
     setCurrentRackForm,
     setIsRackModalOpen,
     datacenterPowerStats,
@@ -1227,16 +1200,6 @@ function MainApp() {
     setSelectedRack,
     handleDeleteRack,
     setEditingDevice,
-    handleZoomIn,
-    handleZoomOut,
-    handleZoomReset,
-    elevationScrollRef,
-    elevationContentRef,
-    handleElevationMouseDown,
-    handleElevationMouseLeave,
-    handleElevationMouseUp,
-    handleElevationMouseMove,
-    viewState,
     refreshData,
     auditLogs,
     blocklist,
@@ -1376,21 +1339,13 @@ function MainApp() {
   const handleSaveRack = async (formData) => {
     const url = formData.id ? `/api/racks/${formData.id}/` : '/api/racks/';
     const method = formData.id ? 'PUT' : 'POST';
-    const pduMeta = {
-      count: safeInt(formData.pdu_count, 2),
-      power: safeInt(formData.pdu_power, 0),
-    };
-    const cleanDesc = (formData.description || '').replace(/__PDU_META__:({.*})$/m, '').trim();
-    const description = cleanDesc
-      ? `${cleanDesc}\n__PDU_META__:${JSON.stringify(pduMeta)}`
-      : `__PDU_META__:${JSON.stringify(pduMeta)}`;
     const payload = {
       ...formData,
       datacenter: activeLocation,
-      description,
+      description: (formData.description || '').trim(),
+      pdu_count: safeInt(formData.pdu_count, 2),
+      pdu_power: safeInt(formData.pdu_power, 0),
     };
-    delete payload.pdu_count;
-    delete payload.pdu_power;
     delete payload.pdu_a_power;
     delete payload.pdu_b_power;
 
@@ -1523,33 +1478,28 @@ function MainApp() {
     }
   }
 
-  if (isAuthChecking) {
-      return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500 text-sm">正在检查登录状态...</div>;
-  }
-
-    if (isDcElevationMode) {
-      return <DcimElevationPage />;
-    }
-
-    if (isDcOverviewMode) {
-      return <DcimOverviewPage />;
-    }
+  const publicScreenFallback = (
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-500">
+      正在加载公开页面...
+    </div>
+  );
 
   if (isChangeRequestIntakeMode) {
-      return <DatacenterChangeIntakePage />;
+    return <React.Suspense fallback={publicScreenFallback}><DatacenterChangeIntakePage /></React.Suspense>;
   }
 
   if (isResidentIntakeMode) {
-      return <ResidentIntakePage />;
+    return <React.Suspense fallback={publicScreenFallback}><ResidentIntakePage /></React.Suspense>;
+  }
+
+  if (isAuthChecking) {
+    return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500 text-sm">正在检查登录状态...</div>;
   }
 
   if (!isLoggedIn) return <LoginScreen onLogin={completeLogin} />;
 
   return (
-    <div className="app-shell flex h-screen text-slate-800 font-sans overflow-hidden"
-         onMouseUp={handleElevationMouseUp}
-         onMouseLeave={handleElevationMouseLeave}
-         onMouseMove={handleElevationMouseMove}>
+    <div className="app-shell flex h-screen text-slate-800 font-sans overflow-hidden">
       <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".xlsx, .xls, .csv" className="hidden" />
         <AppSidebar
           activeTab={activeTab}
@@ -1579,10 +1529,13 @@ function MainApp() {
         <div className="flex-1 overflow-hidden relative">
           <AppScreenRouter
             activeTab={activeTab}
+            currentRole={currentRole}
             dashboardProps={screenProps.dashboardProps}
+            assetProps={screenProps.assetProps}
             ipamProps={screenProps.ipamProps}
             dcimProps={screenProps.dcimProps}
             residentProps={screenProps.residentProps}
+            changesProps={screenProps.changesProps}
             securityProps={screenProps.securityProps}
             backupProps={screenProps.backupProps}
             usersProps={screenProps.usersProps}
@@ -1720,6 +1673,3 @@ export default function AppWrapper() {
     </ErrorBoundary>
   );
 }
-
-
-

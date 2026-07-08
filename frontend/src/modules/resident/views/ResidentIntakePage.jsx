@@ -79,6 +79,7 @@ export default function ResidentIntakePage() {
   const [linkError, setLinkError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submittedCodes, setSubmittedCodes] = useState([]);
+  const [exportToken, setExportToken] = useState('');
   const [exportingPdf, setExportingPdf] = useState(false);
 
   useEffect(() => {
@@ -183,6 +184,7 @@ export default function ResidentIntakePage() {
     setCompanyProfile(EMPTY_COMPANY_PROFILE);
     setStaffMembers([{ ...EMPTY_MEMBER }]);
     setSubmittedCodes([]);
+    setExportToken('');
   };
 
   const submit = async () => {
@@ -228,6 +230,7 @@ export default function ResidentIntakePage() {
       }
 
       setSubmittedCodes(payload.registration_codes || []);
+      setExportToken(payload.export_token || '');
     } finally {
       setSubmitting(false);
     }
@@ -241,7 +244,10 @@ export default function ResidentIntakePage() {
       const response = await safeFetch('/api/resident-intake/export-pdf/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ registration_codes: submittedCodes }),
+        body: JSON.stringify({
+          registration_codes: submittedCodes,
+          export_token: exportToken,
+        }),
       });
       if (!response.ok) {
         const errorText = await response.text();

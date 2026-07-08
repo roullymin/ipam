@@ -23,7 +23,10 @@ export const safeFetch = async (url, options = {}) => {
       }
     }
 
-    return await fetch(url, options);
+    return await fetch(url, {
+      credentials: 'same-origin',
+      ...options,
+    });
   } catch (error) {
     console.warn(`[SafeFetch] 请求异常: ${url}`, error);
     return {

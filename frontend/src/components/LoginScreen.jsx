@@ -26,6 +26,25 @@ const FEATURE_CARDS = [
   },
 ];
 
+const getLoginErrorMessage = (response, data) => {
+  if (data?.message || data?.detail) {
+    return data.message || data.detail;
+  }
+  if (response.status === 0) {
+    return '无法连接后端服务，请检查 backend 容器日志和生产环境配置。';
+  }
+  if ([502, 503, 504].includes(response.status)) {
+    return '后端服务尚未就绪，请检查 DJANGO_SECRET_KEY、数据库迁移和容器日志。';
+  }
+  if (response.status === 429) {
+    return '登录尝试过于频繁，请稍后再试。';
+  }
+  if (response.status === 403) {
+    return '登录请求被安全策略拒绝，请检查来源 IP 黑名单和 HTTPS 配置。';
+  }
+  return `登录失败（HTTP ${response.status || '未知'}），请检查账号密码或联系管理员。`;
+};
+
 export default function LoginScreen({ onLogin }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -42,7 +61,7 @@ export default function LoginScreen({ onLogin }) {
       if (res.ok) {
         onLogin(data.user || { username });
       } else {
-        alert(data.message || '登录失败：账号或密码错误。');
+        alert(getLoginErrorMessage(res, data));
       }
     } catch (error) {
       alert(`系统错误：${error.message}`);

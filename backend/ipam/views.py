@@ -16,6 +16,7 @@ import qrcode
 from django.conf import settings
 from django.contrib.auth import authenticate, login, logout, update_session_auth_hash
 from django.contrib.auth.models import User
+from django.core import signing
 from django.db import transaction
 from django.http import FileResponse, HttpResponse
 from django.middleware.csrf import get_token
@@ -27,9 +28,10 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.pdfbase.pdfmetrics import registerFont
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-from rest_framework import filters, status, viewsets
+from rest_framework import filters, serializers, status, viewsets
 from rest_framework.authentication import BasicAuthentication, SessionAuthentication
 from rest_framework.decorators import action, api_view, authentication_classes, parser_classes, permission_classes
+from rest_framework.exceptions import APIException, PermissionDenied
 from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
@@ -49,6 +51,9 @@ from .models import (
     ResidentDevice,
     ResidentIntakeLink,
     ResidentStaff,
+    SecretAccessRequest,
+    SecretAuditEvent,
+    SecretRecord,
     Subnet,
     UserProfile,
 )
@@ -60,14 +65,26 @@ from .permissions import (
     IpamAccessPermission,
     IpamWritePermission,
     ResidentAccessPermission,
+    SecretActionPermission,
+    SecretAuditPermission,
+    SecretRecordPermission,
+    get_user_role,
 )
 from .domains.backup.selectors import build_backup_summary, collect_backup_files, get_backup_dir
 from .domains.backup.services import create_manual_backup, resolve_backup_download_path
 from .domains.change_requests.selectors import build_change_request_topology_rows
 from .domains.change_requests.services import apply_change_request_execution
+from .domains.change_requests.workflow import transition_change_request
 from .domains.data_quality.services import build_encoding_report_payload
 from .domains.data_quality.selectors import get_data_quality_summary
+from .domains.dcim.selectors import build_public_dcim_payload
 from .domains.platform.selectors import build_system_overview_payload
+from .domains.public_access.services import (
+    issue_resident_export_token,
+    permanent_resident_intake_allowed,
+    public_dcim_access_allowed,
+    validate_resident_export_token,
+)
 from .domains.resident.selectors import build_resident_export_rows, build_resident_lookup_maps
 from .domains.resident.services import (
     build_resident_import_groups,
@@ -83,6 +100,12 @@ from .domains.security.services import (
     record_audit as security_record_audit,
     record_login as security_record_login,
 )
+from .domains.vault.services import (
+    VaultError,
+    delete_secret as vault_delete_secret,
+    read_secret as vault_read_secret,
+    write_secret as vault_write_secret,
+)
 from .serializers import (
     AuditLogSerializer,
     BlocklistSerializer,
@@ -97,6 +120,9 @@ from .serializers import (
     RackSerializer,
     ResidentIntakeLinkSerializer,
     ResidentStaffSerializer,
+    SecretAccessRequestSerializer,
+    SecretAuditEventSerializer,
+    SecretRecordSerializer,
     SubnetSerializer,
     UserSerializer,
     normalize_resident_device_payload,
@@ -107,7 +133,13 @@ logger = logging.getLogger('django')
 
 LOGIN_LOCK_THRESHOLD = 5
 LOGIN_LOCK_MINUTES = 30
-APP_VERSION = os.environ.get('APP_VERSION', 'v1')
+APP_VERSION = os.environ.get('APP_VERSION', 'ipam-20260622.9')
+
+
+class VaultServiceUnavailable(APIException):
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    default_detail = '密码库暂时不可用。'
+    default_code = 'vault_unavailable'
 
 
 def get_client_ip(request):
@@ -173,10 +205,12 @@ DCIM_DEVICE_HEADERS = [
     '占用高度(U)',
     '设备类型',
     '品牌',
+    '型号',
     '管理IP',
     '项目名称',
     '负责人',
     '额定功率(W)',
+    '典型功率(W)',
     '配置信息',
     '序列号(SN)',
     '固定资产编号',
@@ -413,11 +447,13 @@ def _build_resident_intake_link_payload(request, intake_link=None):
             'expires_at': None,
             'created_at': None,
             'intake_url': _get_resident_registration_url(request),
-            'is_permanent': True,
+            'is_permanent': permanent_resident_intake_allowed(),
+            'requires_token': not permanent_resident_intake_allowed(),
         }
 
     payload = ResidentIntakeLinkSerializer(intake_link, context={'request': request}).data
     payload['is_permanent'] = False
+    payload['requires_token'] = False
     return payload
 
 
@@ -1565,6 +1601,246 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
         return OptionalPaginationMixin.list(self, request, *args, **kwargs)
 
 
+def record_secret_audit(request, secret, action, result='success', reason=''):
+    return SecretAuditEvent.objects.create(
+        secret=secret,
+        user=request.user if request.user.is_authenticated else None,
+        secret_name=secret.name if secret else '',
+        action=action,
+        result=result,
+        reason=reason,
+        ip_address=get_client_ip(request),
+    )
+
+
+class SecretRecordViewSet(OptionalPaginationMixin, BaseViewSet):
+    audit_module = 'secret_record'
+    permission_classes = [SecretRecordPermission]
+    queryset = SecretRecord.objects.select_related(
+        'datacenter',
+        'rack',
+        'rack__datacenter',
+        'rack_device',
+        'rack_device__rack',
+        'rack_device__rack__datacenter',
+        'ip_address',
+        'created_by',
+    ).all()
+    serializer_class = SecretRecordSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name', 'username_hint', 'owner_team', 'notes']
+
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        instance = serializer.save(created_by=self.request.user)
+        payload = instance._pending_secret_payload
+        try:
+            vault_write_secret(
+                instance.vault_path,
+                payload['username'],
+                payload['secret_value'],
+                {'record_id': instance.pk, 'name': instance.name},
+            )
+        except VaultError as exc:
+            raise VaultServiceUnavailable(str(exc)) from exc
+        instance.last_rotated_at = timezone.now()
+        instance.save(update_fields=['last_rotated_at', 'updated_at'])
+        record_secret_audit(self.request, instance, 'create', reason='创建密码台账')
+        record_audit(self.request, self.audit_module, 'create', instance, '创建密码台账（密文存储于 OpenBao）')
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        payload = getattr(instance, '_pending_secret_payload', None)
+        if payload:
+            try:
+                vault_write_secret(
+                    instance.vault_path,
+                    payload['username'],
+                    payload['secret_value'],
+                    {'record_id': instance.pk, 'name': instance.name},
+                )
+            except VaultError as exc:
+                raise VaultServiceUnavailable(str(exc)) from exc
+            instance.last_rotated_at = timezone.now()
+            instance.save(update_fields=['last_rotated_at', 'updated_at'])
+        record_secret_audit(
+            self.request,
+            instance,
+            'rotate' if payload else 'update',
+            reason='轮换密码' if payload else '更新密码台账',
+        )
+        record_audit(self.request, self.audit_module, 'update', instance, '更新密码台账')
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)
+
+    def perform_destroy(self, instance):
+        try:
+            vault_delete_secret(instance.vault_path)
+        except VaultError as exc:
+            raise VaultServiceUnavailable(str(exc)) from exc
+        record_secret_audit(self.request, instance, 'delete', reason='删除密码台账及 OpenBao 密文')
+        record_audit(self.request, self.audit_module, 'delete', instance, '删除密码台账及 OpenBao 密文')
+        instance.delete()
+
+    @action(detail=True, methods=['post'], permission_classes=[SecretActionPermission], url_path='request-access')
+    def request_access(self, request, pk=None):
+        secret = self.get_object()
+        role = get_user_role(request.user)
+        if role not in ('admin', 'dc_operator', 'ip_manager'):
+            record_secret_audit(request, secret, 'request', 'denied', '当前角色无取用权限')
+            raise PermissionDenied('当前角色不能申请取用密码。')
+        reason = str(request.data.get('reason') or '').strip()
+        if not reason:
+            return Response({'detail': '请填写取用原因。'}, status=status.HTTP_400_BAD_REQUEST)
+        pending = SecretAccessRequest.objects.filter(
+            secret=secret,
+            requester=request.user,
+            status='pending',
+        ).first()
+        if pending:
+            return Response(SecretAccessRequestSerializer(pending).data, status=status.HTTP_200_OK)
+        access_request = SecretAccessRequest.objects.create(
+            secret=secret,
+            requester=request.user,
+            reason=reason,
+        )
+        record_secret_audit(request, secret, 'request', reason=reason)
+        return Response(SecretAccessRequestSerializer(access_request).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], permission_classes=[SecretActionPermission])
+    def reveal(self, request, pk=None):
+        secret = self.get_object()
+        reason = str(request.data.get('reason') or '直接查看密码记录').strip()
+
+        role = get_user_role(request.user)
+        if role not in ('admin', 'dc_operator', 'ip_manager'):
+            record_secret_audit(request, secret, 'reveal', 'denied', f'角色无权限：{reason}')
+            raise PermissionDenied('当前角色不能查看密码。')
+        if secret.status != 'active':
+            record_secret_audit(request, secret, 'reveal', 'denied', f'条目已停用：{reason}')
+            raise PermissionDenied('该密码条目已停用。')
+
+        try:
+            payload = vault_read_secret(secret.vault_path)
+        except VaultError as exc:
+            record_secret_audit(request, secret, 'reveal', 'error', f'OpenBao 读取失败：{reason}')
+            raise VaultServiceUnavailable(str(exc)) from exc
+        if not payload.get('secret_value'):
+            record_secret_audit(request, secret, 'reveal', 'error', f'OpenBao 返回空凭据：{reason}')
+            raise VaultServiceUnavailable('OpenBao 中的凭据内容为空。')
+
+        record_secret_audit(request, secret, 'reveal', reason=reason)
+        response = Response(
+            {
+                'username': payload.get('username', ''),
+                'secret_value': payload['secret_value'],
+                'expires_in': 60,
+            }
+        )
+        response['Cache-Control'] = 'no-store, private, max-age=0'
+        response['Pragma'] = 'no-cache'
+        return response
+
+    @action(detail=True, methods=['post'], permission_classes=[SecretActionPermission])
+    def rotate(self, request, pk=None):
+        secret = self.get_object()
+        if get_user_role(request.user) != 'admin':
+            raise PermissionDenied('仅超级管理员可以轮换密码。')
+        current_password = request.data.get('current_password') or ''
+        secret_value = request.data.get('secret_value') or ''
+        username = request.data.get('secret_username')
+        reason = str(request.data.get('reason') or '管理员轮换密码').strip()
+        if not request.user.check_password(current_password):
+            record_secret_audit(request, secret, 'rotate', 'denied', '二次验证失败')
+            raise PermissionDenied('当前登录密码验证失败。')
+        if not secret_value:
+            return Response({'detail': '新密码或密钥不能为空。'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            vault_write_secret(
+                secret.vault_path,
+                username if username is not None else secret.username_hint,
+                secret_value,
+                {'record_id': secret.pk, 'name': secret.name},
+            )
+        except VaultError as exc:
+            record_secret_audit(request, secret, 'rotate', 'error', reason)
+            raise VaultServiceUnavailable(str(exc)) from exc
+        if username is not None:
+            secret.username_hint = username
+        secret.last_rotated_at = timezone.now()
+        secret.save(update_fields=['username_hint', 'last_rotated_at', 'updated_at'])
+        record_secret_audit(request, secret, 'rotate', reason=reason)
+        return Response(SecretRecordSerializer(secret, context={'request': request}).data)
+
+
+class SecretAccessRequestViewSet(OptionalPaginationMixin, viewsets.ReadOnlyModelViewSet):
+    authentication_classes = (SessionAuthentication, BasicAuthentication)
+    permission_classes = [SecretActionPermission]
+    serializer_class = SecretAccessRequestSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['secret__name', 'requester__username', 'reason', 'review_comment']
+
+    def get_queryset(self):
+        queryset = SecretAccessRequest.objects.select_related(
+            'secret', 'requester', 'reviewed_by'
+        ).all()
+        if get_user_role(self.request.user) in ('admin', 'auditor'):
+            return queryset
+        return queryset.filter(requester=self.request.user)
+
+    def _review(self, request, approved):
+        if get_user_role(request.user) != 'admin':
+            raise PermissionDenied('仅超级管理员可以审批密码取用申请。')
+        access_request = self.get_object()
+        if access_request.status != 'pending':
+            return Response({'detail': '该申请已经处理。'}, status=status.HTTP_400_BAD_REQUEST)
+        access_request.status = 'approved' if approved else 'rejected'
+        access_request.reviewed_by = request.user
+        access_request.reviewed_at = timezone.now()
+        access_request.review_comment = str(request.data.get('review_comment') or '').strip()
+        if approved:
+            try:
+                requested_minutes = int(request.data.get('valid_minutes') or 30)
+            except (TypeError, ValueError):
+                requested_minutes = 30
+            minutes = max(5, min(requested_minutes, 240))
+            access_request.approved_expires_at = timezone.now() + timedelta(minutes=minutes)
+        access_request.save()
+        record_secret_audit(
+            request,
+            access_request.secret,
+            'approve' if approved else 'reject',
+            reason=access_request.review_comment,
+        )
+        return Response(self.get_serializer(access_request).data)
+
+    @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        return self._review(request, True)
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        return self._review(request, False)
+
+
+class SecretAuditEventViewSet(OptionalPaginationMixin, viewsets.ReadOnlyModelViewSet):
+    authentication_classes = (SessionAuthentication, BasicAuthentication)
+    permission_classes = [SecretAuditPermission]
+    queryset = SecretAuditEvent.objects.select_related('secret', 'user').all()
+    serializer_class = SecretAuditEventSerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['secret_name', 'user__username', 'action', 'result', 'reason', 'ip_address']
+
+
 class BlocklistViewSet(OptionalPaginationMixin, BaseViewSet):
     audit_module = 'blocklist'
     permission_classes = [IsAdminUser]
@@ -1851,6 +2127,7 @@ class ResidentStaffViewSet(OptionalPaginationMixin, BaseViewSet):
         )
 
     @action(detail=False, methods=['post'], parser_classes=[MultiPartParser])
+    @transaction.atomic
     def import_excel(self, request):
         uploaded_file = request.FILES.get('file')
         if not uploaded_file:
@@ -1942,6 +2219,11 @@ def api_resident_intake(request):
         intake_link, error_response = _resolve_resident_intake_link(token)
         if error_response is not None:
             return error_response
+    elif not permanent_resident_intake_allowed():
+        return Response(
+            {'detail': '驻场登记必须使用管理员生成的有效链接。'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     if request.method == 'GET':
         return Response(
@@ -1973,8 +2255,8 @@ def api_resident_intake(request):
             'project_name': (company_profile.get('project_name') or '').strip(),
             'department': (company_profile.get('department') or '').strip(),
             'resident_type': company_profile.get('resident_type') or 'implementation',
-            'start_date': company_profile.get('start_date') or '',
-            'end_date': company_profile.get('end_date') or '',
+            'start_date': company_profile.get('start_date') or None,
+            'end_date': company_profile.get('end_date') or None,
         }
 
         if not common_payload['company']:
@@ -2042,6 +2324,9 @@ def api_resident_intake(request):
                 'created': created_count,
                 'updated': updated_count,
                 'registration_codes': [resident.registration_code for resident in saved_residents],
+                'export_token': issue_resident_export_token(
+                    resident.registration_code for resident in saved_residents
+                ),
                 'residents': ResidentStaffSerializer(saved_residents, many=True).data,
             },
             status=response_status,
@@ -2069,6 +2354,7 @@ def api_resident_intake(request):
                 'updated': 0 if existing_resident is None else 1,
                 'registration_code': resident.registration_code,
                 'registration_codes': [resident.registration_code],
+                'export_token': issue_resident_export_token([resident.registration_code]),
                 'resident': ResidentStaffSerializer(resident).data,
                 'residents': [ResidentStaffSerializer(resident).data],
             },
@@ -2082,6 +2368,7 @@ def api_resident_intake(request):
 @authentication_classes([])
 def api_resident_intake_export_pdf(request):
     registration_codes = request.data.get('registration_codes') or []
+    export_token = request.data.get('export_token') or ''
     if isinstance(registration_codes, str):
         try:
             registration_codes = json.loads(registration_codes)
@@ -2091,6 +2378,13 @@ def api_resident_intake_export_pdf(request):
     registration_codes = [str(code).strip() for code in registration_codes if str(code).strip()]
     if not registration_codes:
         return Response({'detail': '请先提供要导出的登记编号。'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        if not validate_resident_export_token(export_token, registration_codes):
+            raise signing.BadSignature('Requested records are not covered by the token.')
+    except signing.SignatureExpired:
+        return Response({'detail': '导出凭证已过期，请重新提交登记。'}, status=status.HTTP_410_GONE)
+    except signing.BadSignature:
+        return Response({'detail': '导出凭证无效。'}, status=status.HTTP_403_FORBIDDEN)
 
     residents_map = {
         resident.registration_code: resident
@@ -2161,7 +2455,8 @@ def public_change_request_detail(request, token):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         topology = build_change_request_topology_rows(
-            Datacenter.objects.prefetch_related('racks__devices').all()
+            Datacenter.objects.prefetch_related('racks__devices').all(),
+            include_sensitive=False,
         )
         return Response(
             {
@@ -2174,7 +2469,8 @@ def public_change_request_detail(request, token):
 
     serializer = DatacenterChangeRequestPublicSerializer(change_request, context={'request': request})
     topology = build_change_request_topology_rows(
-        Datacenter.objects.prefetch_related('racks__devices').all()
+        Datacenter.objects.prefetch_related('racks__devices').all(),
+        include_sensitive=False,
     )
     return Response({'status': 'success', 'request': serializer.data, 'topology': topology})
 
@@ -2300,6 +2596,14 @@ class DatacenterChangeRequestViewSet(OptionalPaginationMixin, BaseViewSet):
         'items__serial_number',
     ]
 
+    def _enforce_reviewer_separation(self, change_request):
+        if (
+            change_request.created_by_id
+            and change_request.created_by_id == self.request.user.id
+            and get_user_role(self.request.user) != 'admin'
+        ):
+            raise PermissionDenied('申请创建人不能审批或驳回自己的申请。')
+
     def destroy(self, request, *args, **kwargs):
         change_request = self.get_object()
         if change_request.status != 'draft':
@@ -2313,39 +2617,24 @@ class DatacenterChangeRequestViewSet(OptionalPaginationMixin, BaseViewSet):
     @action(detail=True, methods=['post'])
     def submit(self, request, pk=None):
         change_request = self.get_object()
-        if change_request.status not in {'draft', 'rejected'}:
-            return Response({'detail': '当前状态不支持提交审批。'}, status=status.HTTP_400_BAD_REQUEST)
-        change_request.status = 'submitted'
-        change_request.save(update_fields=['status', 'updated_at'])
+        transition_change_request(change_request, 'submit')
         record_audit(request, self.audit_module, 'submit', change_request, '机房设备变更申请已提交审批')
         return Response({'status': 'success', 'request': self.get_serializer(change_request).data})
 
     @action(detail=True, methods=['post'])
     def approve(self, request, pk=None):
         change_request = self.get_object()
-        change_request.status = 'approved'
-        change_request.reviewer_name = get_actor_name(request.user)
-        change_request.reviewed_at = timezone.now()
-        if request.data.get('approval_code') is not None:
-            change_request.approval_code = request.data.get('approval_code')
-        if request.data.get('department_comment') is not None:
-            change_request.department_comment = request.data.get('department_comment')
-        if request.data.get('it_comment') is not None:
-            change_request.it_comment = request.data.get('it_comment')
-        comment = request.data.get('review_comment')
-        if comment is not None:
-            change_request.review_comment = comment
-        change_request.save(
-            update_fields=[
-                'status',
-                'reviewer_name',
-                'reviewed_at',
-                'approval_code',
-                'department_comment',
-                'it_comment',
-                'review_comment',
-                'updated_at',
-            ]
+        self._enforce_reviewer_separation(change_request)
+        transition_change_request(
+            change_request,
+            'approve',
+            actor_name=get_actor_name(request.user),
+            updates={
+                'approval_code': request.data.get('approval_code'),
+                'department_comment': request.data.get('department_comment'),
+                'it_comment': request.data.get('it_comment'),
+                'review_comment': request.data.get('review_comment'),
+            },
         )
         record_audit(request, self.audit_module, 'approve', change_request, '机房设备变更申请已批准')
         return Response({'status': 'success', 'request': self.get_serializer(change_request).data})
@@ -2353,37 +2642,29 @@ class DatacenterChangeRequestViewSet(OptionalPaginationMixin, BaseViewSet):
     @action(detail=True, methods=['post'])
     def reject(self, request, pk=None):
         change_request = self.get_object()
-        change_request.status = 'rejected'
-        change_request.reviewer_name = get_actor_name(request.user)
-        change_request.reviewed_at = timezone.now()
-        comment = request.data.get('review_comment')
-        if comment is not None:
-            change_request.review_comment = comment
-        change_request.save(update_fields=['status', 'reviewer_name', 'reviewed_at', 'review_comment', 'updated_at'])
+        self._enforce_reviewer_separation(change_request)
+        transition_change_request(
+            change_request,
+            'reject',
+            actor_name=get_actor_name(request.user),
+            updates={'review_comment': request.data.get('review_comment')},
+        )
         record_audit(request, self.audit_module, 'reject', change_request, '机房设备变更申请已驳回')
         return Response({'status': 'success', 'request': self.get_serializer(change_request).data})
 
     @action(detail=True, methods=['post'])
     def schedule(self, request, pk=None):
         change_request = self.get_object()
-        change_request.status = 'scheduled'
-        if request.data.get('planned_execute_at'):
-            change_request.planned_execute_at = request.data.get('planned_execute_at')
-        if request.data.get('review_comment') is not None:
-            change_request.review_comment = request.data.get('review_comment')
-        if request.data.get('department_comment') is not None:
-            change_request.department_comment = request.data.get('department_comment')
-        if request.data.get('it_comment') is not None:
-            change_request.it_comment = request.data.get('it_comment')
-        change_request.save(
-            update_fields=[
-                'status',
-                'planned_execute_at',
-                'review_comment',
-                'department_comment',
-                'it_comment',
-                'updated_at',
-            ]
+        transition_change_request(
+            change_request,
+            'schedule',
+            actor_name=get_actor_name(request.user),
+            updates={
+                'planned_execute_at': request.data.get('planned_execute_at'),
+                'review_comment': request.data.get('review_comment'),
+                'department_comment': request.data.get('department_comment'),
+                'it_comment': request.data.get('it_comment'),
+            },
         )
         record_audit(request, self.audit_module, 'schedule', change_request, '机房设备变更申请已排期')
         return Response({'status': 'success', 'request': self.get_serializer(change_request).data})
@@ -2400,11 +2681,15 @@ class DatacenterChangeRequestViewSet(OptionalPaginationMixin, BaseViewSet):
                 change_request = serializer.save()
 
             execution_rows = apply_change_request_execution(change_request)
-            change_request.status = 'completed'
-            change_request.executor_name = request.data.get('executor_name') or get_actor_name(request.user)
-            change_request.execution_comment = request.data.get('execution_comment', change_request.execution_comment)
-            change_request.executed_at = timezone.now()
-            change_request.save(update_fields=['status', 'executor_name', 'execution_comment', 'executed_at', 'updated_at'])
+            transition_change_request(
+                change_request,
+                'complete',
+                actor_name=get_actor_name(request.user),
+                updates={
+                    'executor_name': request.data.get('executor_name'),
+                    'execution_comment': request.data.get('execution_comment', change_request.execution_comment),
+                },
+            )
 
         record_audit(
             request,
@@ -2420,6 +2705,18 @@ class DatacenterChangeRequestViewSet(OptionalPaginationMixin, BaseViewSet):
                 'execution_report': execution_rows,
             }
         )
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        change_request = self.get_object()
+        transition_change_request(
+            change_request,
+            'cancel',
+            actor_name=get_actor_name(request.user),
+            updates={'review_comment': request.data.get('review_comment')},
+        )
+        record_audit(request, self.audit_module, 'cancel', change_request, '机房设备变更申请已取消')
+        return Response({'status': 'success', 'request': self.get_serializer(change_request).data})
 
     @action(detail=True, methods=['post'])
     def regenerate_link(self, request, pk=None):
@@ -2595,142 +2892,18 @@ def download_backup(request):
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def public_dcim_overview(request):
-    datacenter_rows = []
-    total_racks = 0
-    total_devices = 0
-    total_capacity = 0
-    total_used = 0
-    total_planned_power = 0
-    total_actual_power = 0
+    if not public_dcim_access_allowed(request):
+        return Response({'detail': '公开机房视图未启用或访问令牌无效。'}, status=status.HTTP_403_FORBIDDEN)
 
-    datacenters = Datacenter.objects.all().order_by('name')
-    for datacenter in datacenters:
-        racks = list(datacenter.racks.all().order_by('code', 'id'))
-        rack_payload = []
-        dc_devices = 0
-        dc_capacity = 0
-        dc_used = 0
-        dc_planned_power = 0
-        dc_actual_power = 0
-
-        for rack in racks:
-            devices = list(rack.devices.all().order_by('-position', 'id'))
-            rack_height = int(rack.height or 42)
-            used_units = sum(max(1, int(device.u_height or 1)) for device in devices)
-            free_units = max(0, rack_height - used_units)
-            utilization = min(100, round((used_units / rack_height) * 100)) if rack_height else 0
-            planned_power, actual_power = _resolve_rack_power_snapshot(rack, devices)
-            device_payload = [
-                {
-                    'id': device.id,
-                    'name': device.name,
-                    'position': device.position,
-                    'u_height': device.u_height,
-                    'device_type': device.device_type,
-                    'mgmt_ip': device.mgmt_ip,
-                    'project': device.project,
-                    'contact': device.contact,
-                    'power_usage': device.power_usage,
-                }
-                for device in devices
-            ]
-
-            rack_payload.append(
-                {
-                    'id': rack.id,
-                    'code': rack.code,
-                    'name': rack.name or rack.code,
-                    'height': rack_height,
-                    'device_count': len(devices),
-                    'used_units': used_units,
-                    'free_units': free_units,
-                    'utilization': utilization,
-                    'planned_power': planned_power,
-                    'actual_power': actual_power,
-                    'devices': device_payload,
-                }
-            )
-
-            dc_devices += len(devices)
-            dc_capacity += rack_height
-            dc_used += used_units
-            dc_planned_power += planned_power
-            dc_actual_power += actual_power
-
-        dc_free = max(0, dc_capacity - dc_used)
-        datacenter_rows.append(
-            {
-                'id': datacenter.id,
-                'name': datacenter.name,
-                'location': datacenter.location,
-                'contact_phone': datacenter.contact_phone,
-                'rack_count': len(racks),
-                'device_count': dc_devices,
-                'total_u': dc_capacity,
-                'used_u': dc_used,
-                'free_u': dc_free,
-                'utilization': min(100, round((dc_used / dc_capacity) * 100)) if dc_capacity else 0,
-                'planned_power': dc_planned_power,
-                'actual_power': dc_actual_power,
-                'racks': rack_payload,
-            }
-        )
-
-        total_racks += len(racks)
-        total_devices += dc_devices
-        total_capacity += dc_capacity
-        total_used += dc_used
-        total_planned_power += dc_planned_power
-        total_actual_power += dc_actual_power
-
+    include_sensitive = bool(getattr(settings, 'PUBLIC_DCIM_INCLUDE_SENSITIVE', False))
+    datacenters = Datacenter.objects.prefetch_related('racks__devices').order_by('name')
     return Response(
-        {
-            'updated_at': timezone.localtime().strftime('%Y-%m-%d %H:%M'),
-            'summary': {
-                'datacenter_count': len(datacenter_rows),
-                'rack_count': total_racks,
-                'device_count': total_devices,
-                'total_u': total_capacity,
-                'used_u': total_used,
-                'free_u': max(0, total_capacity - total_used),
-                'utilization': min(100, round((total_used / total_capacity) * 100)) if total_capacity else 0,
-                'planned_power': total_planned_power,
-                'actual_power': total_actual_power,
-            },
-            'datacenters': datacenter_rows,
-        }
+        build_public_dcim_payload(
+            datacenters,
+            include_sensitive=include_sensitive,
+            updated_at=timezone.localtime().strftime('%Y-%m-%d %H:%M'),
+        )
     )
-
-
-def _split_rack_description(description):
-    raw_description = description or ''
-    pdu_count = 2
-    pdu_power = 0
-    match = re.search(r'__PDU_META__:({.*})$', raw_description, re.MULTILINE)
-    if match:
-        try:
-            meta = json.loads(match.group(1))
-            pdu_count = int(meta.get('count') or 2)
-            pdu_power = int(meta.get('power') or 0)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            pdu_count = 2
-            pdu_power = 0
-        raw_description = re.sub(r'__PDU_META__:({.*})$', '', raw_description, flags=re.MULTILINE).strip()
-    return raw_description, pdu_count, pdu_power
-
-
-def _resolve_rack_power_snapshot(rack, devices):
-    planned_from_devices = sum(max(0, int(device.power_usage or 0)) for device in devices)
-    planned_power = planned_from_devices or max(0, int(rack.power_limit or 0))
-    _, _, pdu_power = _split_rack_description(rack.description)
-    actual_power = max(0, int(pdu_power or 0)) or planned_power
-    return planned_power, actual_power
-
-
-def _merge_rack_description(description, pdu_count, pdu_power):
-    cleaned = (description or '').strip()
-    meta = json.dumps({'count': int(pdu_count or 2), 'power': int(pdu_power or 0)}, ensure_ascii=False)
-    return f'{cleaned}\n__PDU_META__:{meta}'.strip() if cleaned else f'__PDU_META__:{meta}'
 
 
 def _dcim_import_sheets(file_obj):
@@ -2947,10 +3120,12 @@ def download_dcim_template(request):
                 '占用高度(U)': 2,
                 '设备类型': 'switch',
                 '品牌': 'Huawei',
+                '型号': 'CloudEngine',
                 '管理IP': '172.25.1.10',
                 '项目名称': '骨干网络',
                 '负责人': '张三',
                 '额定功率(W)': 350,
+                '典型功率(W)': 260,
                 '配置信息': '24口万兆交换机',
                 '序列号(SN)': 'SN-0001',
                 '固定资产编号': 'ASSET-0001',
@@ -2982,7 +3157,6 @@ def download_dcim_template(request):
 def export_dcim_excel(request):
     rack_rows = []
     for rack in Rack.objects.select_related('datacenter').all().order_by('datacenter__name', 'code'):
-        description, pdu_count, pdu_power = _split_rack_description(rack.description)
         rack_rows.append(
             {
                 '机房名称': rack.datacenter.name,
@@ -2991,9 +3165,9 @@ def export_dcim_excel(request):
                 '机柜名称': rack.name,
                 '高度(U)': rack.height,
                 '额定功率(W)': rack.power_limit,
-                'PDU数量': pdu_count,
-                'PDU实测功率(W)': pdu_power,
-                '备注': description,
+                'PDU数量': rack.pdu_count,
+                'PDU实测功率(W)': rack.pdu_power,
+                '备注': rack.description,
             }
         )
 
@@ -3012,10 +3186,12 @@ def export_dcim_excel(request):
                 '占用高度(U)': device.u_height,
                 '设备类型': device.device_type,
                 '品牌': device.brand,
+                '型号': device.model,
                 '管理IP': device.mgmt_ip,
                 '项目名称': device.project,
                 '负责人': device.contact,
                 '额定功率(W)': device.power_usage,
+                '典型功率(W)': device.typical_power,
                 '配置信息': device.specs,
                 '序列号(SN)': device.sn,
                 '固定资产编号': device.asset_tag,
@@ -3069,6 +3245,7 @@ def preview_dcim_import_excel(request):
 @parser_classes([MultiPartParser])
 @authentication_classes([SessionAuthentication, BasicAuthentication])
 @permission_classes([DcimWritePermission])
+@transaction.atomic
 def import_dcim_excel(request):
     file_obj = request.FILES.get('file')
     if not file_obj:
@@ -3098,11 +3275,9 @@ def import_dcim_excel(request):
                 'name': str(row.get('机柜名称', '')).strip(),
                 'height': int(row.get('高度(U)', 42) or 42),
                 'power_limit': int(row.get('额定功率(W)', 0) or 0),
-                'description': _merge_rack_description(
-                    str(row.get('备注', '')).strip(),
-                    row.get('PDU数量', 2) or 2,
-                    row.get('PDU实测功率(W)', 0) or 0,
-                ),
+                'pdu_count': int(row.get('PDU数量', 2) or 2),
+                'pdu_power': int(row.get('PDU实测功率(W)', 0) or 0),
+                'description': str(row.get('备注', '')).strip(),
             }
             rack, _ = Rack.objects.update_or_create(
                 datacenter=datacenter,
@@ -3133,10 +3308,12 @@ def import_dcim_excel(request):
                 'u_height': int(row.get('占用高度(U)', 1) or 1),
                 'device_type': str(row.get('设备类型', 'server') or 'server').strip(),
                 'brand': str(row.get('品牌', '')).strip(),
+                'model': str(row.get('型号', '')).strip(),
                 'mgmt_ip': str(row.get('管理IP', '')).strip() or None,
                 'project': str(row.get('项目名称', '')).strip(),
                 'contact': str(row.get('负责人', '')).strip(),
                 'power_usage': int(row.get('额定功率(W)', 0) or 0),
+                'typical_power': int(row.get('典型功率(W)', 0) or 0),
                 'specs': str(row.get('配置信息', '')).strip(),
                 'sn': str(row.get('序列号(SN)', '')).strip() or None,
                 'asset_tag': str(row.get('固定资产编号', '')).strip(),
@@ -3147,11 +3324,22 @@ def import_dcim_excel(request):
                 'os_version': str(row.get('OS/固件', '')).strip(),
             }
 
-            match_kwargs = {'rack': rack, 'position': int(row.get('起始U位', 1) or 1)}
+            position = int(row.get('起始U位', 1) or 1)
+            match_kwargs = {'rack': rack, 'position': position}
             if defaults['asset_tag']:
                 match_kwargs = {'rack': rack, 'asset_tag': defaults['asset_tag']}
 
-            RackDevice.objects.update_or_create(defaults=defaults, **match_kwargs)
+            existing_device = RackDevice.objects.filter(**match_kwargs).first()
+            device_serializer = RackDeviceSerializer(
+                existing_device,
+                data={
+                    **defaults,
+                    'rack': rack.id,
+                    'position': position,
+                },
+            )
+            device_serializer.is_valid(raise_exception=True)
+            device_serializer.save()
             imported_devices += 1
 
         record_audit(
@@ -3165,6 +3353,11 @@ def import_dcim_excel(request):
                 'status': 'success',
                 'message': f'已导入/更新 {imported_racks} 个机柜，{imported_devices} 台设备。',
             }
+        )
+    except serializers.ValidationError as exc:
+        return Response(
+            {'status': 'error', 'message': 'DCIM 资产数据校验失败。', 'errors': exc.detail},
+            status=status.HTTP_400_BAD_REQUEST,
         )
     except Exception as exc:
         logger.exception('Import dcim excel failed.')
@@ -3460,6 +3653,7 @@ def preview_import_excel(request):
 @parser_classes([MultiPartParser])
 @authentication_classes([SessionAuthentication, BasicAuthentication])
 @permission_classes([IpamWritePermission])
+@transaction.atomic
 def import_excel(request):
     file_obj = request.FILES.get('file')
     if not file_obj:
@@ -3551,10 +3745,17 @@ def import_excel(request):
 
 
 @api_view(['GET'])
-@permission_classes([AllowAny])
-@authentication_classes([])
+@permission_classes([IsAuthenticated])
+@authentication_classes([SessionAuthentication])
 def api_version(request):
     return Response({'status': 'success', 'backend': get_backend_version_payload()})
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+@authentication_classes([])
+def api_health(request):
+    return Response({'status': 'ok'})
 
 
 @api_view(['GET'])
@@ -3612,4 +3813,3 @@ def init_datacenters(request):
     except Exception as exc:
         logger.exception('Init datacenters failed.')
         return Response({'status': 'error', 'message': str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-

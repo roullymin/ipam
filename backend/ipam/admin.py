@@ -10,6 +10,9 @@ from .models import (
     RackDevice,
     ResidentDevice,
     ResidentStaff,
+    SecretAccessRequest,
+    SecretAuditEvent,
+    SecretRecord,
     Subnet,
     UserProfile,
 )
@@ -111,3 +114,36 @@ class ResidentStaffAdmin(admin.ModelAdmin):
     list_filter = ('approval_status', 'resident_type', 'needs_seat', 'office_location')
     search_fields = ('registration_code', 'name', 'company', 'phone', 'project_name')
     inlines = [ResidentDeviceInline]
+
+
+@admin.register(SecretRecord)
+class SecretRecordAdmin(admin.ModelAdmin):
+    list_display = ('name', 'credential_type', 'target_type', 'environment', 'sensitivity', 'status', 'expires_at')
+    list_filter = ('credential_type', 'target_type', 'environment', 'sensitivity', 'status')
+    search_fields = ('name', 'username_hint', 'owner_team', 'notes')
+    readonly_fields = ('vault_path', 'created_by', 'created_at', 'updated_at', 'last_rotated_at')
+
+
+@admin.register(SecretAccessRequest)
+class SecretAccessRequestAdmin(admin.ModelAdmin):
+    list_display = ('secret', 'requester', 'status', 'reviewed_by', 'approved_expires_at', 'created_at')
+    list_filter = ('status',)
+    search_fields = ('secret__name', 'requester__username', 'reason')
+    readonly_fields = ('created_at', 'used_at')
+
+
+@admin.register(SecretAuditEvent)
+class SecretAuditEventAdmin(admin.ModelAdmin):
+    list_display = ('secret_name', 'user', 'action', 'result', 'ip_address', 'created_at')
+    list_filter = ('action', 'result')
+    search_fields = ('secret_name', 'user__username', 'reason', 'ip_address')
+    readonly_fields = ('secret', 'user', 'secret_name', 'action', 'result', 'reason', 'ip_address', 'created_at')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

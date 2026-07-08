@@ -1,17 +1,10 @@
 import { useRef, useState } from 'react';
 
 import { safeFetch } from '../lib/api';
-import { buildDcimExportPayload, exportDcimHtmlReport, exportDcimImageReport } from '../lib/dcimExport';
 
 export function useImportExportHandlers({
-  activeLocation,
   alert,
-  currentRacks,
-  rackDevices,
-  datacenterPowerStats,
-  datacenters,
   extractResponseMessage,
-  getRackCalculatedPower,
   refreshData,
 }) {
   const fileInputRef = useRef(null);
@@ -89,43 +82,8 @@ export function useImportExportHandlers({
     window.open(target, '_blank');
   };
 
-  const handleExportHtml = () => {
-    try {
-      const snapshot = buildDcimExportPayload({
-        datacenters,
-        activeLocation,
-        racks: currentRacks,
-        rackDevices,
-        datacenterPowerStats,
-        getRackCalculatedPower,
-      });
-      exportDcimHtmlReport(snapshot);
-    } catch (error) {
-      alert(`机房设备 HTML 导出失败：${error.message}`);
-    }
-  };
-
   const handleExportExcel = (context = 'ipam') => {
     window.open(context === 'dcim' ? '/api/dcim/export-excel/' : '/api/export-excel/', '_blank');
-  };
-
-  const handleExportImage = async () => {
-    try {
-      const snapshot = buildDcimExportPayload({
-        datacenters,
-        activeLocation,
-        racks: currentRacks,
-        rackDevices,
-        datacenterPowerStats,
-        getRackCalculatedPower,
-      });
-      const result = await exportDcimImageReport(snapshot);
-      if (result?.format === 'svg') {
-        alert('当前浏览器未能生成 PNG，已自动导出 SVG 图片文件。');
-      }
-    } catch (error) {
-      alert(`机房设备图片导出失败：${error.message}`);
-    }
   };
 
   return {
@@ -139,9 +97,7 @@ export function useImportExportHandlers({
     handleConfirmImport,
     handleImportClick,
     handleDownloadTemplate,
-    handleExportHtml,
     handleExportExcel,
-    handleExportImage,
     closeImportWizard: () => {
       setImportWizardOpen(false);
       setPendingFile(null);

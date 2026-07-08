@@ -53,3 +53,18 @@ class IpamWritePermission(BaseRolePermission):
 class DcimWritePermission(BaseRolePermission):
     read_roles = ('admin', 'dc_operator')
     write_roles = ('admin', 'dc_operator')
+
+
+class SecretRecordPermission(BaseRolePermission):
+    read_roles = ('admin', 'dc_operator', 'ip_manager', 'auditor')
+    write_roles = ('admin',)
+
+
+class SecretActionPermission(BaseRolePermission):
+    read_roles = ('admin', 'dc_operator', 'ip_manager', 'auditor')
+    write_roles = ('admin', 'dc_operator', 'ip_manager', 'auditor')
+
+
+class SecretAuditPermission(BaseRolePermission):
+    read_roles = ('admin', 'auditor')
+    write_roles = ()

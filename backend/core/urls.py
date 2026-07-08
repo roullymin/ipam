@@ -18,6 +18,9 @@ router.register(r'racks', views.RackViewSet)
 router.register(r'rack-devices', views.RackDeviceViewSet)
 router.register(r'resident-staff', views.ResidentStaffViewSet)
 router.register(r'datacenter-change-requests', views.DatacenterChangeRequestViewSet)
+router.register(r'secrets', views.SecretRecordViewSet)
+router.register(r'secret-access-requests', views.SecretAccessRequestViewSet, basename='secret-access-request')
+router.register(r'secret-audit-events', views.SecretAuditEventViewSet)
 
 
 urlpatterns = [
@@ -25,6 +28,7 @@ urlpatterns = [
     path('api/', include(router.urls)),
 
     path('api/csrf/', views.api_csrf),
+    path('api/health/', views.api_health),
     path('api/version/', views.api_version),
     path('api/system/overview/', views.system_overview),
     path('api/me/', views.api_me),
