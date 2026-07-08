@@ -222,12 +222,106 @@ body {
 }
 
 .login-feature-card {
-  min-height: 6rem;
+  position: relative;
+  min-height: 7.65rem;
+  overflow: hidden;
   border-radius: 1rem;
-  border: 1px solid rgba(125, 211, 252, 0.14);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+  border: 1px solid rgba(34, 211, 238, 0.18);
+  background:
+    radial-gradient(circle at 84% 8%, rgba(34, 211, 238, 0.17), transparent 24%),
+    linear-gradient(180deg, rgba(17, 38, 65, 0.72), rgba(8, 19, 35, 0.62));
   padding: 1rem;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 0 22px rgba(34, 211, 238, 0.08);
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.login-feature-card::before {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 2px;
+  content: "";
+  background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.92), rgba(124, 58, 237, 0.82), transparent);
+  opacity: 0.62;
+}
+
+.login-feature-card::after {
+  position: absolute;
+  right: -2rem;
+  top: -2rem;
+  height: 5.5rem;
+  width: 5.5rem;
+  border-radius: 999px;
+  content: "";
+  background: currentColor;
+  opacity: 0.08;
+  filter: blur(2px);
+}
+
+.login-feature-card:hover {
+  border-color: rgba(34, 211, 238, 0.48);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 18px 42px rgba(0, 0, 0, 0.26),
+    0 0 28px rgba(34, 211, 238, 0.16);
+  transform: translateY(-2px);
+}
+
+.login-feature-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: currentColor;
+  font-family: "Bahnschrift", "Aptos Display", "Segoe UI Variable Display", sans-serif;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  opacity: 0.9;
+}
+
+.login-feature-topline svg {
+  filter: drop-shadow(0 0 10px currentColor);
+}
+
+.login-feature-title {
+  margin-top: 1.1rem;
+  color: #f8fbff;
+  font-family: "Bahnschrift", "Aptos Display", "Segoe UI Variable Display", "Microsoft YaHei", sans-serif;
+  font-size: 1.28rem;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+  text-shadow: 0 0 18px rgba(34, 211, 238, 0.16);
+}
+
+.login-feature-code {
+  margin-top: 0.45rem;
+  color: currentColor;
+  font-family: "Bahnschrift", "Aptos Display", "Segoe UI Variable Display", sans-serif;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  opacity: 0.82;
+}
+
+.login-feature-desc {
+  margin-top: 0.55rem;
+  color: rgba(215, 227, 247, 0.72);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.login-feature-card--cyan {
+  color: #22f4ff;
+}
+
+.login-feature-card--violet {
+  color: #a78bfa;
+}
+
+.login-feature-card--blue {
+  color: #60a5fa;
 }
 
 .login-brand-orb {

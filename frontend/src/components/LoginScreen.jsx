@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
 import {
   ArrowRight,
+  Boxes,
+  DatabaseBackup,
   Eye,
   EyeOff,
+  KeyRound,
   LockKeyhole,
   RefreshCw,
   ShieldCheck,
@@ -107,12 +110,25 @@ export default function LoginScreen({ onLogin }) {
               ['Assets', '全网资产视图'],
               ['Vault', 'OpenBao 密文托管'],
               ['Backup', '配置版本留存'],
-            ].map(([title, body]) => (
-              <div key={title} className="login-feature-card">
-                <div className="text-lg font-black text-cyan-100">{title}</div>
-                <div className="mt-2 text-xs text-slate-400">{body}</div>
-              </div>
-            ))}
+            ].map(([title, body], index) => {
+              const meta = {
+                Assets: { title: '资产中心', code: 'ASSETS', body: '全网资产视图', icon: Boxes, tone: 'cyan' },
+                Vault: { title: '密码托管', code: 'VAULT', body: 'OpenBao 密文凭据', icon: KeyRound, tone: 'violet' },
+                Backup: { title: '配置备份', code: 'BACKUP', body: '版本留存与恢复', icon: DatabaseBackup, tone: 'blue' },
+              }[title] || { title, code: title, body, icon: ShieldCheck, tone: 'cyan' };
+              const Icon = meta.icon;
+              return (
+                <div key={title} className={`login-feature-card login-feature-card--${meta.tone}`}>
+                  <div className="login-feature-topline">
+                    <span>{String(index + 1).padStart(2, '0')}</span>
+                    <Icon className="h-4 w-4" />
+                  </div>
+                  <div className="login-feature-title">{meta.title}</div>
+                  <div className="login-feature-code">{meta.code}</div>
+                  <div className="login-feature-desc">{meta.body}</div>
+                </div>
+              );
+            })}
           </div>
         </section>
 
