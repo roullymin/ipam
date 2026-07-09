@@ -2,7 +2,7 @@ django>=4.2
 gunicorn
 pymysql
 cryptography
-paramiko
+paramiko>=3.4,<4
 djangorestframework
 pandas
 openpyxl

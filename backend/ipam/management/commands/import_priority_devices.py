@@ -202,6 +202,23 @@ def _test_login(row, credential):
         return 'failed', str(exc)
 
 
+def _login_category(detail):
+    text = str(detail or '').lower()
+    if 'no acceptable kex' in text or 'ssh peer algorithms' in text or 'kex' in text or 'cipher' in text or 'hostkey' in text:
+        return 'ssh_algorithm'
+    if 'authentication' in text or 'auth' in text or 'password' in text:
+        return 'auth_failed'
+    if 'timed out' in text or 'timeout' in text:
+        return 'timeout'
+    if 'connection refused' in text:
+        return 'refused'
+    if 'no route to host' in text or 'network is unreachable' in text:
+        return 'unreachable'
+    if 'name or service not known' in text or 'temporary failure in name resolution' in text:
+        return 'resolve_failed'
+    return 'other'
+
+
 class Command(BaseCommand):
     help = 'Validate/import a priority device Excel list and optionally test SSH login from the server network.'
 
@@ -299,7 +316,10 @@ class Command(BaseCommand):
                     status, detail = _test_login(row, credential)
                     item['login_status'] = status
                     item['login_detail'] = detail
+                    item['login_category'] = 'success' if status == 'success' else _login_category(detail)
                     counters[f'login_{status}'] += 1
+                    if item['login_category'] != status:
+                        counters[f"login_{item['login_category']}"] += 1
 
             if item['status'] == 'validated':
                 counters['validated'] += 1
