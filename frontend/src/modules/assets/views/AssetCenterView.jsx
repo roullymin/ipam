@@ -83,6 +83,14 @@ const extractManagementHost = (value) => {
   }
 };
 
+const normalizeActionMessage = (message, fallback = '操作失败。') => {
+  const text = safeText(message, fallback);
+  if (/incompatible ssh peer|no acceptable kex|no matching|unable to agree|kex algorithm/i.test(text)) {
+    return 'SSH 算法协商失败：设备只支持较旧的 KEX/HostKey/Cipher 算法。系统已启用旧 SSH 兼容尝试，如果仍失败，请在设备侧启用 diffie-hellman-group14-sha1 / group1-sha1 或升级设备 SSH 算法。';
+  }
+  return text;
+};
+
 const inventoryToken = (value, fallback = 'unknown') => {
   const token = String(value || '')
     .trim()
@@ -2654,6 +2662,7 @@ export default function AssetCenterView({
   const [credentialForm, setCredentialForm] = useState(null);
   const [backupSettingsModal, setBackupSettingsModal] = useState(null);
   const [backupTargetForm, setBackupTargetForm] = useState(null);
+  const [operationNotice, setOperationNotice] = useState(null);
   const secretsLoaded = !dataErrors?.secrets;
 
   const assets = useMemo(
@@ -2735,7 +2744,16 @@ export default function AssetCenterView({
 
   const readApiError = async (response, fallback) => {
     const payload = await response.json().catch(() => ({}));
-    return payload?.detail || payload?.message || fallback;
+    return normalizeActionMessage(payload?.detail || payload?.message, fallback);
+  };
+
+  const showOperationNotice = (tone, title, detail) => {
+    setOperationNotice({
+      id: Date.now(),
+      tone,
+      title,
+      detail: normalizeActionMessage(detail, title),
+    });
   };
 
   const buildAssetSecretPayload = (asset, extra = {}) => ({
@@ -2913,6 +2931,29 @@ export default function AssetCenterView({
       }
       const payload = await response.json().catch(() => ({}));
       window.alert(payload.message || 'SSH 登录测试成功。');
+    } finally {
+      setBackupTestAssetId(null);
+    }
+  };
+
+  const handleTestBackupTargetNotice = async (asset) => {
+    if (!asset?.backup?.targetId) {
+      showOperationNotice('warning', '请先创建配置备份目标', '该资产还没有配置备份目标，先在右侧“备份”里完成设置。');
+      return;
+    }
+    setBackupTestAssetId(asset.id);
+    try {
+      const response = await safeFetch(`/api/config-backup-targets/${asset.backup.targetId}/test/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!response.ok) {
+        showOperationNotice('error', '测试连接失败', await readApiError(response, '测试连接失败。'));
+        await refreshAssets();
+        return;
+      }
+      const payload = await response.json().catch(() => ({}));
+      showOperationNotice('success', '测试连接成功', payload.message || 'SSH 登录测试成功。');
     } finally {
       setBackupTestAssetId(null);
     }
@@ -3284,6 +3325,43 @@ export default function AssetCenterView({
           </div>
         </section>
 
+        {operationNotice ? (
+          <div
+            className={`rounded-2xl border bg-slate-950/95 px-4 py-3 text-slate-100 shadow-[0_18px_50px_rgba(0,0,0,0.28)] ${
+              operationNotice.tone === 'success'
+                ? 'border-emerald-400/35'
+                : operationNotice.tone === 'warning'
+                  ? 'border-amber-400/35'
+                  : 'border-rose-400/35'
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${
+                operationNotice.tone === 'success'
+                  ? 'bg-emerald-400/15 text-emerald-200'
+                  : operationNotice.tone === 'warning'
+                    ? 'bg-amber-400/15 text-amber-200'
+                    : 'bg-rose-400/15 text-rose-200'
+              }`}
+              >
+                {operationNotice.tone === 'success' ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-black">{operationNotice.title}</div>
+                <div className="mt-1 text-xs font-semibold leading-5 text-slate-300">{operationNotice.detail}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOperationNotice(null)}
+                className="rounded-lg p-1 text-slate-400 transition hover:bg-white/10 hover:text-white"
+                title="关闭提示"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         {viewMode === 'overview' ? (
           <AssetOverview
             assets={assets}
@@ -3458,7 +3536,7 @@ export default function AssetCenterView({
                 onOpenCredentialModal={openCredentialModal}
                 onTestCredential={handleTestCredential}
                 onOpenBackupSettings={openBackupSettings}
-                onTestBackupTarget={handleTestBackupTarget}
+                onTestBackupTarget={handleTestBackupTargetNotice}
                 onProvisionAnsible={handleProvisionAnsible}
                 onTestAnsible={handleTestAnsible}
                 backupActionAssetId={backupActionAssetId}

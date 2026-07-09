@@ -13,6 +13,37 @@ from ...models import ConfigBackupVersion
 
 PROMPT_PATTERN = re.compile(r'[<\[][\w\-_.]+[>\]]\s*$')
 
+SSH_NEGOTIATION_MARKERS = (
+    'incompatible ssh peer',
+    'no acceptable kex',
+    'no matching',
+    'unable to agree',
+    'kex',
+    'cipher',
+    'host key',
+    'algorithm',
+)
+
+LEGACY_SSH_KEX_ALGORITHMS = (
+    'diffie-hellman-group14-sha1',
+    'diffie-hellman-group-exchange-sha1',
+    'diffie-hellman-group1-sha1',
+)
+LEGACY_SSH_CIPHERS = (
+    'aes128-cbc',
+    'aes192-cbc',
+    'aes256-cbc',
+    '3des-cbc',
+)
+LEGACY_SSH_DIGESTS = (
+    'hmac-sha1',
+    'hmac-md5',
+)
+LEGACY_SSH_KEY_TYPES = (
+    'ssh-rsa',
+    'ssh-dss',
+)
+
 
 class ConfigBackupError(RuntimeError):
     pass
@@ -109,6 +140,12 @@ def _profile_commands(command_profile):
 def _friendly_error_message(exc):
     message = str(exc) or exc.__class__.__name__
     lowered = message.lower()
+    if _is_ssh_algorithm_error(message):
+        return (
+            'SSH 算法协商失败：设备只支持较旧的 KEX/HostKey/Cipher 算法，'
+            '系统已尝试兼容旧 SSH 协议仍未成功。请检查设备 SSH 算法配置、固件版本，'
+            f'或在设备侧启用 diffie-hellman-group14-sha1 / group1-sha1。原始错误：{message[:500]}'
+        )
     if 'authentication' in lowered or 'auth' in lowered or 'not allowed' in lowered:
         return '登录认证失败，请检查账号、密码和设备 SSH 登录权限。'
     if 'timed out' in lowered or 'timeout' in lowered:
@@ -122,6 +159,45 @@ def _friendly_error_message(exc):
     return message[:2000]
 
 
+def _is_ssh_algorithm_error(message):
+    text = str(message or '')
+    lowered = text.lower()
+    return any(marker in lowered for marker in SSH_NEGOTIATION_MARKERS) or '算法' in text
+
+
+def _prepend_security_algorithms(security_options, attr, algorithms):
+    try:
+        current = tuple(getattr(security_options, attr) or ())
+    except (AttributeError, TypeError):
+        return
+    if not current:
+        return
+    preferred = []
+    for algorithm in algorithms:
+        if algorithm in preferred:
+            continue
+        candidate = tuple(preferred + [algorithm] + [item for item in current if item not in preferred and item != algorithm])
+        try:
+            setattr(security_options, attr, candidate)
+        except (AttributeError, TypeError, ValueError):
+            continue
+        preferred.append(algorithm)
+        current = tuple(getattr(security_options, attr) or current)
+
+
+def _legacy_transport_factory(paramiko_module):
+    def factory(*args, **kwargs):
+        transport = paramiko_module.Transport(*args, **kwargs)
+        security_options = transport.get_security_options()
+        _prepend_security_algorithms(security_options, 'kex', LEGACY_SSH_KEX_ALGORITHMS)
+        _prepend_security_algorithms(security_options, 'ciphers', LEGACY_SSH_CIPHERS)
+        _prepend_security_algorithms(security_options, 'digests', LEGACY_SSH_DIGESTS)
+        _prepend_security_algorithms(security_options, 'key_types', LEGACY_SSH_KEY_TYPES)
+        return transport
+
+    return factory
+
+
 def _connect_ssh_client(target, username, password, ssh_client_factory=None):
     try:
         import paramiko
@@ -132,17 +208,22 @@ def _connect_ssh_client(target, username, password, ssh_client_factory=None):
     ssh_port = int(getattr(target, 'ssh_port', 22) or 22)
     client = ssh_client_factory() if ssh_client_factory else paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    connect_kwargs = {
+        'port': ssh_port,
+        'username': username,
+        'password': password,
+        'timeout': timeout_seconds,
+        'banner_timeout': timeout_seconds,
+        'auth_timeout': timeout_seconds,
+        'look_for_keys': False,
+        'allow_agent': False,
+    }
+    if ssh_client_factory is None:
+        connect_kwargs['transport_factory'] = _legacy_transport_factory(paramiko)
     try:
         client.connect(
             str(target.management_ip),
-            port=ssh_port,
-            username=username,
-            password=password,
-            timeout=timeout_seconds,
-            banner_timeout=timeout_seconds,
-            auth_timeout=timeout_seconds,
-            look_for_keys=False,
-            allow_agent=False,
+            **connect_kwargs,
         )
     except Exception:
         try:
