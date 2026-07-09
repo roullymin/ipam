@@ -378,7 +378,7 @@ def _connect_ssh_client(target, username, password, ssh_client_factory=None):
             str(target.management_ip),
             **connect_kwargs,
         )
-    except Exception:
+    except Exception as exc:
         try:
             client.close()
         except Exception:
