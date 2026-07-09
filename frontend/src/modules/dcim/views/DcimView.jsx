@@ -87,13 +87,13 @@ function IconFrame({ icon: Icon, tone = 'blue', className = '' }) {
 
 function DcimMetricCard({ icon, tone = 'blue', label, value, hint }) {
   return (
-    <div className="dcim-card flex min-h-[128px] items-center justify-between gap-4 p-5">
+    <div className="dcim-card flex min-h-[104px] items-center justify-between gap-3 p-4">
       <div>
         <div className="text-sm font-bold text-slate-500">{label}</div>
-        <div className="mt-3 text-3xl font-black leading-none text-slate-950">{value}</div>
+        <div className="mt-2 text-2xl font-black leading-none text-slate-950">{value}</div>
         <div className="mt-2 text-sm font-semibold text-slate-500">{hint}</div>
       </div>
-      <IconFrame icon={icon} tone={tone} className="h-12 w-12 shrink-0" />
+      <IconFrame icon={icon} tone={tone} className="h-11 w-11 shrink-0" />
     </div>
   );
 }
@@ -566,7 +566,7 @@ export default function DcimView({
   }
 
   return (
-    <div className="dcim-page flex h-full min-h-0 flex-col gap-4 p-4 lg:p-5">
+    <div className="dcim-page flex h-full min-h-0 flex-col gap-3 p-3 lg:p-4">
       {dcimErrors.length > 0 || hasCountMismatch || reportsEmptyDatabase ? (
         <div
           className={`flex flex-wrap items-center justify-between gap-4 rounded-2xl border px-5 py-4 ${
@@ -600,7 +600,7 @@ export default function DcimView({
         </div>
       ) : null}
 
-      <section className="dcim-compact-bar p-3">
+      <section className="dcim-compact-bar shrink-0 p-2.5">
         <div className="flex flex-col gap-2 xl:flex-row xl:items-center">
           <div className="custom-scrollbar flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1">
             <button
@@ -673,7 +673,7 @@ export default function DcimView({
         ) : null}
       </section>
 
-      <section className="dcim-card shrink-0 px-4 py-3">
+      <section className="dcim-room-workbench dcim-card shrink-0 px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2 text-sm font-bold text-blue-700">
@@ -709,14 +709,14 @@ export default function DcimView({
             ['额定功率', `${summary.ratedPower} W`],
             ['典型功率', `${summary.typicalPower} W`],
           ].map(([label, value]) => (
-            <span key={label} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-400">
+            <span key={label} className="dcim-room-summary-chip rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-400">
               {label}
               <span className="ml-2 text-sm font-black text-slate-900">{value}</span>
             </span>
           ))}
         </div>
 
-        <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/60 p-2.5">
+        <div className={`dcim-rack-matrix-panel mt-3 rounded-xl border border-slate-200 bg-slate-50/60 ${showRackMatrix ? 'p-2.5' : 'px-2.5 py-2'}`}>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="text-sm font-black text-slate-900">机柜矩阵看板</div>
@@ -750,8 +750,8 @@ export default function DcimView({
           <div
             className={
               showRackMatrix
-                ? 'mt-3 grid max-h-44 grid-cols-[repeat(auto-fill,minmax(118px,1fr))] gap-2 overflow-auto pr-1'
-                : 'custom-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1'
+                ? 'mt-3 grid max-h-60 grid-cols-[repeat(auto-fill,minmax(118px,1fr))] gap-2 overflow-auto pr-1'
+                : 'custom-scrollbar mt-2 flex max-h-12 gap-2 overflow-x-auto pb-1'
             }
           >
             {(showRackMatrix ? rackTiles : rackTiles.slice(0, 12)).map((tile) => {
@@ -763,7 +763,7 @@ export default function DcimView({
                     key={tile.rack.id}
                     type="button"
                     onClick={() => setSelectedRackFilter(isSelected ? '' : tile.rack.id)}
-                    className={`dcim-rack-chip flex min-w-[166px] items-center justify-between gap-3 px-3 py-2 text-left text-xs font-bold transition ${
+                    className={`dcim-rack-chip flex min-w-[142px] items-center justify-between gap-3 px-3 py-1.5 text-left text-xs font-bold transition ${
                       isSelected ? 'dcim-rack-chip--active' : ''
                     }`}
                   >
@@ -841,7 +841,7 @@ export default function DcimView({
       </section>
 
       <section className="dcim-table-shell flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
+        <div className="dcim-table-toolbar flex flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
           <select
             value={activeLocation || ''}
             onChange={(event) => {
@@ -1007,7 +1007,7 @@ export default function DcimView({
           </table>
 
           {!isDataLoading && currentDatacenter && filteredRows.length === 0 ? (
-            <div className="flex min-h-64 items-center justify-center text-center text-slate-400">
+            <div className="ui-empty-state flex min-h-64 items-center justify-center text-center text-slate-400">
               <div>
                 <FileSpreadsheet className="mx-auto h-10 w-10 text-slate-300" />
                 <div className="mt-3 font-bold text-slate-600">没有匹配的资产记录</div>
