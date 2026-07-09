@@ -1912,8 +1912,24 @@ function DirectoryStatus({ icon: Icon, label, value, tone = 'text-slate-600', su
   );
 }
 
-function AssetDirectory({ assets, selectedAssetId, onSelect, sortLabel, children }) {
+function AssetDirectory({
+  assets,
+  selectedAssetId,
+  selectedBulkAssetIds,
+  onSelect,
+  onToggleBulkAsset,
+  onBulkSelect,
+  onClearBulkSelection,
+  onBulkProvisionBackup,
+  onBulkProvisionAnsible,
+  bulkAction,
+  sortLabel,
+  children,
+}) {
   if (assets.length === 0) return <EmptyState />;
+  const selectedBulkCount = selectedBulkAssetIds.length;
+  const selectedBulkSet = new Set(selectedBulkAssetIds);
+  const busy = !!bulkAction;
 
   return (
     <section className="asset-directory-panel overflow-hidden">
@@ -1927,29 +1943,80 @@ function AssetDirectory({ assets, selectedAssetId, onSelect, sortLabel, children
           <span className="rounded-lg bg-blue-50 px-3 py-1.5 text-blue-700">{sortLabel}</span>
         </div>
       </div>
+      <div className="asset-bulk-bar">
+        <div className="min-w-0">
+          <div className="text-sm font-black text-slate-950">批量治理</div>
+          <div className="mt-0.5 text-xs font-semibold text-slate-500">
+            已选 {selectedBulkCount} 台，按当前筛选结果快速处理备份和 Ansible 纳管。
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => onBulkSelect('current')} className="ui-secondary-button h-9 px-3 text-xs font-black">
+            全选当前
+          </button>
+          <button type="button" onClick={() => onBulkSelect('backup_ready')} className="ui-secondary-button h-9 px-3 text-xs font-black">
+            选择可备份
+          </button>
+          <button type="button" onClick={() => onBulkSelect('ansible_ready')} className="ui-secondary-button h-9 px-3 text-xs font-black">
+            选择可纳管
+          </button>
+          <button type="button" onClick={onClearBulkSelection} disabled={!selectedBulkCount || busy} className="ui-secondary-button h-9 px-3 text-xs font-black disabled:opacity-50">
+            清空
+          </button>
+          <button
+            type="button"
+            onClick={onBulkProvisionBackup}
+            disabled={!selectedBulkCount || busy}
+            className="ui-primary-button inline-flex h-9 items-center gap-2 px-3 text-xs font-black disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Database className={`h-3.5 w-3.5 ${bulkAction === 'backup' ? 'animate-pulse' : ''}`} />
+            批量纳入备份
+          </button>
+          <button
+            type="button"
+            onClick={onBulkProvisionAnsible}
+            disabled={!selectedBulkCount || busy}
+            className="ui-primary-button inline-flex h-9 items-center gap-2 px-3 text-xs font-black disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Terminal className={`h-3.5 w-3.5 ${bulkAction === 'ansible' ? 'animate-pulse' : ''}`} />
+            批量纳管
+          </button>
+        </div>
+      </div>
 
       <div className="grid min-w-0 xl:grid-cols-[minmax(0,1fr)_440px]">
         <div className="max-h-[calc(100vh-17rem)] min-w-0 overflow-y-auto bg-white">
           <div className="space-y-2 p-3">
             {assets.map((asset) => {
               const selected = selectedAssetId === asset.id;
+              const bulkSelected = selectedBulkSet.has(asset.id);
               const hasCredential = asset.credential.status === 'active' && asset.credential.count > 0;
               const hasBackup = asset.backup.versionCount > 0 || asset.backup.status === 'ready';
               const hasAnsible = asset.automation.managed;
               const mainRisk = asset.riskCodes[0];
               return (
-                <button
+                <div
                   key={asset.id}
-                  type="button"
                   onClick={() => onSelect(asset.id)}
                   className={`asset-directory-row block w-full min-w-0 px-4 py-4 text-left transition ${
                     selected
                       ? 'bg-blue-50 shadow-[inset_4px_0_0_#2557f6,0_12px_28px_rgba(37,87,246,0.08)]'
                       : 'bg-white hover:bg-slate-50'
-                  }`}
+                  } ${bulkSelected ? 'asset-directory-row--bulk-selected' : ''}`}
                 >
                   <div className="grid min-w-0 gap-3 2xl:grid-cols-[minmax(260px,0.95fr)_minmax(0,1.35fr)]">
                     <div className="flex min-w-0 items-start gap-3">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onToggleBulkAsset(asset.id);
+                        }}
+                        className={`asset-bulk-check ${bulkSelected ? 'asset-bulk-check--selected' : ''}`}
+                        title={bulkSelected ? '取消选择' : '选择资产'}
+                      >
+                        {bulkSelected ? '✓' : ''}
+                      </button>
                       <div className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${selected ? 'bg-blue-600 text-white' : 'bg-slate-950 text-white'}`}>
                         <HardDrive className="h-5 w-5" />
                       </div>
@@ -1998,7 +2065,7 @@ function AssetDirectory({ assets, selectedAssetId, onSelect, sortLabel, children
                       />
                     </div>
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -2573,7 +2640,9 @@ export default function AssetCenterView({
   const [governanceFilter, setGovernanceFilter] = useState('all');
   const [visibleColumns, setVisibleColumns] = useState(DEFAULT_VISIBLE_COLUMNS);
   const [selectedAssetId, setSelectedAssetId] = useState(null);
+  const [selectedBulkAssetIds, setSelectedBulkAssetIds] = useState([]);
   const [sortConfig, setSortConfig] = useState({ key: 'risk', direction: 'desc' });
+  const [bulkAction, setBulkAction] = useState(null);
   const [backupActionAssetId, setBackupActionAssetId] = useState(null);
   const [managementIpActionAssetId, setManagementIpActionAssetId] = useState(null);
   const [credentialActionAssetId, setCredentialActionAssetId] = useState(null);
@@ -2616,6 +2685,19 @@ export default function AssetCenterView({
     const preferred = sortedAssets.find((asset) => asset.id === selectedAssetId);
     return preferred || sortedAssets[0] || null;
   }, [selectedAssetId, sortedAssets]);
+
+  const selectedBulkAssets = useMemo(() => {
+    const selectedIds = new Set(selectedBulkAssetIds);
+    return assets.filter((asset) => selectedIds.has(asset.id));
+  }, [assets, selectedBulkAssetIds]);
+
+  useEffect(() => {
+    const validIds = new Set(assets.map((asset) => asset.id));
+    setSelectedBulkAssetIds((current) => {
+      const next = current.filter((id) => validIds.has(id));
+      return next.length === current.length ? current : next;
+    });
+  }, [assets]);
 
   const sortOptionValue = `${sortConfig.key}:${sortConfig.direction}`;
   const hasPresetSortOption = SORT_OPTIONS.some((option) => option.value === sortOptionValue);
@@ -2939,6 +3021,84 @@ export default function AssetCenterView({
 
   const getAnsibleHostId = (asset) => (asset?.backup?.targetId ? `target-${asset.backup.targetId}` : asset?.id);
 
+  const handleBulkProvisionBackup = async () => {
+    if (!selectedBulkAssets.length) return;
+    const candidates = selectedBulkAssets.filter((asset) => getAssetGovernanceFlags(asset).includes('backup_ready'));
+    if (!candidates.length) {
+      window.alert('当前选择里没有同时具备管理 IP 和密码凭据、且尚未接入备份的资产。');
+      return;
+    }
+
+    setBulkAction('backup');
+    let success = 0;
+    let failed = 0;
+    try {
+      for (const asset of candidates) {
+        const managementIp = extractManagementHost(asset.managementIp);
+        const response = await safeFetch('/api/config-backup-targets/provision/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: asset.name,
+            management_ip: managementIp,
+            rack_device: asset.source === 'device' ? asset.deviceId : null,
+            ip_address: asset.relatedIps[0]?.id || null,
+            device_type: asset.type,
+            command_profile: asset.backup.targetCommandProfile || 'huawei_vrp',
+            ssh_port: asset.backup.targetSshPort || 22,
+            timeout_seconds: asset.backup.targetTimeoutSeconds || 30,
+            save_before_backup: asset.backup.targetSaveBeforeBackup ?? true,
+            retention_count: asset.backup.targetRetentionCount || 1,
+            credential: asset.credential.items?.[0]?.id || null,
+          }),
+        });
+        if (response.ok) success += 1;
+        else failed += 1;
+      }
+      await refreshAssets();
+      if (!failed) clearBulkSelection();
+      window.alert(`批量备份目标处理完成：成功 ${success}，失败 ${failed}，跳过 ${selectedBulkAssets.length - candidates.length}。`);
+    } finally {
+      setBulkAction(null);
+    }
+  };
+
+  const handleBulkProvisionAnsible = async () => {
+    if (!selectedBulkAssets.length) return;
+    const candidates = selectedBulkAssets.filter((asset) => getAssetGovernanceFlags(asset).includes('ansible_ready'));
+    if (!candidates.length) {
+      window.alert('当前选择里没有同时具备管理 IP 和密码凭据、且尚未纳入 Ansible 的资产。');
+      return;
+    }
+
+    setBulkAction('ansible');
+    try {
+      const response = await safeFetch('/api/ansible/provision/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          host_ids: candidates.map((asset) => getAnsibleHostId(asset)),
+          command_profile: 'huawei_vrp',
+          ssh_port: 22,
+          timeout_seconds: 30,
+          save_before_backup: true,
+          retention_count: 1,
+        }),
+      });
+      if (!response.ok) {
+        window.alert(await readApiError(response, '批量纳入 Ansible Inventory 失败。'));
+        return;
+      }
+      const payload = await response.json().catch(() => ({}));
+      const summary = payload.summary || {};
+      await refreshAssets();
+      clearBulkSelection();
+      window.alert(`批量纳管完成：新增 ${summary.created || 0}，更新 ${summary.updated || 0}，失败 ${summary.failed || 0}，跳过 ${selectedBulkAssets.length - candidates.length}。`);
+    } finally {
+      setBulkAction(null);
+    }
+  };
+
   const handleProvisionAnsible = async (asset) => {
     if (!extractManagementHost(asset?.managementIp)) {
       window.alert('请先为该资产补充管理 IP。');
@@ -3046,6 +3206,23 @@ export default function AssetCenterView({
     if (criteria.automation) setAutomationFilter(criteria.automation);
     if (criteria.governance) setGovernanceFilter(criteria.governance);
   };
+
+  const handleToggleBulkAsset = (assetId) => {
+    setSelectedBulkAssetIds((current) => (
+      current.includes(assetId)
+        ? current.filter((id) => id !== assetId)
+        : [...current, assetId]
+    ));
+  };
+
+  const handleBulkSelect = (mode) => {
+    const scopedAssets = mode === 'current'
+      ? sortedAssets
+      : sortedAssets.filter((asset) => getAssetGovernanceFlags(asset).includes(mode));
+    setSelectedBulkAssetIds(scopedAssets.map((asset) => asset.id));
+  };
+
+  const clearBulkSelection = () => setSelectedBulkAssetIds([]);
 
   const summary = useMemo(() => {
     const healthyStatuses = new Set(['active', 'online']);
@@ -3263,7 +3440,14 @@ export default function AssetCenterView({
             <AssetDirectory
                 assets={sortedAssets}
                 selectedAssetId={selectedAsset?.id}
+                selectedBulkAssetIds={selectedBulkAssetIds}
                 onSelect={setSelectedAssetId}
+                onToggleBulkAsset={handleToggleBulkAsset}
+                onBulkSelect={handleBulkSelect}
+                onClearBulkSelection={clearBulkSelection}
+                onBulkProvisionBackup={handleBulkProvisionBackup}
+                onBulkProvisionAnsible={handleBulkProvisionAnsible}
+                bulkAction={bulkAction}
                 sortLabel={sortDisplayLabel}
               >
               <AssetDetail
