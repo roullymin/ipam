@@ -1648,7 +1648,7 @@ SECRET_BULK_FIELD_ALIASES = {
     'device_type': {'device_type', 'asset_type', '资产类型', '设备类型', '类型分类'},
     'datacenter': {'datacenter', 'dc', '机房', '数据中心', '位置', '所在机房'},
     'username': {'username', 'secret_username', '账号', '用户名', '登录账号'},
-    'password': {'password', 'secret_value', '密码', '口令', '密钥'},
+    'password': {'password', 'secret_value', '密码', '口令', '密钥', '密码/凭据', '密码/凭据名称', '凭据密码'},
     'credential_type': {'credential_type', '凭据类型', '类型'},
     'owner_team': {'owner_team', '责任团队', '团队', '部门', '负责人'},
     'environment': {'environment', '环境'},
