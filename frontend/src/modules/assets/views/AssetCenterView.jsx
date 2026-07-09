@@ -430,6 +430,30 @@ const RISK_LABELS = {
   automation: '未纳管',
 };
 
+const GOVERNANCE_LABELS = {
+  all: '全部治理',
+  type_review: '分类待确认',
+  missing_ip: '缺管理 IP',
+  missing_location: '缺机房位置',
+  missing_credential: '缺密码凭据',
+  missing_backup: '缺备份目标',
+  backup_ready: '可纳入备份',
+  ansible_ready: '可纳入自动化',
+};
+
+const GOVERNANCE_DESCRIPTIONS = {
+  type_review: '类型过于笼统或疑似识别错误，优先把它归到防火墙、交换机、服务器等标准类目。',
+  missing_ip: '没有可用管理地址，后续密码、备份和自动化都无法顺畅接入。',
+  missing_location: '缺少机房或机柜位置，会影响容量统计和责任定位。',
+  missing_credential: '没有绑定可用凭据，无法做登录测试、配置备份和 Ansible 纳管。',
+  missing_backup: '还没有可用配置版本或备份目标，配置风险不可追溯。',
+  backup_ready: '已经具备管理 IP 和密码，可以批量转为配置备份目标。',
+  ansible_ready: '已经具备管理 IP 和密码，可以进入 Ansible Inventory 纳管。',
+};
+
+const GENERIC_TYPE_KEYS = new Set(['other', 'unknown', 'security', 'server']);
+const NETWORK_NAME_HINTS = ['交换机', '核心交换', '接入交换', '路由器', '防火墙', '网关', '无线AC', '无线 AP', '无线AP', '控制器', 'WAF', 'IDS', 'IPS', 'VPN', '出口'];
+
 const CONFIG_BACKUP_STATUS_LABELS = {
   not_run: '未执行',
   running: '执行中',
@@ -783,6 +807,7 @@ function filterAssets(assets, filters) {
       if (filters.automation === 'managed' && !asset.automation.managed) return false;
       if (filters.automation === 'unmanaged' && asset.automation.managed) return false;
     }
+    if (filters.governance && filters.governance !== 'all' && !getAssetGovernanceFlags(asset).includes(filters.governance)) return false;
     if (!keyword) return true;
     return [
       asset.name,
@@ -855,6 +880,85 @@ const countBy = (assets, getKey) => {
   });
   return Array.from(grouped.values()).sort((left, right) => right.count - left.count || right.risk - left.risk);
 };
+
+function suggestGovernanceType(asset) {
+  const byName = classifyAssetType('', `${asset.name || ''} ${asset.specs || ''} ${asset.vendor || ''}`);
+  if (byName.key && !['other', 'unknown'].includes(byName.key) && byName.key !== asset.type) return byName;
+  const byRaw = classifyAssetType(asset.rawType || asset.type, asset.name || '');
+  if (byRaw.key && !['other', 'unknown'].includes(byRaw.key)) return byRaw;
+  return null;
+}
+
+function assetNeedsTypeReview(asset) {
+  const rawType = normalize(asset.rawType || asset.type);
+  const text = `${asset.name || ''} ${asset.typeLabel || ''} ${asset.specs || ''}`.toUpperCase();
+  const networkLike = NETWORK_NAME_HINTS.some((hint) => text.includes(String(hint).toUpperCase()));
+  if (['other', 'unknown'].includes(asset.type)) return true;
+  if (!rawType && asset.source === 'ip') return true;
+  if (asset.type === 'security') return true;
+  if (asset.type === 'server' && networkLike) return true;
+  if (GENERIC_TYPE_KEYS.has(asset.type) && networkLike) return true;
+  return false;
+}
+
+function getAssetGovernanceFlags(asset) {
+  const hasManagementIp = !!extractManagementHost(asset.managementIp);
+  const hasLocation = !!asset.datacenterName && !!asset.rackCode;
+  const hasCredential = asset.credential.status === 'active' && asset.credential.count > 0;
+  const hasBackup = asset.backup.versionCount > 0 || asset.backup.status === 'ready';
+  const flags = [];
+
+  if (assetNeedsTypeReview(asset)) flags.push('type_review');
+  if (!hasManagementIp) flags.push('missing_ip');
+  if (!hasLocation) flags.push('missing_location');
+  if (!hasCredential) flags.push('missing_credential');
+  if (!hasBackup) flags.push('missing_backup');
+  if (hasManagementIp && hasCredential && !hasBackup) flags.push('backup_ready');
+  if (hasManagementIp && hasCredential && !asset.automation.managed) flags.push('ansible_ready');
+
+  return flags;
+}
+
+function buildAssetGovernance(assets) {
+  const counters = Object.fromEntries(
+    Object.keys(GOVERNANCE_LABELS)
+      .filter((key) => key !== 'all')
+      .map((key) => [key, 0]),
+  );
+  const reviewAssets = [];
+
+  assets.forEach((asset) => {
+    const flags = getAssetGovernanceFlags(asset);
+    flags.forEach((flag) => {
+      counters[flag] = (counters[flag] || 0) + 1;
+    });
+    if (flags.length) {
+      reviewAssets.push({
+        asset,
+        flags,
+        score:
+          (flags.includes('type_review') ? 40 : 0)
+          + (flags.includes('missing_ip') ? 28 : 0)
+          + (flags.includes('missing_credential') ? 22 : 0)
+          + (flags.includes('missing_backup') ? 18 : 0)
+          + (flags.includes('missing_location') ? 12 : 0)
+          + asset.riskCodes.length * 8,
+        suggestedType: suggestGovernanceType(asset),
+      });
+    }
+  });
+
+  const normalized = assets.length || 1;
+  return {
+    counters,
+    reviewAssets: reviewAssets
+      .sort((left, right) => right.score - left.score || left.asset.name.localeCompare(right.asset.name, 'zh-CN'))
+      .slice(0, 8),
+    qualityScore: Math.max(0, Math.round(100 - ((counters.type_review + counters.missing_ip + counters.missing_credential + counters.missing_backup) / normalized) * 24)),
+    readyForBackup: counters.backup_ready || 0,
+    readyForAnsible: counters.ansible_ready || 0,
+  };
+}
 
 function buildGroupSummary(assets) {
   const riskRows = Object.entries(RISK_LABELS)
@@ -932,8 +1036,105 @@ const TYPE_CARD_VISUALS = {
 
 const getTypeCardVisual = (key) => TYPE_CARD_VISUALS[key] || { icon: HardDrive, tone: 'slate' };
 
+function AssetGovernancePanel({ governance, onNavigate }) {
+  const governanceCards = [
+    { key: 'type_review', icon: ShieldCheck, tone: 'cyan' },
+    { key: 'missing_ip', icon: Network, tone: 'amber' },
+    { key: 'missing_credential', icon: KeyRound, tone: 'rose' },
+    { key: 'backup_ready', icon: Database, tone: 'blue' },
+    { key: 'ansible_ready', icon: Terminal, tone: 'violet' },
+  ];
+
+  return (
+    <section className="asset-governance-panel">
+      <div className="asset-governance-head">
+        <div>
+          <div className="ui-eyebrow text-xs font-black uppercase">Data Governance</div>
+          <h2 className="mt-2 text-2xl font-black text-slate-950">资产数据治理 v1.3</h2>
+          <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">
+            先把分类、管理 IP、机房位置、密码和备份状态打干净，再推进批量备份和自动化纳管。
+          </p>
+        </div>
+        <div className="asset-governance-score">
+          <span className="text-xs font-black text-slate-500">治理健康度</span>
+          <strong>{governance.qualityScore}</strong>
+          <span className="text-xs font-semibold text-slate-500">越高代表资产基础越可用</span>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,0.9fr)_minmax(360px,1.1fr)]">
+        <div className="grid gap-3 sm:grid-cols-2">
+          {governanceCards.map(({ key, icon: Icon, tone }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onNavigate({ governance: key })}
+              className={`asset-governance-card asset-governance-card--${tone}`}
+            >
+              <span className="asset-governance-icon">
+                <Icon className="h-4 w-4" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-black text-slate-950">{GOVERNANCE_LABELS[key]}</span>
+                <span className="mt-1 line-clamp-2 block text-xs font-semibold leading-5 text-slate-500">
+                  {GOVERNANCE_DESCRIPTIONS[key]}
+                </span>
+              </span>
+              <strong>{governance.counters[key] || 0}</strong>
+            </button>
+          ))}
+        </div>
+
+        <div className="asset-governance-queue">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-base font-black text-slate-950">优先治理队列</div>
+              <div className="mt-1 text-sm font-semibold text-slate-500">按分类、地址、凭据、备份缺口自动排序。</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigate({ governance: 'type_review' })}
+              className="ui-secondary-button h-9 px-3 text-xs font-black"
+            >
+              待确认分类
+            </button>
+          </div>
+          <div className="mt-3 space-y-2">
+            {governance.reviewAssets.length ? governance.reviewAssets.map(({ asset, flags, suggestedType }) => (
+              <button
+                key={asset.id}
+                type="button"
+                onClick={() => onNavigate({ governance: flags[0], keyword: asset.name })}
+                className="asset-governance-row"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-black text-slate-950">{asset.name}</span>
+                  <span className="mt-1 block truncate text-xs font-semibold text-slate-500">
+                    {asset.typeLabel}
+                    {suggestedType?.label && suggestedType.key !== asset.type ? ` → 建议 ${suggestedType.label}` : ''}
+                  </span>
+                </span>
+                <span className="flex flex-wrap justify-end gap-1.5">
+                  {flags.slice(0, 3).map((flag) => (
+                    <span key={flag} className="asset-governance-tag">{GOVERNANCE_LABELS[flag]}</span>
+                  ))}
+                </span>
+              </button>
+            )) : (
+              <div className="rounded-2xl border border-emerald-400/25 bg-emerald-500/10 px-4 py-5 text-sm font-bold text-emerald-100">
+                当前没有明显治理缺口，可以进入批量备份或 Ansible 纳管。
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function AssetOverview({ assets, summary, groupSummary, typeOptions, onNavigate, onRefresh, isDataLoading }) {
   const typeCards = useMemo(() => buildOverviewTypeCards(assets, typeOptions), [assets, typeOptions]);
+  const governance = useMemo(() => buildAssetGovernance(assets), [assets]);
   const priorityCards = [
     { key: 'backup', label: '配置未接入', count: assets.filter((asset) => asset.riskCodes.includes('backup')).length, tone: 'amber', icon: Database },
     { key: 'credential', label: '密码未受控', count: assets.filter((asset) => asset.riskCodes.includes('credential')).length, tone: 'rose', icon: KeyRound },
@@ -957,6 +1158,8 @@ function AssetOverview({ assets, summary, groupSummary, typeOptions, onNavigate,
         <IconTile icon={Terminal} label="自动化纳管" value={`${summary.automationRate}%`} subtext="Ansible Inventory" tone="text-blue-600" />
         <IconTile icon={AlertTriangle} label="风险资产" value={summary.riskAssets} subtext="需要优先处理" tone="text-rose-600" />
       </section>
+
+      <AssetGovernancePanel governance={governance} onNavigate={onNavigate} />
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.55fr)]">
         <div className="asset-hero-card p-5">
@@ -2367,6 +2570,7 @@ export default function AssetCenterView({
   const [credentialFilter, setCredentialFilter] = useState('all');
   const [backupFilter, setBackupFilter] = useState('all');
   const [automationFilter, setAutomationFilter] = useState('all');
+  const [governanceFilter, setGovernanceFilter] = useState('all');
   const [visibleColumns, setVisibleColumns] = useState(DEFAULT_VISIBLE_COLUMNS);
   const [selectedAssetId, setSelectedAssetId] = useState(null);
   const [sortConfig, setSortConfig] = useState({ key: 'risk', direction: 'desc' });
@@ -2398,8 +2602,9 @@ export default function AssetCenterView({
       credential: credentialFilter,
       backup: backupFilter,
       automation: automationFilter,
+      governance: governanceFilter,
     }),
-    [assets, automationFilter, backupFilter, credentialFilter, datacenterFilter, keyword, risk, status, type],
+    [assets, automationFilter, backupFilter, credentialFilter, datacenterFilter, governanceFilter, keyword, risk, status, type],
   );
 
   const sortedAssets = useMemo(
@@ -2824,12 +3029,14 @@ export default function AssetCenterView({
     setCredentialFilter('all');
     setBackupFilter('all');
     setAutomationFilter('all');
+    setGovernanceFilter('all');
   };
 
   const navigateToList = (criteria = {}) => {
     resetListFilters();
     setViewMode('list');
     setSelectedAssetId(null);
+    if (criteria.keyword) setKeyword(criteria.keyword);
     if (criteria.type) setType(criteria.type);
     if (criteria.datacenter) setDatacenterFilter(criteria.datacenter);
     if (criteria.risk) setRisk(criteria.risk);
@@ -2837,6 +3044,7 @@ export default function AssetCenterView({
     if (criteria.credential) setCredentialFilter(criteria.credential);
     if (criteria.backup) setBackupFilter(criteria.backup);
     if (criteria.automation) setAutomationFilter(criteria.automation);
+    if (criteria.governance) setGovernanceFilter(criteria.governance);
   };
 
   const summary = useMemo(() => {
@@ -2918,6 +3126,7 @@ export default function AssetCenterView({
                   {datacenterFilter !== 'all' ? <span className="rounded-lg bg-slate-100 px-3 py-1.5">机房：{datacenterFilter}</span> : null}
                   {type !== 'all' ? <span className="rounded-lg bg-slate-100 px-3 py-1.5">类型：{DEVICE_TYPE_LABELS[type] || type}</span> : null}
                   {risk !== 'all' ? <span className="rounded-lg bg-slate-100 px-3 py-1.5">风险：{RISK_LABELS[risk] || risk}</span> : null}
+                  {governanceFilter !== 'all' ? <span className="rounded-lg bg-slate-100 px-3 py-1.5">治理：{GOVERNANCE_LABELS[governanceFilter] || governanceFilter}</span> : null}
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -2946,7 +3155,7 @@ export default function AssetCenterView({
                     placeholder="搜索名称、IP、序列号、项目、负责人"
                   />
                 </label>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-[repeat(8,minmax(112px,1fr))_90px]">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-[repeat(9,minmax(112px,1fr))_90px]">
                   <select
                     value={status}
                     onChange={(event) => setStatus(event.target.value)}
@@ -3022,6 +3231,15 @@ export default function AssetCenterView({
                     <option value="all">全部纳管</option>
                     <option value="managed">已纳管</option>
                     <option value="unmanaged">未纳管</option>
+                  </select>
+                  <select
+                    value={governanceFilter}
+                    onChange={(event) => setGovernanceFilter(event.target.value)}
+                    className="h-11 rounded-2xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                  >
+                    {Object.entries(GOVERNANCE_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
                   </select>
                   <select
                     value={sortOptionValue}
