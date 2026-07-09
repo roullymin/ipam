@@ -34,7 +34,7 @@ from rest_framework import filters, serializers, status, viewsets
 from rest_framework.authentication import BasicAuthentication, SessionAuthentication
 from rest_framework.decorators import action, api_view, authentication_classes, parser_classes, permission_classes
 from rest_framework.exceptions import APIException, PermissionDenied
-from rest_framework.parsers import MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 
@@ -1645,6 +1645,8 @@ SECRET_BULK_FIELD_ALIASES = {
     'name': {'name', '名称', '凭据名称', '密码名称'},
     'management_ip': {'management_ip', 'mgmt_ip', 'ip', '管理ip', '管理IP', '设备IP', '目标IP', '地址'},
     'device_name': {'device_name', '设备名称', '资产名称', '主机名'},
+    'device_type': {'device_type', 'asset_type', '资产类型', '设备类型', '类型分类'},
+    'datacenter': {'datacenter', 'dc', '机房', '数据中心', '位置', '所在机房'},
     'username': {'username', 'secret_username', '账号', '用户名', '登录账号'},
     'password': {'password', 'secret_value', '密码', '口令', '密钥'},
     'credential_type': {'credential_type', '凭据类型', '类型'},
@@ -1708,6 +1710,19 @@ def _canonical_secret_bulk_field(name):
     return lowered
 
 
+def _normalize_secret_bulk_record(row):
+    normalized = {}
+    for key, value in (row or {}).items():
+        field_name = _canonical_secret_bulk_field(key)
+        if field_name not in SECRET_BULK_FIELD_ALIASES:
+            continue
+        if value is None or (not isinstance(value, str) and pd.isna(value)):
+            normalized[field_name] = ''
+            continue
+        normalized[field_name] = str(value) if field_name == 'password' else str(value).strip()
+    return normalized
+
+
 def _parse_secret_bulk_rows(csv_text):
     content = str(csv_text or '').lstrip('\ufeff').strip()
     if not content:
@@ -1721,17 +1736,46 @@ def _parse_secret_bulk_rows(csv_text):
         raise ValueError('CSV 需要包含表头。')
     rows = []
     for row in reader:
-        normalized = {}
-        for key, value in (row or {}).items():
-            field_name = _canonical_secret_bulk_field(key)
-            if field_name not in SECRET_BULK_FIELD_ALIASES:
-                continue
-            normalized[field_name] = str(value or '') if field_name == 'password' else str(value or '').strip()
+        normalized = _normalize_secret_bulk_record(row)
         if any(str(value or '').strip() for value in normalized.values()):
             rows.append(normalized)
     if not rows:
         raise ValueError('CSV 中没有可导入的数据行。')
     return rows
+
+
+def _parse_secret_bulk_file(uploaded_file):
+    filename = str(getattr(uploaded_file, 'name', '') or '').lower()
+    try:
+        uploaded_file.seek(0)
+    except (AttributeError, OSError):
+        pass
+
+    if filename.endswith(('.xlsx', '.xls')):
+        try:
+            dataframe = pd.read_excel(uploaded_file, dtype=str, keep_default_na=False)
+        except Exception as exc:
+            raise ValueError(f'Excel 文件读取失败：{exc}') from exc
+        rows = []
+        for row in dataframe.to_dict(orient='records'):
+            normalized = _normalize_secret_bulk_record(row)
+            if any(str(value or '').strip() for value in normalized.values()):
+                rows.append(normalized)
+        if not rows:
+            raise ValueError('Excel 中没有可导入的数据行。')
+        return rows
+
+    try:
+        uploaded_file.seek(0)
+    except (AttributeError, OSError):
+        pass
+    raw_bytes = uploaded_file.read()
+    for encoding in ('utf-8-sig', 'gb18030', 'gbk', 'latin-1'):
+        try:
+            return _parse_secret_bulk_rows(raw_bytes.decode(encoding))
+        except UnicodeDecodeError:
+            continue
+    raise ValueError('文件编码无法识别，请使用 UTF-8 或 GBK 编码的 CSV。')
 
 
 def _normalize_secret_bulk_choice(field_name, value, default):
@@ -1757,44 +1801,140 @@ def _parse_secret_bulk_datetime(value):
     return parsed.isoformat()
 
 
+def _bulk_text_match(left, right):
+    left_text = str(left or '').strip().lower()
+    right_text = str(right or '').strip().lower()
+    return bool(left_text and right_text and (left_text == right_text or left_text in right_text or right_text in left_text))
+
+
+def _bulk_datacenter_match(rack_device, datacenter):
+    if not datacenter:
+        return True
+    if not getattr(rack_device, 'rack_id', None) or not getattr(rack_device.rack, 'datacenter_id', None):
+        return False
+    return _bulk_text_match(datacenter, rack_device.rack.datacenter.name)
+
+
+def _bulk_device_type_match(raw_device_type, expected_type):
+    if not expected_type:
+        return True
+    if not str(raw_device_type or '').strip():
+        return False
+    normalized_raw = _normalize_backup_device_type(raw_device_type)
+    normalized_expected = _normalize_backup_device_type(expected_type)
+    return normalized_raw == normalized_expected or _bulk_text_match(raw_device_type, expected_type)
+
+
+def _pick_secret_bulk_rack_device(candidates, device_type='', datacenter=''):
+    scored = []
+    for device in candidates:
+        score = 0
+        if _bulk_datacenter_match(device, datacenter):
+            score += 20
+        elif datacenter:
+            continue
+        if _bulk_device_type_match(device.device_type, device_type):
+            score += 15
+        elif device_type:
+            continue
+        if device.mgmt_ip:
+            score += 5
+        scored.append((score, device))
+    if not scored:
+        return None
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return scored[0][1]
+
+
+def _secret_bulk_rack_device_payload(rack_device, management_ip='', match_method='asset_name', match_confidence='high'):
+    datacenter_id = rack_device.rack.datacenter_id if getattr(rack_device, 'rack_id', None) and getattr(rack_device.rack, 'datacenter_id', None) else None
+    rack_id = rack_device.rack_id if getattr(rack_device, 'rack_id', None) else None
+    location_parts = []
+    if datacenter_id:
+        location_parts.append(rack_device.rack.datacenter.name)
+    if rack_id:
+        location_parts.append(rack_device.rack.code)
+    location_parts.append(rack_device.name)
+    return {
+        'target_type': 'device',
+        'rack_device': rack_device.pk,
+        'ip_address': None,
+        'datacenter': datacenter_id,
+        'rack': rack_id,
+        'target_label': ' / '.join(part for part in location_parts if part),
+        'management_ip': management_ip or _extract_management_host(rack_device.mgmt_ip) or '',
+        'match_method': match_method,
+        'match_confidence': match_confidence,
+    }
+
+
 def _resolve_secret_bulk_target(row):
     management_ip = _extract_management_host(row.get('management_ip'))
     device_name = str(row.get('device_name') or '').strip()
-    rack_device = None
+    device_type = str(row.get('device_type') or '').strip()
+    datacenter = str(row.get('datacenter') or '').strip()
+    rack_queryset = RackDevice.objects.select_related('rack', 'rack__datacenter')
     ip_asset = None
+
     if management_ip:
-        rack_device = RackDevice.objects.filter(mgmt_ip__iexact=management_ip).select_related(
-            'rack',
-            'rack__datacenter',
-        ).first()
+        rack_device = rack_queryset.filter(mgmt_ip__iexact=management_ip).first()
+        if rack_device is not None:
+            return _secret_bulk_rack_device_payload(
+                rack_device,
+                management_ip,
+                match_method='management_ip',
+                match_confidence='exact',
+            )
         ip_asset = IPAddress.objects.filter(ip_address=management_ip).first()
-    if rack_device is None and device_name:
-        rack_device = RackDevice.objects.filter(name__iexact=device_name).select_related(
-            'rack',
-            'rack__datacenter',
-        ).first()
-    if rack_device is not None:
-        return {
-            'target_type': 'device',
-            'rack_device': rack_device.pk,
-            'ip_address': None,
-            'target_label': f'{rack_device.rack.datacenter.name} / {rack_device.rack.code} / {rack_device.name}',
-            'management_ip': management_ip or rack_device.mgmt_ip or '',
-        }
+
+    if device_name:
+        exact_candidates = list(rack_queryset.filter(name__iexact=device_name)[:30])
+        rack_device = _pick_secret_bulk_rack_device(exact_candidates, device_type=device_type, datacenter=datacenter)
+        if rack_device is not None:
+            return _secret_bulk_rack_device_payload(
+                rack_device,
+                management_ip,
+                match_method='asset_name',
+                match_confidence='exact',
+            )
+
+        fuzzy_candidates = list(rack_queryset.filter(name__icontains=device_name)[:50])
+        rack_device = _pick_secret_bulk_rack_device(fuzzy_candidates, device_type=device_type, datacenter=datacenter)
+        if rack_device is not None:
+            return _secret_bulk_rack_device_payload(
+                rack_device,
+                management_ip,
+                match_method='asset_name_fuzzy',
+                match_confidence='medium',
+            )
+
+        ip_asset = ip_asset or IPAddress.objects.filter(device_name__iexact=device_name).first()
+        if ip_asset is None:
+            ip_asset = IPAddress.objects.filter(device_name__icontains=device_name).first()
+
     if ip_asset is not None:
         return {
             'target_type': 'ip',
             'rack_device': None,
             'ip_address': ip_asset.pk,
-            'target_label': ip_asset.ip_address,
-            'management_ip': management_ip,
+            'datacenter': None,
+            'rack': None,
+            'target_label': ip_asset.device_name or ip_asset.ip_address,
+            'management_ip': management_ip or _extract_management_host(ip_asset.ip_address),
+            'match_method': 'ip_asset',
+            'match_confidence': 'high' if management_ip else 'medium',
         }
+
     return {
         'target_type': 'general',
         'rack_device': None,
         'ip_address': None,
+        'datacenter': None,
+        'rack': None,
         'target_label': management_ip or device_name or '通用凭据',
         'management_ip': management_ip,
+        'match_method': 'unmatched',
+        'match_confidence': 'low',
     }
 
 
@@ -1819,8 +1959,8 @@ def _build_secret_bulk_payload(row):
         'target_type': target['target_type'],
         'rack_device': target['rack_device'],
         'ip_address': target['ip_address'],
-        'datacenter': None,
-        'rack': None,
+        'datacenter': target.get('datacenter'),
+        'rack': target.get('rack'),
         'secret_username': username,
         'secret_value': secret_value,
         'owner_team': str(row.get('owner_team') or '').strip(),
@@ -1936,6 +2076,18 @@ def _resolve_secret_login_target(secret):
 def _classify_login_failure(detail):
     message = str(detail or '')
     lowered = message.lower()
+    algorithm_markers = (
+        'incompatible ssh peer',
+        'no acceptable kex',
+        'no matching',
+        'unable to agree',
+        'kex',
+        'cipher',
+        'host key',
+        'algorithm',
+    )
+    if any(marker in lowered for marker in algorithm_markers) or '算法' in message:
+        return 'ssh_algorithm', 'SSH算法不兼容'
     if '认证' in message or '密码' in message or 'authentication' in lowered or 'auth' in lowered:
         return 'auth_failed', '账号或密码错误'
     if '超时' in message or 'timed out' in lowered or 'timeout' in lowered:
@@ -2016,13 +2168,16 @@ class SecretRecordViewSet(OptionalPaginationMixin, BaseViewSet):
         )
         record_audit(self.request, self.audit_module, 'update', instance, '更新密码台账')
 
-    @action(detail=False, methods=['post'], url_path='bulk-import')
+    @action(detail=False, methods=['post'], parser_classes=[JSONParser, FormParser, MultiPartParser], url_path='bulk-import')
     def bulk_import(self, request):
         conflict_mode = str(request.data.get('conflict_mode') or 'update').strip().lower()
         if conflict_mode not in {'update', 'skip', 'create'}:
             return Response({'detail': '冲突策略只能是 update、skip 或 create。'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            rows = _parse_secret_bulk_rows(request.data.get('csv_text') or request.data.get('content') or '')
+            upload = request.FILES.get('file')
+            rows = _parse_secret_bulk_file(upload) if upload else _parse_secret_bulk_rows(
+                request.data.get('csv_text') or request.data.get('content') or ''
+            )
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -2059,6 +2214,8 @@ class SecretRecordViewSet(OptionalPaginationMixin, BaseViewSet):
                         'name': existing.name,
                         'management_ip': target['management_ip'],
                         'target': target['target_label'],
+                        'match_method': target.get('match_method'),
+                        'match_confidence': target.get('match_confidence'),
                         'detail': '已存在同一资产和账号的凭据。',
                     }
                 )
@@ -2081,6 +2238,8 @@ class SecretRecordViewSet(OptionalPaginationMixin, BaseViewSet):
                         'name': payload.get('name') or '',
                         'management_ip': target['management_ip'],
                         'target': target['target_label'],
+                        'match_method': target.get('match_method'),
+                        'match_confidence': target.get('match_confidence'),
                         'detail': '；'.join(field_errors) or '数据校验失败。',
                     }
                 )
@@ -2127,6 +2286,8 @@ class SecretRecordViewSet(OptionalPaginationMixin, BaseViewSet):
                         'name': payload.get('name') or '',
                         'management_ip': target['management_ip'],
                         'target': target['target_label'],
+                        'match_method': target.get('match_method'),
+                        'match_confidence': target.get('match_confidence'),
                         'detail': str(exc),
                     }
                 )
@@ -2142,6 +2303,8 @@ class SecretRecordViewSet(OptionalPaginationMixin, BaseViewSet):
                     'name': instance.name,
                     'management_ip': target['management_ip'],
                     'target': target['target_label'],
+                    'match_method': target.get('match_method'),
+                    'match_confidence': target.get('match_confidence'),
                     'detail': '已更新 OpenBao 密文。' if existing is not None else '已写入 OpenBao 密文。',
                 }
             )
@@ -2326,6 +2489,7 @@ class SecretRecordViewSet(OptionalPaginationMixin, BaseViewSet):
             'refused': 0,
             'unreachable': 0,
             'resolve_failed': 0,
+            'ssh_algorithm': 0,
             'dependency': 0,
             'other': 0,
             'template_warning': 0,

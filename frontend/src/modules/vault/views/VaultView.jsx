@@ -39,11 +39,19 @@ const EMPTY_FORM = {
   notes: '',
 };
 
-const BULK_IMPORT_TEMPLATE = 'name,management_ip,username,password,owner_team,credential_type,environment,sensitivity,rotation_days,notes';
+const BULK_IMPORT_TEMPLATE = 'name,management_ip,device_name,device_type,datacenter,username,password,owner_team,credential_type,environment,sensitivity,rotation_days,notes';
 const BULK_IMPORT_PLACEHOLDER = [
   BULK_IMPORT_TEMPLATE,
-  '核心交换机 SSH,172.25.254.10,admin,真实密码,网络运维,ssh,production,restricted,90,配置备份账号',
+  '核心交换机 SSH,172.25.254.10,核心交换机,核心交换机,7F 核心机房,admin,真实密码,网络运维,ssh,production,restricted,90,配置备份账号',
 ].join('\n');
+
+const BULK_MATCH_LABELS = {
+  management_ip: '管理 IP 精确匹配',
+  asset_name: '资产名称精确匹配',
+  asset_name_fuzzy: '资产名称模糊匹配',
+  ip_asset: 'IP 地址台账匹配',
+  unmatched: '未匹配资产',
+};
 
 const unwrap = (payload) => (Array.isArray(payload) ? payload : payload?.results || []);
 const formatTime = (value) => (value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-');
@@ -135,6 +143,7 @@ export default function VaultView({ currentRole }) {
   const [countdown, setCountdown] = useState(0);
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [bulkText, setBulkText] = useState(BULK_IMPORT_TEMPLATE);
+  const [bulkFile, setBulkFile] = useState(null);
   const [bulkConflictMode, setBulkConflictMode] = useState('update');
   const [bulkResult, setBulkResult] = useState(null);
   const [showBulkTest, setShowBulkTest] = useState(false);
@@ -214,6 +223,7 @@ export default function VaultView({ currentRole }) {
 
   const openBulkImport = () => {
     setBulkText(BULK_IMPORT_TEMPLATE);
+    setBulkFile(null);
     setBulkConflictMode('update');
     setBulkResult(null);
     setShowBulkImport(true);
@@ -278,14 +288,22 @@ export default function VaultView({ currentRole }) {
     setBusy(true);
     setError('');
     setBulkResult(null);
-    const response = await safeFetch('/api/secrets/bulk-import/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        csv_text: bulkText,
-        conflict_mode: bulkConflictMode,
-      }),
-    });
+    const requestOptions = bulkFile
+      ? (() => {
+        const formData = new FormData();
+        formData.append('file', bulkFile);
+        formData.append('conflict_mode', bulkConflictMode);
+        return { method: 'POST', body: formData };
+      })()
+      : {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          csv_text: bulkText,
+          conflict_mode: bulkConflictMode,
+        }),
+      };
+    const response = await safeFetch('/api/secrets/bulk-import/', requestOptions);
     if (!response.ok) {
       setError(await readError(response, '批量导入失败。'));
       setBusy(false);
@@ -571,6 +589,26 @@ export default function VaultView({ currentRole }) {
       {showBulkImport && (
         <Modal title="批量导入密码凭据" onClose={() => setShowBulkImport(false)} width="max-w-5xl">
           <form onSubmit={submitBulkImport} className="space-y-4">
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+              <label className="flex flex-wrap items-center justify-between gap-3 text-sm font-semibold text-blue-900">
+                <span>
+                  上传 Excel / CSV
+                  <span className="ml-2 text-xs font-normal text-blue-700">支持 .xlsx、.xls、.csv，字段可用管理IP、资产名称、设备类型、机房自动匹配。</span>
+                </span>
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,.csv,.txt"
+                  onChange={(event) => setBulkFile(event.target.files?.[0] || null)}
+                  className="max-w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs text-blue-900"
+                />
+              </label>
+              {bulkFile && (
+                <div className="mt-2 flex items-center justify-between rounded-lg border border-blue-100 bg-white/80 px-3 py-2 text-xs text-blue-800">
+                  <span className="truncate">当前文件：{bulkFile.name}</span>
+                  <button type="button" onClick={() => setBulkFile(null)} className="font-bold text-blue-700">改用粘贴 CSV</button>
+                </div>
+              )}
+            </div>
             <div className="grid gap-3 lg:grid-cols-[1fr_220px]">
               <label className="space-y-1.5 text-sm font-semibold text-slate-700">
                 CSV 内容
@@ -597,11 +635,11 @@ export default function VaultView({ currentRole }) {
                 </label>
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600">
                   <div className="font-bold text-slate-800">支持字段</div>
-                  <div className="mt-1">name、management_ip、username、password、owner_team、credential_type、environment、sensitivity、rotation_days、notes</div>
-                  <div className="mt-2">系统会优先用 management_ip 匹配机柜设备，其次匹配 IP 地址。</div>
+                  <div className="mt-1">name、management_ip、device_name、device_type、datacenter、username、password、owner_team、credential_type、environment、sensitivity、rotation_days、notes</div>
+                  <div className="mt-2">系统优先按管理 IP 精确匹配，再用资产名称、设备类型、机房做二次匹配。</div>
                 </div>
                 <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-xs leading-5 text-blue-800">
-                  已填写 {Math.max(bulkText.split(/\r?\n/).filter(Boolean).length - 1, 0)} 行待导入数据。
+                  {bulkFile ? `将从文件 ${bulkFile.name} 导入。` : `已填写 ${Math.max(bulkText.split(/\r?\n/).filter(Boolean).length - 1, 0)} 行待导入数据。`}
                 </div>
               </div>
             </div>
@@ -632,10 +670,10 @@ export default function VaultView({ currentRole }) {
                 ))}
               </div>
               <div className="max-h-[320px] overflow-auto rounded-lg border border-slate-200">
-                <table className="min-w-[980px] w-full text-left text-xs">
+                <table className="min-w-[1120px] w-full text-left text-xs">
                   <thead className="sticky top-0 bg-slate-100 text-slate-500">
                     <tr>
-                      {['行', '状态', '动作', '名称', '管理 IP', '绑定对象', '结果'].map((head) => (
+                      {['行', '状态', '动作', '名称', '管理 IP', '绑定对象', '匹配方式', '结果'].map((head) => (
                         <th key={head} className="border-b border-r border-slate-200 px-3 py-2 font-bold">{head}</th>
                       ))}
                     </tr>
@@ -651,6 +689,11 @@ export default function VaultView({ currentRole }) {
                         <td className="border-b border-r border-slate-100 px-3 py-2 font-semibold text-slate-800">{item.name || '-'}</td>
                         <td className="border-b border-r border-slate-100 px-3 py-2 font-mono">{item.management_ip || '-'}</td>
                         <td className="border-b border-r border-slate-100 px-3 py-2">{item.target || '-'}</td>
+                        <td className="border-b border-r border-slate-100 px-3 py-2">
+                          <span className={`rounded-full px-2 py-1 font-semibold ${item.match_method === 'unmatched' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>
+                            {BULK_MATCH_LABELS[item.match_method] || item.match_method || '-'}
+                          </span>
+                        </td>
                         <td className="border-b border-slate-100 px-3 py-2">{item.detail || '-'}</td>
                       </tr>
                     ))}
@@ -703,12 +746,13 @@ export default function VaultView({ currentRole }) {
 
           {bulkTestResult && (
             <div className="mt-5 space-y-4">
-              <div className="grid gap-2 sm:grid-cols-5">
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
                 {[
                   ['登录成功', bulkTestResult.success, 'text-emerald-700'],
                   ['登录失败', bulkTestResult.failed, 'text-rose-700'],
                   ['密码错误', bulkTestResult.auth_failed, 'text-orange-700'],
                   ['端口/网络', (bulkTestResult.timeout || 0) + (bulkTestResult.refused || 0) + (bulkTestResult.unreachable || 0), 'text-amber-700'],
+                  ['SSH算法', bulkTestResult.ssh_algorithm, 'text-cyan-700'],
                   ['模板待确认', bulkTestResult.template_warning, 'text-blue-700'],
                 ].map(([title, value, tone]) => (
                   <div key={title} className="rounded-lg border border-slate-200 bg-white p-3">
