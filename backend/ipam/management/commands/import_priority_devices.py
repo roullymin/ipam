@@ -206,7 +206,17 @@ def _login_category(detail):
     text = str(detail or '').lower()
     if 'no acceptable kex' in text or 'ssh peer algorithms' in text or 'kex' in text or 'cipher' in text or 'hostkey' in text:
         return 'ssh_algorithm'
-    if 'authentication' in text or 'auth' in text or 'password' in text:
+    if (
+        'authentication' in text
+        or 'auth' in text
+        or 'password' in text
+        or 'permission denied' in text
+        or '认证' in text
+        or '账号' in text
+        or '账户' in text
+        or '密码' in text
+        or '登录' in text
+    ):
         return 'auth_failed'
     if 'timed out' in text or 'timeout' in text:
         return 'timeout'
