@@ -2131,6 +2131,7 @@ function AssetDetail({
   onTestBackupTarget,
   onProvisionAnsible,
   onTestAnsible,
+  onNotice,
   backupActionAssetId,
   backupTestAssetId,
   credentialTestAssetId,
@@ -2173,7 +2174,7 @@ function AssetDetail({
   const handleSaveManagementIp = async () => {
     const nextValue = extractManagementHost(managementIpDraft);
     if (!nextValue) {
-      window.alert('请输入管理 IP。');
+      onNotice?.('warning', '请输入管理 IP', '请填写可连接的管理 IP 后再保存。');
       return;
     }
     await onUpdateManagementIp(asset, nextValue);
@@ -2819,7 +2820,7 @@ export default function AssetCenterView({
         });
       }
       if (!response.ok) {
-        window.alert(await readApiError(response, '保存凭据失败。'));
+        showOperationNotice('error', '保存凭据失败', await readApiError(response, '保存凭据失败。'));
         return;
       }
       const saved = await response.json().catch(() => null);
@@ -2835,7 +2836,7 @@ export default function AssetCenterView({
     if (!asset || !secret) return;
     const managementIp = extractManagementHost(asset.managementIp);
     if (!managementIp) {
-      window.alert('请先补充管理 IP。');
+      showOperationNotice('warning', '请先补充管理 IP', '测试登录前需要先给资产填写可连接的管理 IP。');
       return;
     }
     setCredentialTestAssetId(asset.id);
@@ -2850,11 +2851,11 @@ export default function AssetCenterView({
         }),
       });
       if (!response.ok) {
-        window.alert(await readApiError(response, '测试登录失败。'));
+        showOperationNotice('error', '测试登录失败', await readApiError(response, '测试登录失败。'));
         return;
       }
       const payload = await response.json().catch(() => ({}));
-      window.alert(payload.message || 'SSH 登录测试成功。');
+      showOperationNotice('success', '测试登录成功', payload.message || 'SSH 登录测试成功。');
     } finally {
       setCredentialTestAssetId(null);
     }
@@ -2876,7 +2877,7 @@ export default function AssetCenterView({
     const { asset } = backupSettingsModal;
     const managementIp = extractManagementHost(asset.managementIp);
     if (!managementIp) {
-      window.alert('请先补充管理 IP。');
+      showOperationNotice('warning', '请先补充管理 IP', '保存配置备份目标前需要先给资产填写可连接的管理 IP。');
       return;
     }
     setBackupActionAssetId(asset.id);
@@ -2903,7 +2904,7 @@ export default function AssetCenterView({
         },
       );
       if (!response.ok) {
-        window.alert(await readApiError(response, '保存配置备份目标失败。'));
+        showOperationNotice('error', '保存配置备份目标失败', await readApiError(response, '保存配置备份目标失败。'));
         return;
       }
       closeBackupSettings();
@@ -2915,7 +2916,7 @@ export default function AssetCenterView({
 
   const handleTestBackupTarget = async (asset) => {
     if (!asset?.backup?.targetId) {
-      window.alert('请先创建配置备份目标。');
+      showOperationNotice('warning', '请先创建配置备份目标', '该资产还没有配置备份目标，先在右侧“备份”里完成设置。');
       return;
     }
     setBackupTestAssetId(asset.id);
@@ -2925,12 +2926,12 @@ export default function AssetCenterView({
         headers: { 'Content-Type': 'application/json' },
       });
       if (!response.ok) {
-        window.alert(await readApiError(response, '测试连接失败。'));
+        showOperationNotice('error', '测试连接失败', await readApiError(response, '测试连接失败。'));
         await refreshAssets();
         return;
       }
       const payload = await response.json().catch(() => ({}));
-      window.alert(payload.message || 'SSH 登录测试成功。');
+      showOperationNotice('success', '测试连接成功', payload.message || 'SSH 登录测试成功。');
     } finally {
       setBackupTestAssetId(null);
     }
@@ -2962,7 +2963,7 @@ export default function AssetCenterView({
   const handleUpdateManagementIp = async (asset, nextValue) => {
     const nextHost = extractManagementHost(nextValue);
     if (!asset || !nextHost) {
-      window.alert('请输入管理 IP。');
+      showOperationNotice('warning', '请输入管理 IP', '请填写可连接的管理 IP 后再保存。');
       return;
     }
 
@@ -2972,7 +2973,7 @@ export default function AssetCenterView({
     const payload = isDeviceAsset ? { mgmt_ip: nextHost } : { ip_address: nextHost };
 
     if (!isDeviceAsset && !ipAssetId) {
-      window.alert('当前资产没有可更新的 IP 地址台账记录。');
+      showOperationNotice('warning', '无法更新管理 IP', '当前资产没有可更新的 IP 地址台账记录。');
       return;
     }
 
@@ -2984,7 +2985,7 @@ export default function AssetCenterView({
         body: JSON.stringify(payload),
       });
       if (!response.ok) {
-        window.alert(await readApiError(response, '更新管理 IP 失败。'));
+        showOperationNotice('error', '更新管理 IP 失败', await readApiError(response, '更新管理 IP 失败。'));
         return;
       }
 
@@ -2995,7 +2996,7 @@ export default function AssetCenterView({
           body: JSON.stringify({ management_ip: nextHost }),
         });
         if (!targetResponse.ok) {
-          window.alert(await readApiError(targetResponse, '管理 IP 已更新，但同步配置备份目标失败。'));
+          showOperationNotice('warning', '管理 IP 已更新', await readApiError(targetResponse, '管理 IP 已更新，但同步配置备份目标失败。'));
         }
       }
 
@@ -3008,7 +3009,7 @@ export default function AssetCenterView({
   const handleProvisionBackup = async (asset) => {
     const managementIp = extractManagementHost(asset?.managementIp);
     if (!managementIp) {
-      window.alert('请先为该资产补充管理 IP。');
+      showOperationNotice('warning', '请先补充管理 IP', '创建配置备份目标前需要先给资产填写可连接的管理 IP。');
       return;
     }
     setBackupActionAssetId(asset.id);
@@ -3031,7 +3032,7 @@ export default function AssetCenterView({
         }),
       });
       if (!response.ok) {
-        window.alert(await readApiError(response, '创建配置备份目标失败。'));
+        showOperationNotice('error', '创建配置备份目标失败', await readApiError(response, '创建配置备份目标失败。'));
         return;
       }
       await refreshAssets();
@@ -3052,8 +3053,11 @@ export default function AssetCenterView({
         headers: { 'Content-Type': 'application/json' },
       });
       if (!response.ok) {
-        window.alert(await readApiError(response, '执行配置备份失败。'));
+        showOperationNotice('error', '执行配置备份失败', await readApiError(response, '执行配置备份失败。'));
+        await refreshAssets();
+        return;
       }
+      showOperationNotice('success', '执行配置备份完成', '已完成本次配置备份任务，右侧版本列表会同步刷新。');
       await refreshAssets();
     } finally {
       setBackupActionAssetId(null);
@@ -3066,7 +3070,7 @@ export default function AssetCenterView({
     if (!selectedBulkAssets.length) return;
     const candidates = selectedBulkAssets.filter((asset) => getAssetGovernanceFlags(asset).includes('backup_ready'));
     if (!candidates.length) {
-      window.alert('当前选择里没有同时具备管理 IP 和密码凭据、且尚未接入备份的资产。');
+      showOperationNotice('warning', '没有可接入备份的资产', '当前选择里没有同时具备管理 IP 和密码凭据、且尚未接入备份的资产。');
       return;
     }
 
@@ -3098,7 +3102,11 @@ export default function AssetCenterView({
       }
       await refreshAssets();
       if (!failed) clearBulkSelection();
-      window.alert(`批量备份目标处理完成：成功 ${success}，失败 ${failed}，跳过 ${selectedBulkAssets.length - candidates.length}。`);
+      showOperationNotice(
+        failed ? 'warning' : 'success',
+        '批量备份目标处理完成',
+        `成功 ${success}，失败 ${failed}，跳过 ${selectedBulkAssets.length - candidates.length}。`,
+      );
     } finally {
       setBulkAction(null);
     }
@@ -3108,7 +3116,7 @@ export default function AssetCenterView({
     if (!selectedBulkAssets.length) return;
     const candidates = selectedBulkAssets.filter((asset) => getAssetGovernanceFlags(asset).includes('ansible_ready'));
     if (!candidates.length) {
-      window.alert('当前选择里没有同时具备管理 IP 和密码凭据、且尚未纳入 Ansible 的资产。');
+      showOperationNotice('warning', '没有可纳入 Ansible 的资产', '当前选择里没有同时具备管理 IP 和密码凭据、且尚未纳入 Ansible 的资产。');
       return;
     }
 
@@ -3127,14 +3135,18 @@ export default function AssetCenterView({
         }),
       });
       if (!response.ok) {
-        window.alert(await readApiError(response, '批量纳入 Ansible Inventory 失败。'));
+        showOperationNotice('error', '批量纳入 Ansible 失败', await readApiError(response, '批量纳入 Ansible Inventory 失败。'));
         return;
       }
       const payload = await response.json().catch(() => ({}));
       const summary = payload.summary || {};
       await refreshAssets();
       clearBulkSelection();
-      window.alert(`批量纳管完成：新增 ${summary.created || 0}，更新 ${summary.updated || 0}，失败 ${summary.failed || 0}，跳过 ${selectedBulkAssets.length - candidates.length}。`);
+      showOperationNotice(
+        summary.failed ? 'warning' : 'success',
+        '批量纳管完成',
+        `新增 ${summary.created || 0}，更新 ${summary.updated || 0}，失败 ${summary.failed || 0}，跳过 ${selectedBulkAssets.length - candidates.length}。`,
+      );
     } finally {
       setBulkAction(null);
     }
@@ -3142,11 +3154,11 @@ export default function AssetCenterView({
 
   const handleProvisionAnsible = async (asset) => {
     if (!extractManagementHost(asset?.managementIp)) {
-      window.alert('请先为该资产补充管理 IP。');
+      showOperationNotice('warning', '请先补充管理 IP', '纳入 Ansible 前需要先给资产填写可连接的管理 IP。');
       return;
     }
     if (!asset?.credential?.count) {
-      window.alert('请先在资产右侧“密码”标签绑定登录凭据。');
+      showOperationNotice('warning', '请先绑定登录凭据', '请先在资产右侧“密码”标签绑定登录凭据。');
       return;
     }
     setAnsibleActionAssetId(asset.id);
@@ -3164,12 +3176,16 @@ export default function AssetCenterView({
         }),
       });
       if (!response.ok) {
-        window.alert(await readApiError(response, '纳入 Ansible Inventory 失败。'));
+        showOperationNotice('error', '纳入 Ansible 失败', await readApiError(response, '纳入 Ansible Inventory 失败。'));
         return;
       }
       const payload = await response.json().catch(() => ({}));
       const summary = payload.summary || {};
-      window.alert(`已处理：新增 ${summary.created || 0}，更新 ${summary.updated || 0}，失败 ${summary.failed || 0}。`);
+      showOperationNotice(
+        summary.failed ? 'warning' : 'success',
+        'Ansible 纳管完成',
+        `新增 ${summary.created || 0}，更新 ${summary.updated || 0}，失败 ${summary.failed || 0}。`,
+      );
       await refreshAssets();
     } finally {
       setAnsibleActionAssetId(null);
@@ -3178,11 +3194,11 @@ export default function AssetCenterView({
 
   const handleTestAnsible = async (asset) => {
     if (!extractManagementHost(asset?.managementIp)) {
-      window.alert('请先为该资产补充管理 IP。');
+      showOperationNotice('warning', '请先补充管理 IP', '测试 Ansible 登录前需要先给资产填写可连接的管理 IP。');
       return;
     }
     if (!asset?.credential?.count) {
-      window.alert('请先绑定登录凭据后再测试。');
+      showOperationNotice('warning', '请先绑定登录凭据', '请先绑定登录凭据后再测试。');
       return;
     }
     setAnsibleTestAssetId(asset.id);
@@ -3194,11 +3210,11 @@ export default function AssetCenterView({
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        window.alert(payload.detail || payload.message || 'Ansible 登录测试失败。');
+        showOperationNotice('error', 'Ansible 登录测试失败', normalizeActionMessage(payload.detail || payload.message, 'Ansible 登录测试失败。'));
         return;
       }
       const result = payload.results?.[0];
-      window.alert(result?.detail || (payload.summary?.success ? 'Ansible 登录测试成功。' : '没有可测试的主机。'));
+      showOperationNotice('success', 'Ansible 登录测试完成', result?.detail || (payload.summary?.success ? 'Ansible 登录测试成功。' : '没有可测试的主机。'));
     } finally {
       setAnsibleTestAssetId(null);
     }
@@ -3539,6 +3555,7 @@ export default function AssetCenterView({
                 onTestBackupTarget={handleTestBackupTargetNotice}
                 onProvisionAnsible={handleProvisionAnsible}
                 onTestAnsible={handleTestAnsible}
+                onNotice={showOperationNotice}
                 backupActionAssetId={backupActionAssetId}
                 backupTestAssetId={backupTestAssetId}
                 credentialTestAssetId={credentialTestAssetId}
