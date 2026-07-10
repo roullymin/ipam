@@ -800,6 +800,7 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
 function filterAssets(assets, filters) {
   const keyword = normalize(filters.keyword);
   return assets.filter((asset) => {
+    if (filters.scope === 'priority' && !isPriorityManagedAsset(asset)) return false;
     if (filters.status !== 'all' && asset.status !== filters.status) return false;
     if (filters.type !== 'all' && asset.type !== filters.type) return false;
     if (filters.datacenter !== 'all' && (asset.datacenterName || '未标注机房') !== filters.datacenter) return false;
@@ -807,9 +808,12 @@ function filterAssets(assets, filters) {
     if (filters.credential !== 'all' && asset.credential.status !== filters.credential) return false;
     if (filters.backup !== 'all') {
       const backedUp = asset.backup.versionCount > 0 || asset.backup.status === 'ready';
+      const targetStatus = asset.backup.targetStatus || asset.backup.status;
       if (filters.backup === 'ready' && !backedUp) return false;
       if (filters.backup === 'missing' && backedUp) return false;
-      if (!['ready', 'missing'].includes(filters.backup) && asset.backup.status !== filters.backup) return false;
+      if (filters.backup === 'failed' && targetStatus !== 'failed') return false;
+      if (filters.backup === 'pending' && !['pending', 'not_run'].includes(targetStatus) && asset.backup.status !== 'pending') return false;
+      if (!['ready', 'missing', 'failed', 'pending'].includes(filters.backup) && asset.backup.status !== filters.backup) return false;
     }
     if (filters.automation !== 'all') {
       if (filters.automation === 'managed' && !asset.automation.managed) return false;
@@ -965,6 +969,59 @@ function buildAssetGovernance(assets) {
     qualityScore: Math.max(0, Math.round(100 - ((counters.type_review + counters.missing_ip + counters.missing_credential + counters.missing_backup) / normalized) * 24)),
     readyForBackup: counters.backup_ready || 0,
     readyForAnsible: counters.ansible_ready || 0,
+  };
+}
+
+function getBackupTimestamp(asset) {
+  const raw = asset?.backup?.lastBackupAt || asset?.updatedAt || '';
+  const time = raw ? new Date(raw).getTime() : 0;
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function hasManagedBackupTarget(asset) {
+  return !!asset?.backup?.targetId || !!asset?.backup?.target;
+}
+
+function hasActiveCredential(asset) {
+  return asset?.credential?.status === 'active' && asset?.credential?.count > 0;
+}
+
+function isPriorityManagedAsset(asset) {
+  return !!extractManagementHost(asset?.managementIp) && hasActiveCredential(asset) && hasManagedBackupTarget(asset);
+}
+
+function isBackupSuccessful(asset) {
+  return asset?.backup?.targetStatus === 'success'
+    || asset?.backup?.versionCount > 0
+    || asset?.backup?.status === 'ready';
+}
+
+function buildPriorityWorkspace(assets) {
+  const priorityAssets = assets.filter(isPriorityManagedAsset);
+  const successAssets = priorityAssets.filter(isBackupSuccessful);
+  const failedAssets = priorityAssets.filter((asset) => asset.backup.targetStatus === 'failed');
+  const pendingAssets = priorityAssets.filter((asset) => !isBackupSuccessful(asset) && asset.backup.targetStatus !== 'failed');
+  const ansibleReadyAssets = priorityAssets.filter((asset) => asset.automation.managed || isBackupSuccessful(asset));
+  const typeGroups = countBy(priorityAssets, (asset) => asset.typeLabel || '未分类').slice(0, 6);
+  const locationGroups = countBy(priorityAssets, (asset) => asset.datacenterName || '未标注机房').slice(0, 6);
+  const recentAssets = [...priorityAssets]
+    .sort((left, right) => getBackupTimestamp(right) - getBackupTimestamp(left))
+    .slice(0, 6);
+  const failureAssets = [...failedAssets]
+    .sort((left, right) => getBackupTimestamp(right) - getBackupTimestamp(left))
+    .slice(0, 6);
+
+  return {
+    total: priorityAssets.length,
+    success: successAssets.length,
+    failed: failedAssets.length,
+    pending: pendingAssets.length,
+    ansibleReady: ansibleReadyAssets.length,
+    successRate: priorityAssets.length ? Math.round((successAssets.length / priorityAssets.length) * 100) : 0,
+    typeGroups,
+    locationGroups,
+    recentAssets,
+    failureAssets,
   };
 }
 
@@ -1140,9 +1197,186 @@ function AssetGovernancePanel({ governance, onNavigate }) {
   );
 }
 
+function PriorityWorkspacePanel({ workspace, onNavigate }) {
+  const metrics = [
+    {
+      label: '重点设备',
+      value: workspace.total,
+      subtext: '有 IP / 凭据 / 备份目标',
+      icon: ServerCog,
+      tone: 'cyan',
+      criteria: { scope: 'priority' },
+    },
+    {
+      label: '备份成功',
+      value: workspace.success,
+      subtext: `${workspace.successRate}% 已形成版本`,
+      icon: CheckCircle2,
+      tone: 'emerald',
+      criteria: { scope: 'priority', backup: 'ready' },
+    },
+    {
+      label: '备份失败',
+      value: workspace.failed,
+      subtext: '需要优先排查',
+      icon: AlertTriangle,
+      tone: 'rose',
+      criteria: { scope: 'priority', backup: 'failed' },
+    },
+    {
+      label: '待执行',
+      value: workspace.pending,
+      subtext: '已接入但暂无成功版本',
+      icon: Database,
+      tone: 'amber',
+      criteria: { scope: 'priority', backup: 'pending' },
+    },
+    {
+      label: 'Ansible 就绪',
+      value: workspace.ansibleReady,
+      subtext: '可转 Inventory',
+      icon: Terminal,
+      tone: 'violet',
+      criteria: { scope: 'priority', governance: 'ansible_ready' },
+    },
+  ];
+
+  return (
+    <section className="asset-priority-workspace">
+      <div className="asset-priority-workspace__head">
+        <div>
+          <div className="ui-eyebrow text-xs font-black uppercase">Priority Device Loop</div>
+          <h2 className="mt-2 text-2xl font-black text-slate-950">重点设备闭环工作台</h2>
+          <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">
+            先把已导入的重点设备做成闭环：登录成功、配置备份、版本留存、再转 Ansible 纳管。
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => onNavigate({ scope: 'priority', backup: 'failed' })}
+          className="ui-primary-button inline-flex h-11 items-center gap-2 px-4 text-sm font-black transition"
+        >
+          处理失败项
+          <ArrowUpDown className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        {metrics.map(({ label, value, subtext, icon: Icon, tone, criteria }) => (
+          <button
+            key={label}
+            type="button"
+            onClick={() => onNavigate(criteria)}
+            className={`asset-priority-metric asset-priority-metric--${tone}`}
+          >
+            <span className="asset-priority-metric__icon">
+              <Icon className="h-4 w-4" />
+            </span>
+            <span className="block text-xs font-black text-slate-500">{label}</span>
+            <strong>{value}</strong>
+            <span className="block truncate text-xs font-semibold text-slate-500">{subtext}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+        <div className="asset-priority-section">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-base font-black text-slate-950">纳管分布</div>
+              <div className="mt-1 text-sm font-semibold text-slate-500">按类型和机房看重点设备是否集中。</div>
+            </div>
+            <GitBranch className="h-4 w-4 text-blue-600" />
+          </div>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <SummaryColumn icon={Boxes} title="类型分布">
+              {workspace.typeGroups.length ? workspace.typeGroups.map((item) => (
+                <StatBar key={item.label} label={item.label} count={item.count} total={workspace.total || 1} meta={`${item.risk} 个风险标签`} tone="bg-cyan-400" />
+              )) : (
+                <div className="asset-priority-empty">暂无重点设备。</div>
+              )}
+            </SummaryColumn>
+            <SummaryColumn icon={MapPin} title="机房分布">
+              {workspace.locationGroups.length ? workspace.locationGroups.map((item) => (
+                <StatBar key={item.label} label={item.label} count={item.count} total={workspace.total || 1} meta={`${item.offline} 离线 / ${item.credentialMissing} 未绑密码`} tone="bg-violet-400" />
+              )) : (
+                <div className="asset-priority-empty">暂无机房分布。</div>
+              )}
+            </SummaryColumn>
+          </div>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+          <div className="asset-priority-section">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-base font-black text-slate-950">最近成功版本</div>
+                <div className="mt-1 text-sm font-semibold text-slate-500">用于确认重点设备是否持续有版本。</div>
+              </div>
+              <Database className="h-4 w-4 text-cyan-300" />
+            </div>
+            <div className="mt-3 space-y-2">
+              {workspace.recentAssets.length ? workspace.recentAssets.map((asset) => (
+                <button
+                  key={asset.id}
+                  type="button"
+                  onClick={() => onNavigate({ keyword: asset.name })}
+                  className="asset-priority-row"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-black text-slate-950">{asset.name}</span>
+                    <span className="mt-1 block truncate text-xs font-semibold text-slate-500">{asset.managementIp || '-'}</span>
+                  </span>
+                  <span className="text-right text-xs font-bold text-slate-500">
+                    <span className="block text-slate-950">{asset.backup.versionCount || 0} 个版本</span>
+                    <span>{formatTime(asset.backup.lastBackupAt)}</span>
+                  </span>
+                </button>
+              )) : (
+                <div className="asset-priority-empty">暂无备份版本。</div>
+              )}
+            </div>
+          </div>
+
+          <div className="asset-priority-section">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-base font-black text-slate-950">失败处理队列</div>
+                <div className="mt-1 text-sm font-semibold text-slate-500">优先看认证、端口和 SSH 算法问题。</div>
+              </div>
+              <AlertTriangle className="h-4 w-4 text-rose-300" />
+            </div>
+            <div className="mt-3 space-y-2">
+              {workspace.failureAssets.length ? workspace.failureAssets.map((asset) => (
+                <button
+                  key={asset.id}
+                  type="button"
+                  onClick={() => onNavigate({ scope: 'priority', keyword: asset.name, backup: 'failed' })}
+                  className="asset-priority-row asset-priority-row--danger"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-black text-slate-950">{asset.name}</span>
+                    <span className="mt-1 block truncate text-xs font-semibold text-slate-500">{asset.managementIp || '-'}</span>
+                  </span>
+                  <span className="max-w-[11rem] truncate text-xs font-bold text-rose-200">{asset.backup.targetError || '备份失败'}</span>
+                </button>
+              )) : (
+                <div className="asset-priority-ok">
+                  当前重点设备没有备份失败项，可以推进批量执行和 Ansible Inventory。
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function AssetOverview({ assets, summary, groupSummary, typeOptions, onNavigate, onRefresh, isDataLoading }) {
   const typeCards = useMemo(() => buildOverviewTypeCards(assets, typeOptions), [assets, typeOptions]);
   const governance = useMemo(() => buildAssetGovernance(assets), [assets]);
+  const priorityWorkspace = useMemo(() => buildPriorityWorkspace(assets), [assets]);
   const priorityCards = [
     { key: 'backup', label: '配置未接入', count: assets.filter((asset) => asset.riskCodes.includes('backup')).length, tone: 'amber', icon: Database },
     { key: 'credential', label: '密码未受控', count: assets.filter((asset) => asset.riskCodes.includes('credential')).length, tone: 'rose', icon: KeyRound },
@@ -1168,6 +1402,8 @@ function AssetOverview({ assets, summary, groupSummary, typeOptions, onNavigate,
       </section>
 
       <AssetGovernancePanel governance={governance} onNavigate={onNavigate} />
+
+      <PriorityWorkspacePanel workspace={priorityWorkspace} onNavigate={onNavigate} />
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.55fr)]">
         <div className="asset-hero-card p-5">
@@ -2647,6 +2883,7 @@ export default function AssetCenterView({
   const [backupFilter, setBackupFilter] = useState('all');
   const [automationFilter, setAutomationFilter] = useState('all');
   const [governanceFilter, setGovernanceFilter] = useState('all');
+  const [scopeFilter, setScopeFilter] = useState('all');
   const [visibleColumns, setVisibleColumns] = useState(DEFAULT_VISIBLE_COLUMNS);
   const [selectedAssetId, setSelectedAssetId] = useState(null);
   const [selectedBulkAssetIds, setSelectedBulkAssetIds] = useState([]);
@@ -2682,8 +2919,9 @@ export default function AssetCenterView({
       backup: backupFilter,
       automation: automationFilter,
       governance: governanceFilter,
+      scope: scopeFilter,
     }),
-    [assets, automationFilter, backupFilter, credentialFilter, datacenterFilter, governanceFilter, keyword, risk, status, type],
+    [assets, automationFilter, backupFilter, credentialFilter, datacenterFilter, governanceFilter, keyword, risk, scopeFilter, status, type],
   );
 
   const sortedAssets = useMemo(
@@ -3247,6 +3485,7 @@ export default function AssetCenterView({
     setBackupFilter('all');
     setAutomationFilter('all');
     setGovernanceFilter('all');
+    setScopeFilter('all');
   };
 
   const navigateToList = (criteria = {}) => {
@@ -3262,6 +3501,7 @@ export default function AssetCenterView({
     if (criteria.backup) setBackupFilter(criteria.backup);
     if (criteria.automation) setAutomationFilter(criteria.automation);
     if (criteria.governance) setGovernanceFilter(criteria.governance);
+    if (criteria.scope) setScopeFilter(criteria.scope);
   };
 
   const handleToggleBulkAsset = (assetId) => {
@@ -3398,6 +3638,7 @@ export default function AssetCenterView({
                   {type !== 'all' ? <span className="rounded-lg bg-slate-100 px-3 py-1.5">类型：{DEVICE_TYPE_LABELS[type] || type}</span> : null}
                   {risk !== 'all' ? <span className="rounded-lg bg-slate-100 px-3 py-1.5">风险：{RISK_LABELS[risk] || risk}</span> : null}
                   {governanceFilter !== 'all' ? <span className="rounded-lg bg-slate-100 px-3 py-1.5">治理：{GOVERNANCE_LABELS[governanceFilter] || governanceFilter}</span> : null}
+                  {scopeFilter === 'priority' ? <span className="rounded-lg bg-slate-100 px-3 py-1.5">范围：重点设备</span> : null}
                 </div>
                 <div className="flex items-center gap-2">
                   <button

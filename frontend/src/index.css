@@ -1304,6 +1304,169 @@ body {
   }
 }
 
+.asset-priority-workspace {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(34, 211, 238, 0.18);
+  border-radius: var(--radius-card);
+  background:
+    radial-gradient(circle at 16% 0%, rgba(34, 211, 238, 0.16), transparent 30%),
+    radial-gradient(circle at 94% 10%, rgba(124, 58, 237, 0.14), transparent 26%),
+    linear-gradient(180deg, rgba(11, 28, 48, 0.96), rgba(5, 12, 24, 0.9));
+  box-shadow: var(--shadow-card), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  padding: 1.25rem;
+}
+
+.asset-priority-workspace::before {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(34, 211, 238, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 211, 238, 0.035) 1px, transparent 1px);
+  background-size: 38px 38px;
+  mask-image: linear-gradient(180deg, black, transparent 78%);
+}
+
+.asset-priority-workspace > * {
+  position: relative;
+  z-index: 1;
+}
+
+.asset-priority-workspace__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.asset-priority-metric {
+  min-width: 0;
+  border: 1px solid rgba(34, 211, 238, 0.18);
+  border-radius: 1rem;
+  background:
+    linear-gradient(180deg, rgba(13, 31, 54, 0.92), rgba(7, 16, 31, 0.84)),
+    rgba(8, 19, 35, 0.78);
+  padding: 0.9rem;
+  text-align: left;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+
+.asset-priority-metric:hover {
+  border-color: rgba(34, 211, 238, 0.5);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.28), 0 0 22px rgba(34, 211, 238, 0.1);
+  transform: translateY(-1px);
+}
+
+.asset-priority-metric__icon {
+  display: inline-flex;
+  height: 2.35rem;
+  width: 2.35rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.85rem;
+  border: 1px solid currentColor;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  color: #22f4ff;
+  box-shadow: 0 0 18px color-mix(in srgb, currentColor 18%, transparent);
+  margin-bottom: 0.75rem;
+}
+
+.asset-priority-metric strong {
+  display: block;
+  margin-top: 0.5rem;
+  color: #ffffff;
+  font-size: 2rem;
+  font-weight: 950;
+  line-height: 1;
+  text-shadow: 0 0 22px rgba(34, 211, 238, 0.12);
+}
+
+.asset-priority-metric--cyan {
+  color: #22f4ff;
+}
+
+.asset-priority-metric--emerald {
+  color: #4ade80;
+}
+
+.asset-priority-metric--rose {
+  color: #fb7185;
+}
+
+.asset-priority-metric--amber {
+  color: #fbbf24;
+}
+
+.asset-priority-metric--violet {
+  color: #a78bfa;
+}
+
+.asset-priority-section {
+  min-width: 0;
+  border: 1px solid rgba(34, 211, 238, 0.16);
+  border-radius: 1rem;
+  background:
+    linear-gradient(180deg, rgba(12, 29, 50, 0.9), rgba(6, 16, 30, 0.82)),
+    rgba(8, 19, 35, 0.8);
+  padding: 1rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.asset-priority-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  border-radius: 0.85rem;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(5, 12, 24, 0.56);
+  padding: 0.75rem 0.85rem;
+  text-align: left;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.asset-priority-row:hover {
+  border-color: rgba(34, 211, 238, 0.42);
+  background: rgba(34, 211, 238, 0.08);
+  transform: translateY(-1px);
+}
+
+.asset-priority-row--danger {
+  border-color: rgba(251, 113, 133, 0.22);
+  background: rgba(127, 29, 29, 0.16);
+}
+
+.asset-priority-empty,
+.asset-priority-ok {
+  border-radius: 0.9rem;
+  border: 1px solid rgba(34, 211, 238, 0.16);
+  background: rgba(5, 12, 24, 0.46);
+  padding: 1rem;
+  color: #9fb0cb;
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.asset-priority-ok {
+  border-color: rgba(34, 197, 94, 0.26);
+  background: rgba(6, 78, 59, 0.16);
+  color: #bbf7d0;
+}
+
+@media (max-width: 900px) {
+  .asset-priority-workspace__head {
+    flex-direction: column;
+  }
+
+  .asset-priority-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .asset-center-page .ui-card {
   border-color: var(--app-panel-border) !important;
   background:
