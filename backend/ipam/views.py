@@ -99,6 +99,7 @@ from .domains.config_backup.services import (
     run_config_backup_target,
     test_config_backup_target,
     test_secret_login,
+    test_secret_readonly_commands,
 )
 from .domains.data_quality.services import build_encoding_report_payload
 from .domains.data_quality.selectors import get_data_quality_summary
@@ -2098,6 +2099,8 @@ def _classify_login_failure(detail):
         return 'unreachable', '网络不可达'
     if '解析' in message or 'name or service not known' in lowered or 'temporary failure in name resolution' in lowered:
         return 'resolve_failed', '管理地址无法解析'
+    if '命令' in message or 'command' in lowered:
+        return 'command_failed', '只读命令失败'
     if 'paramiko' in lowered or '依赖' in message:
         return 'dependency', '后端依赖缺失'
     return 'other', '其他失败'
@@ -3103,8 +3106,11 @@ def _build_ansible_inventory(hosts):
     for row in hosts:
         if not row.get('managed') or not row.get('management_ip') or not row.get('credential_id'):
             continue
-        group = row['groups'][0] if row.get('groups') else 'managed'
-        grouped.setdefault(group, []).append(row)
+        groups = row.get('groups') or ['managed']
+        for group in groups:
+            if group == 'unmanaged':
+                continue
+            grouped.setdefault(group, []).append(row)
     lines = []
     for group in sorted(grouped):
         lines.append(f'[{group}]')
@@ -3178,10 +3184,27 @@ def ansible_summary(request):
 def ansible_test(request):
     if get_user_role(request.user) not in ANSIBLE_MANAGE_ROLES:
         raise PermissionDenied('当前角色无权执行 Ansible 登录测试。')
+    mode = str(request.data.get('mode') or '').strip().lower()
+    if mode not in ('login', 'readonly'):
+        mode = 'readonly' if _coerce_bool(request.data.get('run_readonly'), False) else 'login'
     hosts = _build_ansible_hosts()
     selected_hosts = _ansible_host_selection(hosts, request.data)
     results = []
-    counters = {'total': len(selected_hosts), 'success': 0, 'failed': 0, 'skipped': 0}
+    counters = {
+        'total': len(selected_hosts),
+        'success': 0,
+        'failed': 0,
+        'skipped': 0,
+        'auth_failed': 0,
+        'timeout': 0,
+        'refused': 0,
+        'unreachable': 0,
+        'resolve_failed': 0,
+        'ssh_algorithm': 0,
+        'command_failed': 0,
+        'dependency': 0,
+        'other': 0,
+    }
     for row in selected_hosts:
         credential = SecretRecord.objects.filter(pk=row.get('credential_id'), status='active').first()
         if not row.get('management_ip'):
@@ -3199,15 +3222,35 @@ def ansible_test(request):
                 read_secret=vault_read_secret,
                 ssh_port=row.get('ssh_port') or 22,
                 timeout_seconds=row.get('timeout_seconds') or 30,
+            ) if mode == 'login' else test_secret_readonly_commands(
+                credential=credential,
+                management_ip=row['management_ip'],
+                read_secret=vault_read_secret,
+                ssh_port=row.get('ssh_port') or 22,
+                timeout_seconds=row.get('timeout_seconds') or 30,
+                command_profile=row.get('command_profile') or 'huawei_vrp',
             )
             counters['success'] += 1
-            results.append({**row, 'status': 'success', 'category': 'success', 'detail': payload.get('message') or 'SSH 登录测试成功。', 'duration_seconds': payload.get('duration_seconds', 0)})
+            results.append(
+                {
+                    **row,
+                    'status': 'success',
+                    'category': 'success',
+                    'category_label': '登录成功' if mode == 'login' else '只读命令成功',
+                    'detail': payload.get('message') or ('SSH 登录测试成功。' if mode == 'login' else '只读命令执行成功。'),
+                    'duration_seconds': payload.get('duration_seconds', 0),
+                    'commands': payload.get('commands') or [],
+                    'username': payload.get('username') or credential.username_hint,
+                }
+            )
         except (ConfigBackupConnectionError, ConfigBackupError, VaultError) as exc:
             category, label = _classify_login_failure(str(exc))
             counters['failed'] += 1
+            counters[category] = counters.get(category, 0) + 1
             results.append({**row, 'status': 'failed', 'category': category, 'category_label': label, 'detail': str(exc)})
-    record_audit(request, 'ansible', 'test', detail=f'批量测试 Ansible 登录：成功 {counters["success"]}，失败 {counters["failed"]}，跳过 {counters["skipped"]}')
-    return Response({'summary': counters, 'results': results})
+    mode_label = '只读命令' if mode == 'readonly' else '登录'
+    record_audit(request, 'ansible', 'test', detail=f'批量测试 Ansible {mode_label}：成功 {counters["success"]}，失败 {counters["failed"]}，跳过 {counters["skipped"]}')
+    return Response({'mode': mode, 'summary': counters, 'results': results})
 
 
 def _provision_ansible_host(row, request, defaults):

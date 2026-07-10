@@ -164,6 +164,12 @@ def _profile_commands(command_profile):
     }
 
 
+def _readonly_probe_commands(command_profile):
+    if command_profile in ('cisco_ios', 'generic_show_run'):
+        return ['show version']
+    return ['display version', 'display clock']
+
+
 def _friendly_error_message(exc, probe=None):
     message = str(exc) or exc.__class__.__name__
     lowered = message.lower()
@@ -639,6 +645,92 @@ def test_secret_login(*, credential, management_ip, read_secret, ssh_port=22, ti
             'message': 'SSH 登录测试成功。',
             'username': username,
             'duration_seconds': max(int(time.monotonic() - started), 0),
+        }
+    except ConfigBackupConnectionError:
+        raise
+    except Exception as exc:
+        raise ConfigBackupConnectionError(_friendly_error_message(exc)) from exc
+    finally:
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
+
+
+def test_secret_readonly_commands(
+    *,
+    credential,
+    management_ip,
+    read_secret,
+    ssh_port=22,
+    timeout_seconds=30,
+    command_profile='huawei_vrp',
+    ssh_client_factory=None,
+):
+    target = SimpleNamespace(
+        credential=credential,
+        management_ip=management_ip,
+        ssh_port=ssh_port,
+        timeout_seconds=timeout_seconds,
+        command_profile=command_profile,
+    )
+    username, password = _read_secret_payload(target, read_secret)
+    commands = _profile_commands(command_profile)
+    readonly_commands = _readonly_probe_commands(command_profile)
+    client = None
+    started = time.monotonic()
+    command_results = []
+    try:
+        client = _connect_ssh_client(target, username, password, ssh_client_factory=ssh_client_factory)
+        channel = client.invoke_shell()
+        time.sleep(0.5)
+        _receive(channel, timeout=min(max(int(timeout_seconds or 30), 5), 15))
+
+        for command in commands['prepare']:
+            try:
+                _send_command(channel, command, timeout=max(int(timeout_seconds or 30), 5))
+            except TimeoutError:
+                # Some network devices do not support every terminal paging command.
+                # The probe can still continue with the read-only commands below.
+                continue
+
+        for command in readonly_commands:
+            try:
+                raw_output = _send_command(channel, command, timeout=max(int(timeout_seconds or 30), 30))
+                output_excerpt = _clean_config_output(raw_output, [command])[:1200]
+                command_results.append(
+                    {
+                        'command': command,
+                        'ok': True,
+                        'bytes': len(raw_output.encode('utf-8', errors='ignore')),
+                        'output_excerpt': output_excerpt,
+                    }
+                )
+            except TimeoutError as exc:
+                command_results.append(
+                    {
+                        'command': command,
+                        'ok': False,
+                        'error': f'命令超时：{exc}',
+                    }
+                )
+
+        if not any(result.get('ok') for result in command_results):
+            error_parts = [
+                f"{result.get('command')}: {result.get('error') or '未返回可用输出'}"
+                for result in command_results
+            ]
+            raise ConfigBackupConnectionError(f"只读命令执行失败：{'；'.join(error_parts)}")
+
+        return {
+            'status': 'success',
+            'message': '只读命令执行成功。'
+            if all(result.get('ok') for result in command_results)
+            else '只读命令部分成功，请检查失败命令。',
+            'username': username,
+            'duration_seconds': max(int(time.monotonic() - started), 0),
+            'commands': command_results,
         }
     except ConfigBackupConnectionError:
         raise
