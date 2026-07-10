@@ -350,6 +350,48 @@ def _legacy_transport_factory(paramiko_module, peer_probe=None):
     return factory
 
 
+def _is_auth_failure(exc):
+    text = str(exc or '').lower()
+    exc_name = exc.__class__.__name__.lower()
+    return (
+        'authentication' in text
+        or 'auth' in text
+        or 'permission denied' in text
+        or 'not allowed' in text
+        or 'authentication' in exc_name
+    )
+
+
+def _connect_keyboard_interactive_client(paramiko_module, target, username, password, timeout_seconds, ssh_port, peer_probe):
+    sock = None
+    transport = None
+    try:
+        sock = socket.create_connection((str(target.management_ip), ssh_port), timeout=timeout_seconds)
+        sock.settimeout(timeout_seconds)
+        transport = _legacy_transport_factory(paramiko_module, peer_probe)(sock)
+        transport.banner_timeout = timeout_seconds
+        transport.auth_timeout = timeout_seconds
+        transport.start_client(timeout=timeout_seconds)
+
+        def password_handler(title, instructions, prompts):
+            return [password for _prompt, _echo in prompts]
+
+        transport.auth_interactive(username, password_handler)
+        if not transport.is_authenticated():
+            raise paramiko_module.AuthenticationException('keyboard-interactive authentication failed')
+
+        client = paramiko_module.SSHClient()
+        client.set_missing_host_key_policy(paramiko_module.AutoAddPolicy())
+        client._transport = transport
+        return client
+    except Exception:
+        if transport is not None:
+            transport.close()
+        elif sock is not None:
+            sock.close()
+        raise
+
+
 def _connect_ssh_client(target, username, password, ssh_client_factory=None):
     try:
         import paramiko
@@ -383,6 +425,21 @@ def _connect_ssh_client(target, username, password, ssh_client_factory=None):
             client.close()
         except Exception:
             pass
+        if ssh_client_factory is None and _is_auth_failure(exc):
+            try:
+                return _connect_keyboard_interactive_client(
+                    paramiko,
+                    target,
+                    username,
+                    password,
+                    timeout_seconds,
+                    ssh_port,
+                    peer_probe,
+                )
+            except Exception as interactive_exc:
+                if _is_ssh_algorithm_error(interactive_exc):
+                    raise ConfigBackupConnectionError(_friendly_error_message(interactive_exc, peer_probe)) from interactive_exc
+                raise interactive_exc from exc
         if _is_ssh_algorithm_error(exc):
             raise ConfigBackupConnectionError(_friendly_error_message(exc, peer_probe)) from exc
         raise
