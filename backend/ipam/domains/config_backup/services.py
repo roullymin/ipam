@@ -188,6 +188,19 @@ def _normalize_fact_value(value):
     return value[:180]
 
 
+def _is_valid_serial_number(value):
+    value = str(value or '').strip()
+    if not value:
+        return False
+    if value.lower() in {'of', 'the', 'none', 'null', 'unknown', 'n/a', 'na', '-'}:
+        return False
+    if len(value) < 4:
+        return False
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+', value):
+        return False
+    return bool(re.search(r'\d', value))
+
+
 def _first_match(patterns, text):
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE | re.MULTILINE)
@@ -233,12 +246,14 @@ def _parse_device_facts(raw_outputs, management_ip=''):
     )
     serial_number = _first_match(
         [
-            r'^\s*(?:DEVICE_SERIAL_NUMBER|Device\s+serial\s+number|Device\s+Serial\s+Number|Serial\s+Number|Serial\s+No\.?|SN|S/N|BarCode|Barcode|Board\s+BarCode|Chassis\s+SN|ESN)\s*[:：]?\s*([A-Za-z0-9_.-]+)',
-            r'SN\s*[:：]\s*([A-Za-z0-9_.-]+)',
+            r'^\s*(?:DEVICE_SERIAL_NUMBER|Device\s+serial\s+number|Device\s+Serial\s+Number|Serial\s+Number|Serial\s+No\.?|SN|S/N|BarCode|Barcode|Board\s+BarCode|Chassis\s+SN|ESN)\s*[:：]\s*([A-Za-z0-9_.-]{4,})',
+            r'^\s*(?:Device\s+serial\s+number|Serial\s+Number|Serial\s+No\.?)\s+(?:is\s+)?([A-Za-z0-9_.-]{4,})\s*$',
             r'SNMP\s+Board\s+Serial\s+Number\s*:\s*([A-Za-z0-9_.-]+)',
         ],
         text,
     )
+    if not _is_valid_serial_number(serial_number):
+        serial_number = ''
     version = _first_match(
         [
             r'VRP\s*\(R\)\s*software,\s*Version\s+([^\r\n]+)',

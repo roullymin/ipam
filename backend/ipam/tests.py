@@ -113,6 +113,22 @@ BarCode      : 219801A2ABC0Q100002
         self.assertEqual(facts['hostname'], 'Core-SW')
         self.assertIn('Release 6628P02', facts['version'])
 
+    def test_parse_does_not_treat_esn_of_phrase_as_serial_number(self):
+        facts = _parse_device_facts(
+            [
+                """
+Huawei Versatile Routing Platform Software
+VRP (R) software, Version 5.170 (S5736 V200R022C00SPC500)
+ESN of device is not displayed in this view.
+HUAWEI S5736-S48T4XC Routing Switch uptime is 1 week
+<Access-SW>
+""",
+            ],
+            management_ip='172.25.254.21',
+        )
+
+        self.assertEqual(facts['serial_number'], '')
+
 
 class AnsibleDefaultScopeTests(SimpleTestCase):
     def test_default_scope_prefers_priority_import_hosts(self):
@@ -162,6 +178,7 @@ class AnsibleFactWriteBackTests(APITestCase):
             u_height=1,
             device_type='switch_core',
             mgmt_ip='172.25.254.254',
+            sn='of',
         )
 
         applied = _apply_ansible_facts_to_asset(

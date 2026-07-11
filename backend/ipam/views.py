@@ -97,6 +97,7 @@ from .domains.config_backup.policy import (
 from .domains.config_backup.services import (
     ConfigBackupConnectionError,
     ConfigBackupError,
+    _is_valid_serial_number,
     collect_secret_device_facts,
     run_config_backup_target,
     test_config_backup_target,
@@ -3293,9 +3294,12 @@ def _apply_ansible_facts_to_asset(row, facts, overwrite=False):
         if instance is None:
             return False
         value = str(value or '').strip()
+        current = str(getattr(instance, field, '') or '').strip()
+        if field == 'sn' and current and not _is_valid_serial_number(current):
+            setattr(instance, field, value if value and _is_valid_serial_number(value) else '')
+            return True
         if not value:
             return False
-        current = str(getattr(instance, field, '') or '').strip()
         if overwrite or not current:
             setattr(instance, field, value)
             return True
