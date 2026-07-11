@@ -976,3 +976,49 @@ class ConfigBackupVersion(models.Model):
         verbose_name_plural = '配置备份版本'
         db_table = 'ops_config_backup_version'
         ordering = ['-started_at', '-id']
+
+
+class AnsibleTaskRun(models.Model):
+    ACTION_CHOICES = [
+        ('login_test', '登录测试'),
+        ('readonly_probe', '只读探测'),
+        ('inventory_provision', '纳入 Inventory'),
+        ('facts_collect', '设备信息采集'),
+        ('rotation_plan', '密码轮换预案'),
+    ]
+    STATUS_CHOICES = [
+        ('success', '成功'),
+        ('partial', '部分成功'),
+        ('failed', '失败'),
+    ]
+
+    action = models.CharField('任务类型', max_length=32, choices=ACTION_CHOICES)
+    status = models.CharField('执行状态', max_length=20, choices=STATUS_CHOICES, default='success')
+    total = models.PositiveIntegerField('目标数量', default=0)
+    success_count = models.PositiveIntegerField('成功数量', default=0)
+    failed_count = models.PositiveIntegerField('失败数量', default=0)
+    skipped_count = models.PositiveIntegerField('跳过数量', default=0)
+    actor = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name='ansible_task_runs',
+        null=True,
+        blank=True,
+        verbose_name='执行人',
+    )
+    actor_name = models.CharField('执行人名称', max_length=150, blank=True)
+    detail = models.TextField('任务摘要', blank=True)
+    results = models.JSONField('执行结果', default=list, blank=True)
+    started_at = models.DateTimeField('开始时间', default=timezone.now)
+    finished_at = models.DateTimeField('完成时间', null=True, blank=True)
+    duration_seconds = models.PositiveIntegerField('耗时（秒）', default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f'{self.action} {self.status} {self.started_at:%Y-%m-%d %H:%M:%S}'
+
+    class Meta:
+        verbose_name = 'Ansible 执行记录'
+        verbose_name_plural = 'Ansible 执行记录'
+        db_table = 'ops_ansible_task_run'
+        ordering = ['-started_at', '-id']

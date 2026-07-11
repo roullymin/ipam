@@ -29,10 +29,14 @@ const EMPTY_SUMMARY = {
     credential_missing: 0,
     backup_missing: 0,
     failed_hosts: 0,
+    candidate_hosts: 0,
+    all_hosts: 0,
+    visible_scope: 'managed',
   },
   hosts: [],
   groups: [],
   inventory: '',
+  recent_runs: [],
 };
 
 const asArray = (value) => {
@@ -68,6 +72,11 @@ const CATEGORY_LABELS = {
   ssh_algorithm: 'SSH 算法不兼容',
   command_failed: '只读命令失败',
   dependency: '后端依赖缺失',
+  missing_ip: '缺少管理 IP',
+  credential_missing: '缺少凭据',
+  skipped: '跳过',
+  created: '已创建',
+  updated: '已更新',
   other: '其他失败',
 };
 
@@ -86,7 +95,7 @@ function getStatusTone(status) {
 
 function StatCard({ icon: Icon, label, value, hint, tone = 'text-cyan-200', ring = 'from-cyan-400/20 to-blue-500/10' }) {
   return (
-    <div className="rounded-2xl border border-slate-700/60 bg-white p-4 shadow-sm">
+    <div className="rounded-2xl border border-cyan-400/15 bg-slate-950/55 p-4 shadow-[0_18px_55px_rgba(0,0,0,0.22)]">
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-xs font-black text-slate-400">{label}</div>
@@ -117,7 +126,9 @@ function ActionButton({ children, icon: Icon, loading, primary, disabled, onClic
       disabled={disabled || loading}
       className={cx(
         'inline-flex h-10 items-center gap-2 rounded-xl px-4 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-50',
-        primary ? 'bg-blue-600 text-white' : 'border border-slate-700/70 bg-white text-slate-100',
+        primary
+          ? 'border border-cyan-300/50 bg-gradient-to-r from-cyan-400 to-blue-600 text-white shadow-[0_14px_35px_rgba(37,99,235,0.34)] hover:shadow-[0_16px_42px_rgba(34,211,238,0.28)]'
+          : 'border border-cyan-400/20 bg-slate-950/45 text-slate-100 hover:border-cyan-300/45 hover:bg-cyan-400/10',
       )}
     >
       {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : Icon ? <Icon className="h-4 w-4" /> : null}
@@ -169,12 +180,14 @@ export default function AnsibleCenterView() {
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [lastAction, setLastAction] = useState(null);
   const [testMode, setTestMode] = useState('login');
+  const [scope, setScope] = useState('managed');
+  const [rotationBatchSize, setRotationBatchSize] = useState(1);
 
   const loadSummary = async () => {
     setLoading(true);
     setError('');
     try {
-      const response = await safeFetch('/api/ansible/summary/');
+      const response = await safeFetch(`/api/ansible/summary/?scope=${scope}`);
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload.detail || payload.message || '加载 Ansible 数据失败');
@@ -190,7 +203,7 @@ export default function AnsibleCenterView() {
 
   useEffect(() => {
     loadSummary();
-  }, []);
+  }, [scope]);
 
   const hosts = asArray(summary.hosts);
   const groups = asArray(summary.groups);
@@ -270,22 +283,35 @@ export default function AnsibleCenterView() {
     setError('');
     setNotice('');
     try {
-      const response = await safeFetch(type === 'test' ? '/api/ansible/test/' : '/api/ansible/provision/', {
+      const endpoint = type === 'test'
+        ? '/api/ansible/test/'
+        : type === 'collect'
+          ? '/api/ansible/collect-facts/'
+          : '/api/ansible/provision/';
+      const response = await safeFetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...(selected.length ? { host_ids: selected } : {}),
           ...(type === 'test' ? { mode: testMode } : {}),
+          ...(type === 'collect' ? { write_back: true, overwrite: false } : {}),
         }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(payload.detail || payload.message || (type === 'test' ? '批量测试失败' : '批量纳管失败'));
+        const fallback = type === 'test' ? '批量测试失败' : type === 'collect' ? '设备信息采集失败' : '批量纳管失败';
+        throw new Error(payload.detail || payload.message || fallback);
       }
       setLastAction({ type, ...payload });
-      const actionLabel = type === 'test' ? (payload.mode === 'readonly' ? '只读命令测试' : '登录测试') : '纳入 Inventory';
-      setNotice(`${actionLabel}完成：成功 ${payload.summary?.success ?? payload.summary?.created ?? 0}，失败 ${payload.summary?.failed ?? 0}。`);
-      if (type === 'provision') {
+      const actionLabel = type === 'test'
+        ? (payload.mode === 'readonly' ? '只读命令测试' : '登录测试')
+        : type === 'collect'
+          ? '设备信息采集'
+          : '纳入 Inventory';
+      const successValue = payload.summary?.success ?? payload.summary?.created ?? 0;
+      const writeBackText = type === 'collect' ? `，回写 ${payload.summary?.written_back ?? 0}` : '';
+      setNotice(`${actionLabel}完成：成功 ${successValue}，失败 ${payload.summary?.failed ?? 0}${writeBackText}。`);
+      if (type === 'provision' || type === 'collect') {
         setSelectedIds(new Set());
         await loadSummary();
       }
@@ -315,11 +341,12 @@ export default function AnsibleCenterView() {
   const stats = summary.stats || EMPTY_SUMMARY.stats;
   const inventoryText = summary.inventory || '# 暂无已纳管并绑定凭据的主机';
   const latestResults = asArray(lastAction?.results).slice(0, 10);
+  const recentRuns = asArray(summary.recent_runs);
 
   return (
     <div className="ops-page custom-scrollbar h-full overflow-auto p-3 lg:p-4">
       <div className="mx-auto max-w-[1920px] space-y-4">
-        <section className="rounded-2xl border border-slate-700/60 bg-white p-5 shadow-sm">
+        <section className="rounded-2xl border border-cyan-400/15 bg-slate-950/55 p-5 shadow-[0_18px_55px_rgba(0,0,0,0.22)]">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="max-w-3xl">
               <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-cyan-200">
@@ -332,6 +359,34 @@ export default function AnsibleCenterView() {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <div className="flex h-10 rounded-xl border border-slate-700/70 bg-slate-950/40 p-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScope('managed');
+                    setSelectedIds(new Set());
+                  }}
+                  className={cx(
+                    'rounded-lg px-3 text-xs font-black transition',
+                    scope === 'managed' ? 'bg-cyan-500 text-slate-950' : 'text-slate-300 hover:text-white',
+                  )}
+                >
+                  纳管池
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScope('all');
+                    setSelectedIds(new Set());
+                  }}
+                  className={cx(
+                    'rounded-lg px-3 text-xs font-black transition',
+                    scope === 'all' ? 'bg-cyan-500 text-slate-950' : 'text-slate-300 hover:text-white',
+                  )}
+                >
+                  全部候选
+                </button>
+              </div>
               <div className="flex h-10 rounded-xl border border-slate-700/70 bg-slate-950/40 p-1">
                 <button
                   type="button"
@@ -360,6 +415,9 @@ export default function AnsibleCenterView() {
               <ActionButton icon={ShieldCheck} loading={actionLoading === 'test'} onClick={() => runHostAction('test')}>
                 {selectedCount ? `测试选中 ${selectedCount}` : '测试已纳管'}
               </ActionButton>
+              <ActionButton icon={Database} loading={actionLoading === 'collect'} onClick={() => runHostAction('collect')}>
+                {selectedCount ? `采集选中 ${selectedCount}` : '采集已纳管'}
+              </ActionButton>
               <ActionButton
                 icon={Play}
                 primary
@@ -384,16 +442,17 @@ export default function AnsibleCenterView() {
           </div>
         ) : null}
 
-        <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-          <StatCard icon={Server} label="Inventory 主机" value={stats.total_hosts || 0} hint="可参与自动化的资产" />
+        <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <StatCard icon={Server} label="当前池主机" value={stats.total_hosts || 0} hint={scope === 'managed' ? '已隐藏暂不用候选' : '全部可识别候选'} />
           <StatCard icon={CheckCircle2} label="已纳管" value={stats.managed_hosts || 0} hint="已有凭据和目标" tone="text-emerald-200" ring="from-emerald-400/20 to-cyan-500/10" />
           <StatCard icon={KeyRound} label="缺少凭据" value={stats.credential_missing || 0} hint="需要先绑定密码本" tone="text-rose-200" ring="from-rose-400/20 to-pink-500/10" />
           <StatCard icon={Database} label="缺少备份目标" value={stats.backup_missing || 0} hint="可批量纳入 Inventory" tone="text-amber-200" ring="from-amber-400/20 to-orange-500/10" />
           <StatCard icon={Layers3} label="分组数量" value={groups.length} hint="按机房、类型、厂商聚合" tone="text-violet-200" ring="from-violet-400/20 to-blue-500/10" />
+          <StatCard icon={Filter} label="暂不用候选" value={stats.candidate_hosts || 0} hint="切到全部候选可查看" tone="text-slate-200" ring="from-slate-400/20 to-cyan-500/10" />
         </section>
 
         <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_430px]">
-          <div className="overflow-hidden rounded-2xl border border-slate-700/60 bg-white shadow-sm">
+          <div className="overflow-hidden rounded-2xl border border-cyan-400/15 bg-slate-950/55 shadow-[0_18px_55px_rgba(0,0,0,0.22)]">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-700/60 p-4">
               <div>
                 <h2 className="text-lg font-black text-slate-50">主机清单</h2>
@@ -446,7 +505,7 @@ export default function AnsibleCenterView() {
             </div>
 
             <div className="custom-scrollbar overflow-auto">
-              <table className="min-w-[1120px] w-full border-collapse text-left text-sm">
+              <table className="min-w-[1280px] w-full border-collapse text-left text-sm">
                 <thead className="bg-slate-950/60 text-xs font-black text-slate-400">
                   <tr>
                     <th className="w-10 border-b border-slate-700/60 px-4 py-3">
@@ -458,6 +517,7 @@ export default function AnsibleCenterView() {
                     <th className="border-b border-slate-700/60 px-4 py-3">位置</th>
                     <th className="border-b border-slate-700/60 px-4 py-3">凭据</th>
                     <th className="border-b border-slate-700/60 px-4 py-3">备份目标</th>
+                    <th className="border-b border-slate-700/60 px-4 py-3">档案</th>
                     <th className="border-b border-slate-700/60 px-4 py-3">状态</th>
                     <th className="border-b border-slate-700/60 px-4 py-3">分组</th>
                   </tr>
@@ -485,6 +545,10 @@ export default function AnsibleCenterView() {
                           <div className="text-xs font-black text-slate-100">{host.backup_target_id ? `#${host.backup_target_id}` : '未创建'}</div>
                           <div className="mt-1 max-w-[220px] truncate text-[11px] font-semibold text-slate-500">{safeText(host.latest_version, '无版本')}</div>
                         </td>
+                        <td className="px-4 py-3 text-[11px] font-semibold text-slate-300">
+                          <div className="max-w-[220px] truncate">{safeText(host.asset_facts?.model || host.asset_facts?.os_version, '待采集')}</div>
+                          <div className="mt-1 max-w-[220px] truncate font-mono text-slate-500">{safeText(host.asset_facts?.serial_number || host.asset_facts?.brand, '')}</div>
+                        </td>
                         <td className="px-4 py-3">
                           <StatusPill tone={getStatusTone(status)}>{STATUS_LABELS[status] || status}</StatusPill>
                         </td>
@@ -509,7 +573,7 @@ export default function AnsibleCenterView() {
           </div>
 
           <aside className="space-y-4">
-            <section className="rounded-2xl border border-slate-700/60 bg-white p-4 shadow-sm">
+            <section className="rounded-2xl border border-cyan-400/15 bg-slate-950/55 p-4 shadow-[0_18px_55px_rgba(0,0,0,0.22)]">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
                   <h2 className="text-lg font-black text-slate-50">Inventory 预览</h2>
@@ -522,7 +586,7 @@ export default function AnsibleCenterView() {
               </pre>
             </section>
 
-            <section className="rounded-2xl border border-slate-700/60 bg-white p-4 shadow-sm">
+            <section className="rounded-2xl border border-cyan-400/15 bg-slate-950/55 p-4 shadow-[0_18px_55px_rgba(0,0,0,0.22)]">
               <div className="mb-3 flex items-center gap-2">
                 <Filter className="h-4 w-4 text-cyan-200" />
                 <h2 className="text-lg font-black text-slate-50">最近动作</h2>
@@ -553,6 +617,26 @@ export default function AnsibleCenterView() {
                     ))}
                   </div>
                 </>
+              ) : recentRuns.length ? (
+                <div className="space-y-2">
+                  {recentRuns.map((run) => (
+                    <div key={run.id} className="rounded-xl border border-slate-700/60 bg-slate-950/35 px-3 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-sm font-black text-slate-50">{run.action_label || run.action}</div>
+                        <StatusPill tone={run.status === 'success' ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-200' : run.status === 'partial' ? 'border-amber-400/40 bg-amber-400/10 text-amber-200' : 'border-rose-400/40 bg-rose-400/10 text-rose-200'}>
+                          {run.status_label || run.status}
+                        </StatusPill>
+                      </div>
+                      <div className="mt-2 text-xs font-semibold leading-5 text-slate-400">{safeText(run.detail)}</div>
+                      <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-black text-slate-500">
+                        <span>目标 {run.total}</span>
+                        <span>成功 {run.success_count}</span>
+                        <span>失败 {run.failed_count}</span>
+                        <span>耗时 {run.duration_seconds}s</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               ) : (
                 <div className="rounded-xl border border-dashed border-slate-700/70 bg-slate-950/30 p-6 text-center">
                   <Gauge className="mx-auto h-7 w-7 text-slate-500" />
@@ -561,7 +645,50 @@ export default function AnsibleCenterView() {
               )}
             </section>
 
-            <section className="rounded-2xl border border-slate-700/60 bg-white p-4 shadow-sm">
+            <section className="rounded-2xl border border-cyan-400/15 bg-slate-950/55 p-4 shadow-[0_18px_55px_rgba(0,0,0,0.22)]">
+              <div className="flex items-center gap-2">
+                <KeyRound className="h-4 w-4 text-cyan-200" />
+                <h2 className="text-lg font-black text-slate-50">密码轮换预案</h2>
+              </div>
+              <p className="mt-1 text-xs font-semibold leading-5 text-slate-400">
+                先做流程编排，不自动改设备密码。建议从 1 台开始，确认旧密码、新密码和回滚路径都稳定后再扩大批量。
+              </p>
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                {[1, 3, 5].map((size) => (
+                  <button
+                    key={size}
+                    type="button"
+                    onClick={() => setRotationBatchSize(size)}
+                    className={cx(
+                      'h-9 rounded-xl border text-xs font-black transition',
+                      rotationBatchSize === size
+                        ? 'border-cyan-300/70 bg-cyan-400/15 text-cyan-100'
+                        : 'border-slate-700/60 bg-slate-950/30 text-slate-300 hover:text-white',
+                    )}
+                  >
+                    {size} 台
+                  </button>
+                ))}
+              </div>
+              <div className="mt-3 space-y-2">
+                {[
+                  ['01', '生成新密码', '生成候选密码，只写入预案，不覆盖 OpenBao。'],
+                  ['02', '测试旧密码', '确认当前密码仍可登录，避免误切换。'],
+                  ['03', '测试新密码', '设备侧临时验证新密码可用后再进入确认。'],
+                  ['04', '确认切换', '人工确认后再更新 OpenBao，并保留回滚记录。'],
+                ].map(([index, title, desc]) => (
+                  <div key={index} className="rounded-xl border border-slate-700/60 bg-slate-950/30 px-3 py-3">
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-cyan-400/15 text-xs font-black text-cyan-100">{index}</span>
+                      <span className="text-sm font-black text-slate-50">{title}</span>
+                    </div>
+                    <div className="mt-2 text-xs font-semibold leading-5 text-slate-400">{desc}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-cyan-400/15 bg-slate-950/55 p-4 shadow-[0_18px_55px_rgba(0,0,0,0.22)]">
               <div className="flex items-center gap-2">
                 <Network className="h-4 w-4 text-cyan-200" />
                 <h2 className="text-lg font-black text-slate-50">推荐流程</h2>

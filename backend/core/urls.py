@@ -57,6 +57,7 @@ urlpatterns = [
     path('api/config-backups/test-email/', views.config_backup_test_email),
     path('api/ansible/summary/', views.ansible_summary),
     path('api/ansible/test/', views.ansible_test),
+    path('api/ansible/collect-facts/', views.ansible_collect_facts),
     path('api/ansible/provision/', views.ansible_provision),
     path('api/backup/download/', views.download_backup),
     path('api/data-quality/encoding-report/', views.encoding_report),

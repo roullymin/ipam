@@ -39,6 +39,7 @@ from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 
 from .models import (
+    AnsibleTaskRun,
     AuditLog,
     Blocklist,
     ConfigBackupTarget,
@@ -96,6 +97,7 @@ from .domains.config_backup.policy import (
 from .domains.config_backup.services import (
     ConfigBackupConnectionError,
     ConfigBackupError,
+    collect_secret_device_facts,
     run_config_backup_target,
     test_config_backup_target,
     test_secret_login,
@@ -2880,6 +2882,26 @@ def _ansible_location_for_device(device):
     return ' / '.join(part for part in [datacenter, device.rack.code, device.name] if part)
 
 
+def _ansible_asset_facts(device=None, ip_asset=None):
+    if device is not None:
+        return {
+            'brand': device.brand or '',
+            'model': device.model or '',
+            'serial_number': device.sn or '',
+            'os_version': device.os_version or '',
+            'asset_tag': device.asset_tag or '',
+        }
+    if ip_asset is not None:
+        return {
+            'brand': '',
+            'model': '',
+            'serial_number': '',
+            'os_version': '',
+            'asset_tag': '',
+        }
+    return {}
+
+
 def _ansible_groups(datacenter='', device_type='', vendor='', managed=False):
     groups = ['managed' if managed else 'unmanaged']
     if datacenter:
@@ -2928,6 +2950,7 @@ def _ansible_row_from_target(target):
         'device_type': _normalize_ansible_device_type(raw_type),
         'raw_device_type': raw_type,
         'vendor': vendor,
+        'asset_facts': _ansible_asset_facts(device, ip_asset),
         'datacenter': datacenter,
         'rack_code': rack_code,
         'location': location,
@@ -2978,6 +3001,7 @@ def _ansible_row_from_device(device):
         'device_type': _normalize_ansible_device_type(raw_type),
         'raw_device_type': raw_type,
         'vendor': device.brand or '',
+        'asset_facts': _ansible_asset_facts(device),
         'datacenter': datacenter,
         'rack_code': rack_code,
         'location': _ansible_location_for_device(device),
@@ -3026,6 +3050,7 @@ def _ansible_row_from_ip(ip_asset):
         'device_type': _normalize_ansible_device_type(raw_type),
         'raw_device_type': raw_type,
         'vendor': '',
+        'asset_facts': _ansible_asset_facts(ip_asset=ip_asset),
         'datacenter': '',
         'rack_code': '',
         'location': management_ip,
@@ -3143,8 +3168,104 @@ def _ansible_host_selection(hosts, payload):
     return [row for row in hosts if row.get('id') in selected or row.get('asset_id') in selected]
 
 
-def _ansible_summary_payload():
-    hosts = _build_ansible_hosts()
+def _serialize_ansible_task_run(run):
+    return {
+        'id': run.id,
+        'action': run.action,
+        'action_label': dict(AnsibleTaskRun.ACTION_CHOICES).get(run.action, run.action),
+        'status': run.status,
+        'status_label': dict(AnsibleTaskRun.STATUS_CHOICES).get(run.status, run.status),
+        'total': run.total,
+        'success_count': run.success_count,
+        'failed_count': run.failed_count,
+        'skipped_count': run.skipped_count,
+        'actor_name': run.actor_name,
+        'detail': run.detail,
+        'duration_seconds': run.duration_seconds,
+        'started_at': run.started_at.isoformat() if run.started_at else '',
+        'finished_at': run.finished_at.isoformat() if run.finished_at else '',
+    }
+
+
+def _record_ansible_task_run(request, action, counters, results, detail, started_at=None):
+    total = int(counters.get('total') or len(results or []))
+    success_count = int(counters.get('success') or counters.get('created') or 0) + int(counters.get('updated') or 0)
+    failed_count = int(counters.get('failed') or 0)
+    skipped_count = int(counters.get('skipped') or 0)
+    if total and success_count == total and failed_count == 0 and skipped_count == 0:
+        status_value = 'success'
+    elif success_count > 0:
+        status_value = 'partial'
+    else:
+        status_value = 'failed'
+    finished_at = timezone.now()
+    started_value = started_at or finished_at
+    run = AnsibleTaskRun.objects.create(
+        action=action,
+        status=status_value,
+        total=total,
+        success_count=success_count,
+        failed_count=failed_count,
+        skipped_count=skipped_count,
+        actor=request.user if request.user.is_authenticated else None,
+        actor_name=request.user.get_username() if request.user.is_authenticated else '',
+        detail=detail,
+        results=results or [],
+        started_at=started_value,
+        finished_at=finished_at,
+        duration_seconds=max(int((finished_at - started_value).total_seconds()), 0),
+    )
+    return run
+
+
+def _apply_ansible_facts_to_asset(row, facts, overwrite=False):
+    applied = []
+    rack_device = RackDevice.objects.filter(pk=row.get('rack_device_id')).first() if row.get('rack_device_id') else None
+    ip_asset = IPAddress.objects.filter(pk=row.get('ip_address_id')).first() if row.get('ip_address_id') else None
+
+    def assign(instance, field, value):
+        if instance is None:
+            return
+        value = str(value or '').strip()
+        if not value:
+            return
+        current = str(getattr(instance, field, '') or '').strip()
+        if overwrite or not current:
+            setattr(instance, field, value)
+            applied.append(field)
+
+    if rack_device is not None:
+        assign(rack_device, 'brand', facts.get('vendor'))
+        assign(rack_device, 'model', facts.get('model'))
+        assign(rack_device, 'sn', facts.get('serial_number'))
+        assign(rack_device, 'os_version', facts.get('version'))
+        assign(rack_device, 'mgmt_ip', facts.get('management_ip'))
+        if applied:
+            rack_device.save(update_fields=sorted(set([*applied, 'updated_at'])))
+    elif ip_asset is not None:
+        if facts.get('hostname') and (overwrite or not ip_asset.device_name):
+            ip_asset.device_name = facts['hostname']
+            applied.append('device_name')
+        if ip_asset.status != 'online':
+            ip_asset.status = 'online'
+            applied.append('status')
+        if applied:
+            ip_asset.save(update_fields=sorted(set([*applied, 'updated_at'])))
+
+    return sorted(set(applied))
+
+
+def _ansible_summary_payload(scope='managed'):
+    all_hosts = _build_ansible_hosts()
+    managed_pool = [
+        row for row in all_hosts
+        if row.get('managed') or row.get('backup_target_id') or row.get('backup_enabled')
+    ]
+    if scope == 'all':
+        hosts = all_hosts
+    else:
+        scope = 'managed'
+        hosts = managed_pool
     managed = [row for row in hosts if row.get('managed')]
     credential_missing = [row for row in hosts if not row.get('credential_id')]
     backup_missing = [row for row in hosts if not row.get('backup_target_id')]
@@ -3164,10 +3285,17 @@ def _ansible_summary_payload():
             'credential_missing': len(credential_missing),
             'backup_missing': len(backup_missing),
             'failed_hosts': len(failed),
+            'candidate_hosts': max(len(all_hosts) - len(managed_pool), 0),
+            'all_hosts': len(all_hosts),
+            'visible_scope': scope,
         },
         'hosts': hosts,
         'groups': sorted(groups.values(), key=lambda item: (-item['managed'], item['name'])),
         'inventory': _build_ansible_inventory(hosts),
+        'recent_runs': [
+            _serialize_ansible_task_run(run)
+            for run in AnsibleTaskRun.objects.order_by('-started_at', '-id')[:8]
+        ],
     }
 
 
@@ -3175,7 +3303,10 @@ def _ansible_summary_payload():
 @authentication_classes((SessionAuthentication, BasicAuthentication))
 @permission_classes([DcimAccessPermission])
 def ansible_summary(request):
-    return Response(_ansible_summary_payload())
+    scope = str(request.query_params.get('scope') or 'managed').strip().lower()
+    if scope not in ('managed', 'all'):
+        scope = 'managed'
+    return Response(_ansible_summary_payload(scope=scope))
 
 
 @api_view(['POST'])
@@ -3187,6 +3318,7 @@ def ansible_test(request):
     mode = str(request.data.get('mode') or '').strip().lower()
     if mode not in ('login', 'readonly'):
         mode = 'readonly' if _coerce_bool(request.data.get('run_readonly'), False) else 'login'
+    started_at = timezone.now()
     hosts = _build_ansible_hosts()
     selected_hosts = _ansible_host_selection(hosts, request.data)
     results = []
@@ -3250,7 +3382,98 @@ def ansible_test(request):
             results.append({**row, 'status': 'failed', 'category': category, 'category_label': label, 'detail': str(exc)})
     mode_label = '只读命令' if mode == 'readonly' else '登录'
     record_audit(request, 'ansible', 'test', detail=f'批量测试 Ansible {mode_label}：成功 {counters["success"]}，失败 {counters["failed"]}，跳过 {counters["skipped"]}')
-    return Response({'mode': mode, 'summary': counters, 'results': results})
+    run = _record_ansible_task_run(
+        request,
+        'readonly_probe' if mode == 'readonly' else 'login_test',
+        counters,
+        results,
+        f'批量测试 Ansible {mode_label}：成功 {counters["success"]}，失败 {counters["failed"]}，跳过 {counters["skipped"]}',
+        started_at=started_at,
+    )
+    return Response({'mode': mode, 'summary': counters, 'results': results, 'run': _serialize_ansible_task_run(run)})
+
+
+@api_view(['POST'])
+@authentication_classes((SessionAuthentication, BasicAuthentication))
+@permission_classes([DcimAccessPermission])
+def ansible_collect_facts(request):
+    if get_user_role(request.user) not in ANSIBLE_MANAGE_ROLES:
+        raise PermissionDenied('当前角色无权执行设备信息采集。')
+    started_at = timezone.now()
+    write_back = _coerce_bool(request.data.get('write_back'), True)
+    overwrite = _coerce_bool(request.data.get('overwrite'), False)
+    hosts = _build_ansible_hosts()
+    selected_hosts = _ansible_host_selection(hosts, request.data)
+    results = []
+    counters = {
+        'total': len(selected_hosts),
+        'success': 0,
+        'failed': 0,
+        'skipped': 0,
+        'auth_failed': 0,
+        'timeout': 0,
+        'refused': 0,
+        'unreachable': 0,
+        'resolve_failed': 0,
+        'ssh_algorithm': 0,
+        'command_failed': 0,
+        'dependency': 0,
+        'other': 0,
+        'written_back': 0,
+    }
+    for row in selected_hosts:
+        credential = SecretRecord.objects.filter(pk=row.get('credential_id'), status='active').first()
+        if not row.get('management_ip'):
+            counters['skipped'] += 1
+            results.append({**row, 'status': 'skipped', 'category': 'missing_ip', 'detail': '缺少管理 IP。'})
+            continue
+        if credential is None:
+            counters['skipped'] += 1
+            results.append({**row, 'status': 'skipped', 'category': 'credential_missing', 'detail': '缺少可用登录凭据。'})
+            continue
+        try:
+            payload = collect_secret_device_facts(
+                credential=credential,
+                management_ip=row['management_ip'],
+                read_secret=vault_read_secret,
+                ssh_port=row.get('ssh_port') or 22,
+                timeout_seconds=row.get('timeout_seconds') or 30,
+                command_profile=row.get('command_profile') or 'huawei_vrp',
+            )
+            applied_fields = _apply_ansible_facts_to_asset(row, payload.get('facts') or {}, overwrite=overwrite) if write_back else []
+            if applied_fields:
+                counters['written_back'] += 1
+            counters['success'] += 1
+            results.append(
+                {
+                    **row,
+                    'status': 'success',
+                    'category': 'success',
+                    'category_label': '采集成功',
+                    'detail': payload.get('message') or '设备信息采集成功。',
+                    'duration_seconds': payload.get('duration_seconds', 0),
+                    'commands': payload.get('commands') or [],
+                    'facts': payload.get('facts') or {},
+                    'applied_fields': applied_fields,
+                    'username': payload.get('username') or credential.username_hint,
+                }
+            )
+        except (ConfigBackupConnectionError, ConfigBackupError, VaultError) as exc:
+            category, label = _classify_login_failure(str(exc))
+            counters['failed'] += 1
+            counters[category] = counters.get(category, 0) + 1
+            results.append({**row, 'status': 'failed', 'category': category, 'category_label': label, 'detail': str(exc)})
+    detail = f'设备信息采集：成功 {counters["success"]}，失败 {counters["failed"]}，跳过 {counters["skipped"]}，回写 {counters["written_back"]}'
+    record_audit(request, 'ansible', 'collect_facts', detail=detail)
+    run = _record_ansible_task_run(
+        request,
+        'facts_collect',
+        counters,
+        results,
+        detail,
+        started_at=started_at,
+    )
+    return Response({'summary': counters, 'results': results, 'run': _serialize_ansible_task_run(run)})
 
 
 def _provision_ansible_host(row, request, defaults):
@@ -3297,6 +3520,7 @@ def ansible_provision(request):
         'save_before_backup': _coerce_bool(request.data.get('save_before_backup'), True),
         'retention_count': _parse_positive_int(request.data.get('retention_count'), 1, minimum=1, maximum=200, field_name='保留版本'),
     }
+    started_at = timezone.now()
     hosts = _build_ansible_hosts()
     selected_hosts = _ansible_host_selection(hosts, request.data)
     results = []
@@ -3320,7 +3544,15 @@ def ansible_provision(request):
             }
         )
     record_audit(request, 'ansible', 'provision', detail=f'纳入 Ansible Inventory：新增 {counters["created"]}，更新 {counters["updated"]}，失败 {counters["failed"]}')
-    return Response({'summary': counters, 'results': results})
+    run = _record_ansible_task_run(
+        request,
+        'inventory_provision',
+        counters,
+        results,
+        f'纳入 Ansible Inventory：新增 {counters["created"]}，更新 {counters["updated"]}，失败 {counters["failed"]}',
+        started_at=started_at,
+    )
+    return Response({'summary': counters, 'results': results, 'run': _serialize_ansible_task_run(run)})
 
 
 class ConfigBackupTargetViewSet(OptionalPaginationMixin, BaseViewSet):

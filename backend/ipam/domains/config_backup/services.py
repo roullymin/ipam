@@ -170,6 +170,90 @@ def _readonly_probe_commands(command_profile):
     return ['display version', 'display clock']
 
 
+def _fact_probe_commands(command_profile):
+    if command_profile in ('cisco_ios', 'generic_show_run'):
+        return ['show version', 'show inventory']
+    return ['display version', 'display device manuinfo', 'display clock']
+
+
+def _first_match(patterns, text):
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE | re.MULTILINE)
+        if match:
+            value = match.group(1) if match.groups() else match.group(0)
+            value = re.sub(r'\s+', ' ', str(value or '')).strip(' :：\t\r\n')
+            if value:
+                return value[:180]
+    return ''
+
+
+def _parse_device_facts(raw_outputs, management_ip=''):
+    text = '\n'.join(raw_outputs or [])
+    lowered = text.lower()
+    prompt_match = re.search(r'[<\[]([^<>\[\]\s]+)[>\]]\s*$', text, flags=re.MULTILINE)
+    hostname = _first_match(
+        [
+            r'^\s*sysname\s+([^\s]+)',
+            r'^\s*hostname\s+([^\s]+)',
+        ],
+        text,
+    ) or (prompt_match.group(1) if prompt_match else '')
+
+    vendor = ''
+    if 'huawei' in lowered or 'vrp' in lowered:
+        vendor = 'Huawei'
+    elif 'h3c' in lowered or 'comware' in lowered:
+        vendor = 'H3C'
+    elif 'cisco' in lowered:
+        vendor = 'Cisco'
+
+    model = _first_match(
+        [
+            r'^\s*(?:Device|Product|Chassis|Model)(?:\s+(?:name|type|model|number))?\s*[:：]\s*([^\r\n]+)',
+            r'^\s*(?:HUAWEI|Huawei)\s+([A-Za-z0-9_.-]+)\s+uptime',
+            r'^\s*(?:H3C)\s+([A-Za-z0-9_.-]+)\s+uptime',
+            r'PID:\s*([A-Za-z0-9_.-]+)',
+            r'NAME:\s*"[^"]+",\s*DESCR:\s*"([^"]+)"',
+        ],
+        text,
+    )
+    serial_number = _first_match(
+        [
+            r'(?:Serial Number|Serial number|SN|S/N|BarCode|Barcode|ESN)\s*[:：]?\s*([A-Za-z0-9_.-]+)',
+            r'SN:\s*([A-Za-z0-9_.-]+)',
+            r'SNMP\s+Board\s+Serial\s+Number\s*:\s*([A-Za-z0-9_.-]+)',
+        ],
+        text,
+    )
+    version = _first_match(
+        [
+            r'VRP \(R\).*?Version\s+([^\r\n]+)',
+            r'Comware Software,\s*Version\s+([^\r\n]+)',
+            r'Cisco IOS Software.*?Version\s+([^,\r\n]+)',
+            r'^\s*Version\s+([^\r\n]+)',
+            r'^\s*Software Version\s*[:：]\s*([^\r\n]+)',
+        ],
+        text,
+    )
+    uptime = _first_match(
+        [
+            r'uptime is\s+([^\r\n]+)',
+            r'Uptime is\s+([^\r\n]+)',
+            r'^\s*System uptime\s*[:：]\s*([^\r\n]+)',
+        ],
+        text,
+    )
+    return {
+        'hostname': hostname,
+        'vendor': vendor,
+        'model': model,
+        'serial_number': serial_number,
+        'version': version,
+        'uptime': uptime,
+        'management_ip': management_ip,
+    }
+
+
 def _friendly_error_message(exc, probe=None):
     message = str(exc) or exc.__class__.__name__
     lowered = message.lower()
@@ -731,6 +815,95 @@ def test_secret_readonly_commands(
             'username': username,
             'duration_seconds': max(int(time.monotonic() - started), 0),
             'commands': command_results,
+        }
+    except ConfigBackupConnectionError:
+        raise
+    except Exception as exc:
+        raise ConfigBackupConnectionError(_friendly_error_message(exc)) from exc
+    finally:
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
+
+
+def collect_secret_device_facts(
+    *,
+    credential,
+    management_ip,
+    read_secret,
+    ssh_port=22,
+    timeout_seconds=30,
+    command_profile='huawei_vrp',
+    ssh_client_factory=None,
+):
+    target = SimpleNamespace(
+        credential=credential,
+        management_ip=management_ip,
+        ssh_port=ssh_port,
+        timeout_seconds=timeout_seconds,
+        command_profile=command_profile,
+    )
+    username, password = _read_secret_payload(target, read_secret)
+    commands = _profile_commands(command_profile)
+    fact_commands = _fact_probe_commands(command_profile)
+    client = None
+    started = time.monotonic()
+    command_results = []
+    raw_outputs = []
+    timeout_value = max(int(timeout_seconds or 30), 5)
+    try:
+        client = _connect_ssh_client(target, username, password, ssh_client_factory=ssh_client_factory)
+        channel = client.invoke_shell()
+        time.sleep(0.5)
+        _receive(channel, timeout=min(timeout_value, 15))
+
+        for command in commands['prepare']:
+            try:
+                _send_command(channel, command, timeout=timeout_value)
+            except TimeoutError:
+                continue
+
+        for command in fact_commands:
+            try:
+                raw_output = _send_command(channel, command, timeout=max(timeout_value, 45))
+                output_excerpt = _clean_config_output(raw_output, [command])[:2000]
+                raw_outputs.append(output_excerpt)
+                command_results.append(
+                    {
+                        'command': command,
+                        'ok': True,
+                        'bytes': len(raw_output.encode('utf-8', errors='ignore')),
+                        'output_excerpt': output_excerpt,
+                    }
+                )
+            except TimeoutError as exc:
+                command_results.append(
+                    {
+                        'command': command,
+                        'ok': False,
+                        'error': f'命令超时：{exc}',
+                    }
+                )
+
+        if not any(result.get('ok') for result in command_results):
+            error_parts = [
+                f"{result.get('command')}: {result.get('error') or '未返回可用输出'}"
+                for result in command_results
+            ]
+            raise ConfigBackupConnectionError(f"设备信息采集失败：{'；'.join(error_parts)}")
+
+        facts = _parse_device_facts(raw_outputs, management_ip=management_ip)
+        collected_fields = [key for key, value in facts.items() if value and key != 'management_ip']
+        return {
+            'status': 'success',
+            'message': '设备信息采集成功。' if collected_fields else '命令执行成功，但未识别到型号、序列号或版本字段。',
+            'username': username,
+            'duration_seconds': max(int(time.monotonic() - started), 0),
+            'commands': command_results,
+            'facts': facts,
+            'collected_fields': collected_fields,
         }
     except ConfigBackupConnectionError:
         raise
