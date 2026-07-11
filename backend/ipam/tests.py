@@ -19,7 +19,7 @@ from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from .domains.config_backup.services import _parse_device_facts
-from .views import _default_ansible_managed_hosts, _is_priority_ansible_credential
+from .views import _apply_ansible_facts_to_asset, _default_ansible_managed_hosts, _is_priority_ansible_credential
 from .models import (
     AnsibleTaskRun,
     Blocklist,
@@ -141,6 +141,49 @@ class AnsibleDefaultScopeTests(SimpleTestCase):
         credential = SimpleNamespace(notes='重点设备清单导入：核心交换机 172.25.254.254', vault_path='secret/data/device')
 
         self.assertTrue(_is_priority_ansible_credential(credential))
+
+
+class AnsibleFactWriteBackTests(APITestCase):
+    def test_collect_facts_updates_duplicate_rack_devices_with_same_management_ip(self):
+        datacenter = Datacenter.objects.create(name='7F')
+        rack = Rack.objects.create(datacenter=datacenter, code='R04', height=42)
+        linked = RackDevice.objects.create(
+            rack=rack,
+            name='Core switch target',
+            position=42,
+            u_height=1,
+            device_type='switch',
+            mgmt_ip='172.25.254.254',
+        )
+        duplicate = RackDevice.objects.create(
+            rack=rack,
+            name='Core switch duplicate',
+            position=41,
+            u_height=1,
+            device_type='switch_core',
+            mgmt_ip='172.25.254.254',
+        )
+
+        applied = _apply_ansible_facts_to_asset(
+            {
+                'rack_device_id': linked.id,
+                'management_ip': '172.25.254.254',
+            },
+            {
+                'vendor': 'H3C',
+                'model': 'S5560X-30F-EI',
+                'serial_number': '219801A2ABC0Q100002',
+                'version': 'H3C Comware Software, Version 7.1.070',
+                'management_ip': '172.25.254.254',
+            },
+        )
+
+        linked.refresh_from_db()
+        duplicate.refresh_from_db()
+        self.assertEqual(linked.model, 'S5560X-30F-EI')
+        self.assertEqual(duplicate.model, 'S5560X-30F-EI')
+        self.assertEqual(duplicate.sn, '219801A2ABC0Q100002')
+        self.assertIn('os_version', applied)
 
 
 class BaseApiTestCase(APITestCase):

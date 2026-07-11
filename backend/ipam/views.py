@@ -3283,35 +3283,74 @@ def _apply_ansible_facts_to_asset(row, facts, overwrite=False):
     applied = []
     rack_device = RackDevice.objects.filter(pk=row.get('rack_device_id')).first() if row.get('rack_device_id') else None
     ip_asset = IPAddress.objects.filter(pk=row.get('ip_address_id')).first() if row.get('ip_address_id') else None
+    management_ips = []
+    for value in (facts.get('management_ip'), row.get('management_ip')):
+        host = _extract_management_host(value)
+        if host and host not in management_ips:
+            management_ips.append(host)
 
     def assign(instance, field, value):
         if instance is None:
-            return
+            return False
         value = str(value or '').strip()
         if not value:
-            return
+            return False
         current = str(getattr(instance, field, '') or '').strip()
         if overwrite or not current:
             setattr(instance, field, value)
-            applied.append(field)
+            return True
+        return False
 
+    rack_devices = []
+    seen_device_ids = set()
     if rack_device is not None:
-        assign(rack_device, 'brand', facts.get('vendor'))
-        assign(rack_device, 'model', facts.get('model'))
-        assign(rack_device, 'sn', facts.get('serial_number'))
-        assign(rack_device, 'os_version', facts.get('version'))
-        assign(rack_device, 'mgmt_ip', facts.get('management_ip'))
-        if applied:
-            rack_device.save(update_fields=sorted(set([*applied, 'updated_at'])))
-    elif ip_asset is not None:
-        if facts.get('hostname') and (overwrite or not ip_asset.device_name):
-            ip_asset.device_name = facts['hostname']
-            applied.append('device_name')
-        if ip_asset.status != 'online':
-            ip_asset.status = 'online'
-            applied.append('status')
-        if applied:
-            ip_asset.save(update_fields=sorted(set([*applied, 'updated_at'])))
+        rack_devices.append(rack_device)
+        seen_device_ids.add(rack_device.id)
+    if management_ips:
+        for device in RackDevice.objects.filter(mgmt_ip__in=management_ips).order_by('id'):
+            if device.id in seen_device_ids:
+                continue
+            rack_devices.append(device)
+            seen_device_ids.add(device.id)
+
+    for device in rack_devices:
+        changed = []
+        for field, value in (
+            ('brand', facts.get('vendor')),
+            ('model', facts.get('model')),
+            ('sn', facts.get('serial_number')),
+            ('os_version', facts.get('version')),
+            ('mgmt_ip', management_ips[0] if management_ips else facts.get('management_ip')),
+        ):
+            if assign(device, field, value):
+                changed.append(field)
+        if changed:
+            applied.extend(changed)
+            device.save(update_fields=sorted(set([*changed, 'updated_at'])))
+
+    ip_assets = []
+    seen_ip_ids = set()
+    if ip_asset is not None:
+        ip_assets.append(ip_asset)
+        seen_ip_ids.add(ip_asset.id)
+    if management_ips:
+        for asset in IPAddress.objects.filter(ip_address__in=management_ips).order_by('id'):
+            if asset.id in seen_ip_ids:
+                continue
+            ip_assets.append(asset)
+            seen_ip_ids.add(asset.id)
+
+    for asset in ip_assets:
+        changed = []
+        if facts.get('hostname') and (overwrite or not asset.device_name):
+            asset.device_name = facts['hostname']
+            changed.append('device_name')
+        if asset.status != 'online':
+            asset.status = 'online'
+            changed.append('status')
+        if changed:
+            applied.extend(changed)
+            asset.save(update_fields=sorted(set([*changed, 'updated_at'])))
 
     return sorted(set(applied))
 
