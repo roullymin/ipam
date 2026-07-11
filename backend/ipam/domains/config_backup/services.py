@@ -172,11 +172,13 @@ def _readonly_probe_commands(command_profile):
 
 def _fact_probe_commands(command_profile):
     if command_profile in ('cisco_ios', 'generic_show_run'):
-        return ['show version', 'show inventory']
+        return ['show version', 'show running-config | include ^hostname', 'show inventory']
     return [
         'display version',
+        'display current-configuration | include sysname',
         'display device manuinfo',
         'display device manufacture-info',
+        'display elabel',
         'display esn',
         'display clock',
     ]
@@ -246,7 +248,7 @@ def _parse_device_facts(raw_outputs, management_ip=''):
     )
     serial_number = _first_match(
         [
-            r'^\s*(?:DEVICE_SERIAL_NUMBER|Device\s+serial\s+number|Device\s+Serial\s+Number|Serial\s+Number|Serial\s+No\.?|SN|S/N|BarCode|Barcode|Board\s+BarCode|Chassis\s+SN|ESN)\s*[:：]\s*([A-Za-z0-9_.-]{4,})',
+            r'^\s*(?:DEVICE_SERIAL_NUMBER|Device\s+serial\s+number|Device\s+Serial\s+Number|Serial\s*Number|Serial\s+No\.?|SerialNumber|SN|S/N|BarCode|Barcode|Board\s+BarCode|Chassis\s+SN|ESN|Equipment\s+SN|Equipment\s+Serial\s+Number|System\s+Serial\s+Number)\s*[:=：]\s*([A-Za-z0-9_.-]{4,})',
             r'^\s*(?:Device\s+serial\s+number|Serial\s+Number|Serial\s+No\.?)\s+(?:is\s+)?([A-Za-z0-9_.-]{4,})\s*$',
             r'SNMP\s+Board\s+Serial\s+Number\s*:\s*([A-Za-z0-9_.-]+)',
         ],
@@ -900,7 +902,7 @@ def collect_secret_device_facts(
             try:
                 raw_output = _send_command(channel, command, timeout=max(timeout_value, 45))
                 output_excerpt = _clean_config_output(raw_output, [command])[:2000]
-                raw_outputs.append(output_excerpt)
+                raw_outputs.append(raw_output)
                 command_results.append(
                     {
                         'command': command,

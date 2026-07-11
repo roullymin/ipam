@@ -129,6 +129,35 @@ HUAWEI S5736-S48T4XC Routing Switch uptime is 1 week
 
         self.assertEqual(facts['serial_number'], '')
 
+    def test_parse_hostname_from_sysname_probe_output(self):
+        facts = _parse_device_facts(
+            [
+                """
+<Access-SW>display current-configuration | include sysname
+sysname Access-SW
+<Access-SW>
+""",
+            ],
+            management_ip='172.25.254.21',
+        )
+
+        self.assertEqual(facts['hostname'], 'Access-SW')
+
+    def test_parse_huawei_elabel_barcode_with_equals(self):
+        facts = _parse_device_facts(
+            [
+                """
+[Board Properties]
+BoardType=S5736-S48T4XC
+BarCode=210235A1ABC0Q100003
+<Access-SW>
+""",
+            ],
+            management_ip='172.25.254.21',
+        )
+
+        self.assertEqual(facts['serial_number'], '210235A1ABC0Q100003')
+
 
 class AnsibleDefaultScopeTests(SimpleTestCase):
     def test_default_scope_prefers_priority_import_hosts(self):
