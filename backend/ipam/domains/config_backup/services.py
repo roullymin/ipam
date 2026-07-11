@@ -173,7 +173,19 @@ def _readonly_probe_commands(command_profile):
 def _fact_probe_commands(command_profile):
     if command_profile in ('cisco_ios', 'generic_show_run'):
         return ['show version', 'show inventory']
-    return ['display version', 'display device manuinfo', 'display clock']
+    return [
+        'display version',
+        'display device manuinfo',
+        'display device manufacture-info',
+        'display esn',
+        'display clock',
+    ]
+
+
+def _normalize_fact_value(value):
+    value = re.sub(r'\s+', ' ', str(value or '')).strip(' :：\t\r\n"\'')
+    value = re.sub(r'^(?:HUAWEI|Huawei|H3C|Cisco)\s+', '', value).strip()
+    return value[:180]
 
 
 def _first_match(patterns, text):
@@ -181,7 +193,7 @@ def _first_match(patterns, text):
         match = re.search(pattern, text, flags=re.IGNORECASE | re.MULTILINE)
         if match:
             value = match.group(1) if match.groups() else match.group(0)
-            value = re.sub(r'\s+', ' ', str(value or '')).strip(' :：\t\r\n')
+            value = _normalize_fact_value(value)
             if value:
                 return value[:180]
     return ''
@@ -202,32 +214,36 @@ def _parse_device_facts(raw_outputs, management_ip=''):
     vendor = ''
     if 'huawei' in lowered or 'vrp' in lowered:
         vendor = 'Huawei'
-    elif 'h3c' in lowered or 'comware' in lowered:
+    elif 'h3c' in lowered or 'comware' in lowered or 'secpath' in lowered:
         vendor = 'H3C'
     elif 'cisco' in lowered:
         vendor = 'Cisco'
 
     model = _first_match(
         [
+            r'^\s*(?:DEVICE_NAME|DeviceName|Device\s+Name|Device\s+name|Product\s+Name|Product\s+name|Product\s+Type|Board\s+Type|Board\s+type|Chassis\s+Type|Machine\s+Type)\s*[:：]\s*([^\r\n]+)',
             r'^\s*(?:Device|Product|Chassis|Model)(?:\s+(?:name|type|model|number))?\s*[:：]\s*([^\r\n]+)',
-            r'^\s*(?:HUAWEI|Huawei)\s+([A-Za-z0-9_.-]+)\s+uptime',
-            r'^\s*(?:H3C)\s+([A-Za-z0-9_.-]+)\s+uptime',
-            r'PID:\s*([A-Za-z0-9_.-]+)',
+            r'^\s*(?:HUAWEI|Huawei)\s+([A-Za-z0-9_.-]+).*\buptime\b',
+            r'^\s*(?:H3C)\s+([A-Za-z0-9_.-]+).*\buptime\b',
+            r'^\s*((?:S|CE|NE|AR|USG|SecPath|LS-|MSR|CR|SR)[A-Za-z0-9_.-]+)\s+.*\buptime\b',
+            r'PID\s*[:：]\s*([A-Za-z0-9_.-]+)',
             r'NAME:\s*"[^"]+",\s*DESCR:\s*"([^"]+)"',
         ],
         text,
     )
     serial_number = _first_match(
         [
-            r'(?:Serial Number|Serial number|SN|S/N|BarCode|Barcode|ESN)\s*[:：]?\s*([A-Za-z0-9_.-]+)',
-            r'SN:\s*([A-Za-z0-9_.-]+)',
+            r'^\s*(?:DEVICE_SERIAL_NUMBER|Device\s+serial\s+number|Device\s+Serial\s+Number|Serial\s+Number|Serial\s+No\.?|SN|S/N|BarCode|Barcode|Board\s+BarCode|Chassis\s+SN|ESN)\s*[:：]?\s*([A-Za-z0-9_.-]+)',
+            r'SN\s*[:：]\s*([A-Za-z0-9_.-]+)',
             r'SNMP\s+Board\s+Serial\s+Number\s*:\s*([A-Za-z0-9_.-]+)',
         ],
         text,
     )
     version = _first_match(
         [
+            r'VRP\s*\(R\)\s*software,\s*Version\s+([^\r\n]+)',
             r'VRP \(R\).*?Version\s+([^\r\n]+)',
+            r'Huawei\s+Versatile\s+Routing\s+Platform\s+Software.*?Version\s+([^\r\n]+)',
             r'Comware Software,\s*Version\s+([^\r\n]+)',
             r'Cisco IOS Software.*?Version\s+([^,\r\n]+)',
             r'^\s*Version\s+([^\r\n]+)',

@@ -7,17 +7,21 @@ from io import StringIO
 from io import BytesIO
 from pathlib import Path
 from subprocess import CompletedProcess
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pandas as pd
 from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import override_settings
+from django.test import SimpleTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
+from .domains.config_backup.services import _parse_device_facts
+from .views import _default_ansible_managed_hosts, _is_priority_ansible_credential
 from .models import (
+    AnsibleTaskRun,
     Blocklist,
     ConfigBackupTarget,
     Datacenter,
@@ -57,6 +61,86 @@ def make_excel_upload(name, sheets):
         buffer.getvalue(),
         content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     )
+
+
+class DeviceFactParserTests(SimpleTestCase):
+    def test_parse_huawei_vrp_version_and_manuinfo(self):
+        facts = _parse_device_facts(
+            [
+                """
+Huawei Versatile Routing Platform Software
+VRP (R) software, Version 5.170 (S5736 V200R019C10SPC500)
+HUAWEI S5736-S48T4XC Routing Switch uptime is 18 weeks
+<2F-office-JR-S5736-48T>
+""",
+                """
+DEVICE_NAME            : HUAWEI S5736-S48T4XC
+DEVICE_SERIAL_NUMBER   : 210235A1ABC0Q100001
+VENDOR_NAME            : HUAWEI
+<2F-office-JR-S5736-48T>
+""",
+            ],
+            management_ip='172.25.254.21',
+        )
+
+        self.assertEqual(facts['vendor'], 'Huawei')
+        self.assertEqual(facts['model'], 'S5736-S48T4XC')
+        self.assertEqual(facts['serial_number'], '210235A1ABC0Q100001')
+        self.assertEqual(facts['hostname'], '2F-office-JR-S5736-48T')
+        self.assertIn('V200R019C10SPC500', facts['version'])
+
+    def test_parse_h3c_comware_version_and_barcode(self):
+        facts = _parse_device_facts(
+            [
+                """
+H3C Comware Software, Version 7.1.070, Release 6628P02
+H3C S5560X-30F-EI uptime is 21 weeks
+<Core-SW>
+""",
+                """
+Slot 1 CPU 0:
+DEVICE_NAME  : H3C S5560X-30F-EI
+BarCode      : 219801A2ABC0Q100002
+<Core-SW>
+""",
+            ],
+            management_ip='172.25.254.254',
+        )
+
+        self.assertEqual(facts['vendor'], 'H3C')
+        self.assertEqual(facts['model'], 'S5560X-30F-EI')
+        self.assertEqual(facts['serial_number'], '219801A2ABC0Q100002')
+        self.assertEqual(facts['hostname'], 'Core-SW')
+        self.assertIn('Release 6628P02', facts['version'])
+
+
+class AnsibleDefaultScopeTests(SimpleTestCase):
+    def test_default_scope_prefers_priority_import_hosts(self):
+        hosts = [
+            {'id': 'target-1', 'managed': True, 'priority_managed': False},
+            {'id': 'target-2', 'managed': True, 'priority_managed': True},
+            {'id': 'target-3', 'managed': False, 'priority_managed': False},
+        ]
+
+        selected = _default_ansible_managed_hosts(hosts)
+
+        self.assertEqual([row['id'] for row in selected], ['target-2'])
+
+    def test_default_scope_falls_back_to_all_managed_hosts(self):
+        hosts = [
+            {'id': 'target-1', 'managed': True, 'priority_managed': False},
+            {'id': 'target-2', 'managed': True, 'priority_managed': False},
+            {'id': 'target-3', 'managed': False, 'priority_managed': False},
+        ]
+
+        selected = _default_ansible_managed_hosts(hosts)
+
+        self.assertEqual([row['id'] for row in selected], ['target-1', 'target-2'])
+
+    def test_priority_credential_marker_uses_import_notes(self):
+        credential = SimpleNamespace(notes='重点设备清单导入：核心交换机 172.25.254.254', vault_path='secret/data/device')
+
+        self.assertTrue(_is_priority_ansible_credential(credential))
 
 
 class BaseApiTestCase(APITestCase):
@@ -353,6 +437,47 @@ class SecretVaultApiTests(BaseApiTestCase):
         self.assertEqual(target.credential, record)
         self.assertEqual(target.device_type, 'firewall')
         self.assertTrue(target.enabled)
+
+    def test_ansible_rotation_plan_records_steps_without_touching_secrets(self):
+        client = self.make_authenticated_client(self.admin)
+        datacenter = Datacenter.objects.create(name='Ansible DC')
+        rack = Rack.objects.create(datacenter=datacenter, code='ANS-01', height=42)
+        device = RackDevice.objects.create(
+            rack=rack,
+            name='Managed Switch',
+            position=1,
+            u_height=1,
+            device_type='switch',
+            mgmt_ip='10.77.0.10',
+        )
+        record = SecretRecord.objects.create(
+            name='Managed Switch SSH',
+            credential_type='ssh',
+            target_type='device',
+            rack_device=device,
+            username_hint='admin',
+            status='active',
+            created_by=self.admin,
+        )
+        ConfigBackupTarget.objects.create(
+            name='Managed Switch',
+            rack_device=device,
+            management_ip='10.77.0.10',
+            device_type='switch',
+            credential=record,
+            enabled=True,
+            created_by=self.admin,
+        )
+
+        response = client.post('/api/ansible/rotation-plan/', {'batch_size': 1}, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['summary']['planned'], 1)
+        self.assertEqual(response.data['run']['action'], 'rotation_plan')
+        self.assertEqual(response.data['run']['results_preview'][0]['management_ip'], '10.77.0.10')
+        self.assertEqual(len(response.data['run']['results_preview'][0]['rotation_steps']), 4)
+        self.assertNotIn('secret_value', json.dumps(response.data, ensure_ascii=False))
+        self.assertEqual(AnsibleTaskRun.objects.filter(action='rotation_plan').count(), 1)
 
     @patch('ipam.views.vault_read_secret')
     def test_operator_can_directly_reveal_secret(self, read_secret):

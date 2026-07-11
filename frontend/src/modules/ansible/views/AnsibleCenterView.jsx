@@ -1,12 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  ChevronDown,
+  ChevronRight,
   CheckCircle2,
   Clipboard,
   CopyCheck,
   Database,
+  Download,
+  FileText,
   Filter,
   Gauge,
+  History,
   KeyRound,
   Layers3,
   Loader2,
@@ -16,6 +21,7 @@ import {
   Search,
   Server,
   ShieldCheck,
+  Sparkles,
   Terminal,
 } from 'lucide-react';
 
@@ -80,6 +86,71 @@ const CATEGORY_LABELS = {
   other: '其他失败',
 };
 
+const RUN_METRIC_LABELS = {
+  total: '总数',
+  success: '成功',
+  planned: '已生成预案',
+  failed: '失败',
+  skipped: '跳过',
+  created: '新增',
+  updated: '更新',
+  written_back: '回写档案',
+  auth_failed: '认证失败',
+  timeout: '超时',
+  refused: '端口拒绝',
+  unreachable: '不可达',
+  resolve_failed: '解析失败',
+  ssh_algorithm: '算法不兼容',
+  command_failed: '命令失败',
+  dependency: '依赖缺失',
+  other: '其他',
+};
+
+const RUN_METRIC_ORDER = [
+  'total',
+  'success',
+  'planned',
+  'created',
+  'updated',
+  'written_back',
+  'failed',
+  'skipped',
+  'auth_failed',
+  'timeout',
+  'ssh_algorithm',
+  'unreachable',
+  'refused',
+  'command_failed',
+  'other',
+];
+
+const FACT_FIELD_LABELS = {
+  hostname: '主机名',
+  vendor: '厂商',
+  model: '型号',
+  serial_number: '序列号',
+  version: '系统版本',
+  uptime: '运行时长',
+  management_ip: '管理 IP',
+};
+
+const hasAssetFacts = (host) => {
+  const facts = host?.asset_facts || {};
+  return Boolean(facts.model || facts.serial_number || facts.os_version || facts.brand);
+};
+
+const formatRunTime = (value) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
 function getHostStatus(host) {
   if (host.last_job_detail || host.backup_status === 'failed') return 'failed';
   if (!host.credential_id) return 'missing_credential';
@@ -140,6 +211,9 @@ function ActionButton({ children, icon: Icon, loading, primary, disabled, onClic
 function ResultLine({ result }) {
   const ok = result.status === 'success' || result.status === 'created' || result.status === 'updated';
   const commands = asArray(result.commands);
+  const facts = result.facts || {};
+  const appliedFields = asArray(result.applied_fields);
+  const rotationSteps = asArray(result.rotation_steps);
   return (
     <div className="rounded-xl border border-slate-700/60 bg-slate-950/35 px-3 py-3">
       <div className="flex items-start justify-between gap-3">
@@ -154,6 +228,40 @@ function ResultLine({ result }) {
         </StatusPill>
       </div>
       <div className="mt-2 text-xs leading-5 text-slate-300">{safeText(result.detail || result.category_label)}</div>
+      {rotationSteps.length ? (
+        <div className="mt-2 space-y-1.5">
+          {rotationSteps.slice(0, 4).map((step, index) => (
+            <div key={`${step}-${index}`} className="flex items-start gap-2 rounded-lg border border-cyan-400/10 bg-cyan-400/[0.04] px-2 py-1.5">
+              <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded bg-cyan-400/15 text-[9px] font-black text-cyan-100">
+                {index + 1}
+              </span>
+              <span className="text-[11px] font-semibold leading-4 text-slate-300">{step}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {Object.keys(facts).some((key) => facts[key] && key !== 'management_ip') ? (
+        <div className="mt-2 grid grid-cols-2 gap-1.5">
+          {Object.entries(facts)
+            .filter(([key, value]) => value && key !== 'management_ip')
+            .slice(0, 4)
+            .map(([key, value]) => (
+              <div key={key} className="rounded-lg border border-cyan-400/10 bg-cyan-400/[0.04] px-2 py-1">
+                <div className="text-[10px] font-bold text-slate-500">{FACT_FIELD_LABELS[key] || key}</div>
+                <div className="truncate text-[11px] font-black text-slate-200">{value}</div>
+              </div>
+            ))}
+        </div>
+      ) : null}
+      {appliedFields.length ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {appliedFields.slice(0, 5).map((field) => (
+            <StatusPill key={field} tone="border-emerald-400/30 bg-emerald-400/10 text-emerald-200">
+              回写 {field}
+            </StatusPill>
+          ))}
+        </div>
+      ) : null}
       {commands.length ? (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {commands.slice(0, 3).map((command) => (
@@ -163,6 +271,51 @@ function ResultLine({ result }) {
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function RunPreviewList({ results = [] }) {
+  const items = asArray(results).slice(0, 5);
+  if (!items.length) return null;
+  return (
+    <div className="mt-3 space-y-2">
+      {items.map((result, index) => (
+        <ResultLine key={`${result.id || index}-${result.status}-${result.management_ip}`} result={result} />
+      ))}
+    </div>
+  );
+}
+
+function RunMetricGrid({ summary = {} }) {
+  const entries = RUN_METRIC_ORDER
+    .map((key) => [key, Number(summary[key] || 0)])
+    .filter(([, value]) => value > 0);
+  if (!entries.length) return null;
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      {entries.slice(0, 6).map(([key, value]) => (
+        <div key={key} className="rounded-xl border border-cyan-400/15 bg-slate-950/35 px-3 py-2">
+          <div className="text-[11px] font-bold text-slate-400">{RUN_METRIC_LABELS[key] || key}</div>
+          <div className="mt-1 text-xl font-black text-slate-50">{value}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FactCell({ host }) {
+  const facts = host?.asset_facts || {};
+  const collected = hasAssetFacts(host);
+  const primary = facts.model || facts.os_version || facts.brand;
+  const secondary = facts.serial_number || facts.asset_tag || facts.brand;
+  return (
+    <div className="space-y-1.5 text-[11px] font-semibold text-slate-300">
+      <StatusPill tone={collected ? 'border-cyan-300/40 bg-cyan-300/10 text-cyan-100' : 'border-amber-300/40 bg-amber-300/10 text-amber-100'}>
+        {collected ? '已采集' : '待采集'}
+      </StatusPill>
+      <div className="max-w-[220px] truncate text-xs font-black text-slate-100">{safeText(primary, '型号/版本待补全')}</div>
+      <div className="max-w-[220px] truncate font-mono text-slate-500">{safeText(secondary, '序列号待补全')}</div>
     </div>
   );
 }
@@ -177,11 +330,13 @@ export default function AnsibleCenterView() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [groupFilter, setGroupFilter] = useState('all');
+  const [factsFilter, setFactsFilter] = useState('all');
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [lastAction, setLastAction] = useState(null);
   const [testMode, setTestMode] = useState('login');
   const [scope, setScope] = useState('managed');
   const [rotationBatchSize, setRotationBatchSize] = useState(1);
+  const [showInventory, setShowInventory] = useState(false);
 
   const loadSummary = async () => {
     setLoading(true);
@@ -224,6 +379,8 @@ export default function AnsibleCenterView() {
       if (statusFilter !== 'all' && status !== statusFilter) return false;
       if (typeFilter !== 'all' && (host.device_type || host.raw_device_type || 'unknown') !== typeFilter) return false;
       if (groupFilter !== 'all' && !asArray(host.groups).includes(groupFilter)) return false;
+      if (factsFilter === 'collected' && !hasAssetFacts(host)) return false;
+      if (factsFilter === 'missing' && hasAssetFacts(host)) return false;
       if (!query) return true;
       return [
         host.name,
@@ -238,7 +395,7 @@ export default function AnsibleCenterView() {
         host.username_hint,
       ].some((value) => normalize(value).includes(query));
     });
-  }, [groupFilter, hosts, keyword, statusFilter, typeFilter]);
+  }, [factsFilter, groupFilter, hosts, keyword, statusFilter, typeFilter]);
 
   const resultSummary = useMemo(() => {
     const results = asArray(lastAction?.results);
@@ -338,10 +495,75 @@ export default function AnsibleCenterView() {
     }
   };
 
+  const downloadInventory = () => {
+    const text = summary.inventory || '';
+    if (!text) {
+      setNotice('');
+      setError('当前没有可下载的 Inventory 内容。');
+      return;
+    }
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `ansible_inventory_${stamp}.ini`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setError('');
+    setNotice('Inventory 文件已生成。');
+  };
+
+  const runRotationPlan = async () => {
+    const selected = Array.from(selectedIds);
+    setActionLoading('rotation');
+    setError('');
+    setNotice('');
+    try {
+      const response = await safeFetch('/api/ansible/rotation-plan/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          batch_size: rotationBatchSize,
+          ...(selected.length ? { host_ids: selected } : {}),
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.detail || payload.message || '生成密码轮换预案失败');
+      }
+      setLastAction({ type: 'rotation', ...payload });
+      setNotice(`密码轮换预案已生成：计划 ${payload.summary?.planned ?? payload.summary?.success ?? 0}，跳过 ${payload.summary?.skipped ?? 0}。`);
+      await loadSummary();
+    } catch (planError) {
+      setError(planError.message || '生成密码轮换预案失败');
+    } finally {
+      setActionLoading('');
+    }
+  };
+
   const stats = summary.stats || EMPTY_SUMMARY.stats;
   const inventoryText = summary.inventory || '# 暂无已纳管并绑定凭据的主机';
   const latestResults = asArray(lastAction?.results).slice(0, 10);
   const recentRuns = asArray(summary.recent_runs);
+  const factsSummary = useMemo(() => {
+    const collected = Number.isFinite(Number(stats.facts_collected))
+      ? Number(stats.facts_collected)
+      : hosts.filter((host) => hasAssetFacts(host)).length;
+    const missing = Number.isFinite(Number(stats.facts_missing))
+      ? Number(stats.facts_missing)
+      : Math.max(hosts.length - collected, 0);
+    return {
+      collected,
+      missing,
+    };
+  }, [hosts, stats.facts_collected, stats.facts_missing]);
+  const inventoryGroups = useMemo(
+    () => groups.filter((group) => group.name !== 'managed' && group.name !== 'unmanaged').slice(0, 8),
+    [groups],
+  );
 
   return (
     <div className="ops-page custom-scrollbar h-full overflow-auto p-3 lg:p-4">
@@ -442,9 +664,10 @@ export default function AnsibleCenterView() {
           </div>
         ) : null}
 
-        <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+        <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
           <StatCard icon={Server} label="当前池主机" value={stats.total_hosts || 0} hint={scope === 'managed' ? '已隐藏暂不用候选' : '全部可识别候选'} />
           <StatCard icon={CheckCircle2} label="已纳管" value={stats.managed_hosts || 0} hint="已有凭据和目标" tone="text-emerald-200" ring="from-emerald-400/20 to-cyan-500/10" />
+          <StatCard icon={Sparkles} label="档案已采集" value={factsSummary.collected} hint={`${factsSummary.missing} 台待补全`} tone="text-cyan-100" ring="from-cyan-400/25 to-blue-500/10" />
           <StatCard icon={KeyRound} label="缺少凭据" value={stats.credential_missing || 0} hint="需要先绑定密码本" tone="text-rose-200" ring="from-rose-400/20 to-pink-500/10" />
           <StatCard icon={Database} label="缺少备份目标" value={stats.backup_missing || 0} hint="可批量纳入 Inventory" tone="text-amber-200" ring="from-amber-400/20 to-orange-500/10" />
           <StatCard icon={Layers3} label="分组数量" value={groups.length} hint="按机房、类型、厂商聚合" tone="text-violet-200" ring="from-violet-400/20 to-blue-500/10" />
@@ -490,6 +713,15 @@ export default function AnsibleCenterView() {
                   {typeOptions.map(([value, label]) => (
                     <option key={value} value={value}>{label}</option>
                   ))}
+                </select>
+                <select
+                  value={factsFilter}
+                  onChange={(event) => setFactsFilter(event.target.value)}
+                  className="h-10 rounded-xl border border-slate-700/70 bg-slate-950/60 px-3 text-sm font-bold text-slate-100 outline-none"
+                >
+                  <option value="all">全部档案</option>
+                  <option value="collected">已采集档案</option>
+                  <option value="missing">待采集档案</option>
                 </select>
                 <select
                   value={groupFilter}
@@ -545,9 +777,8 @@ export default function AnsibleCenterView() {
                           <div className="text-xs font-black text-slate-100">{host.backup_target_id ? `#${host.backup_target_id}` : '未创建'}</div>
                           <div className="mt-1 max-w-[220px] truncate text-[11px] font-semibold text-slate-500">{safeText(host.latest_version, '无版本')}</div>
                         </td>
-                        <td className="px-4 py-3 text-[11px] font-semibold text-slate-300">
-                          <div className="max-w-[220px] truncate">{safeText(host.asset_facts?.model || host.asset_facts?.os_version, '待采集')}</div>
-                          <div className="mt-1 max-w-[220px] truncate font-mono text-slate-500">{safeText(host.asset_facts?.serial_number || host.asset_facts?.brand, '')}</div>
+                        <td className="px-4 py-3">
+                          <FactCell host={host} />
                         </td>
                         <td className="px-4 py-3">
                           <StatusPill tone={getStatusTone(status)}>{STATUS_LABELS[status] || status}</StatusPill>
@@ -575,32 +806,69 @@ export default function AnsibleCenterView() {
           <aside className="space-y-4">
             <section className="rounded-2xl border border-cyan-400/15 bg-slate-950/55 p-4 shadow-[0_18px_55px_rgba(0,0,0,0.22)]">
               <div className="mb-3 flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-black text-slate-50">Inventory 预览</h2>
-                  <p className="mt-1 text-xs font-semibold text-slate-400">不包含密码，只引用 OpenBao 凭据。</p>
+                <div className="flex items-start gap-2">
+                  <FileText className="mt-1 h-4 w-4 text-cyan-200" />
+                  <div>
+                    <h2 className="text-lg font-black text-slate-50">Inventory 分组</h2>
+                    <p className="mt-1 text-xs font-semibold text-slate-400">默认展示分组概览；原始清单按需展开。</p>
+                  </div>
                 </div>
-                <ActionButton icon={Clipboard} onClick={copyInventory}>复制</ActionButton>
+                <div className="flex shrink-0 items-center gap-2">
+                  <ActionButton icon={showInventory ? ChevronDown : ChevronRight} onClick={() => setShowInventory((value) => !value)}>
+                    {showInventory ? '收起' : '展开'}
+                  </ActionButton>
+                  <ActionButton icon={Clipboard} onClick={copyInventory}>复制</ActionButton>
+                  <ActionButton icon={Download} onClick={downloadInventory}>下载</ActionButton>
+                </div>
               </div>
-              <pre className="custom-scrollbar max-h-[340px] overflow-auto rounded-xl border border-slate-700/60 bg-slate-950/80 p-3 text-xs leading-5 text-cyan-50">
-                {inventoryText}
-              </pre>
+              <div className="grid gap-2">
+                {inventoryGroups.length ? inventoryGroups.map((group) => (
+                  <div key={group.name} className="rounded-xl border border-cyan-400/15 bg-cyan-400/[0.04] px-3 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-black text-slate-50">{group.name}</div>
+                        <div className="mt-1 text-[11px] font-semibold text-slate-400">Inventory 主机分组</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-xl font-black text-cyan-100">{group.managed || group.count || 0}</div>
+                        <div className="text-[11px] font-bold text-slate-500">台</div>
+                      </div>
+                    </div>
+                  </div>
+                )) : (
+                  <div className="rounded-xl border border-dashed border-slate-700/70 bg-slate-950/30 p-5 text-center text-sm font-bold text-slate-500">
+                    暂无 Inventory 分组。
+                  </div>
+                )}
+              </div>
+              {showInventory ? (
+                <pre className="custom-scrollbar mt-3 max-h-[220px] overflow-auto rounded-xl border border-slate-700/60 bg-slate-950/80 p-3 text-xs leading-5 text-cyan-50">
+                  {inventoryText}
+                </pre>
+              ) : null}
             </section>
 
             <section className="rounded-2xl border border-cyan-400/15 bg-slate-950/55 p-4 shadow-[0_18px_55px_rgba(0,0,0,0.22)]">
               <div className="mb-3 flex items-center gap-2">
-                <Filter className="h-4 w-4 text-cyan-200" />
-                <h2 className="text-lg font-black text-slate-50">最近动作</h2>
+                <History className="h-4 w-4 text-cyan-200" />
+                <h2 className="text-lg font-black text-slate-50">任务记录</h2>
               </div>
               {lastAction ? (
                 <>
-                  <div className="grid grid-cols-3 gap-2">
-                    {Object.entries(lastAction.summary || {}).filter(([, value]) => Number(value) > 0).slice(0, 6).map(([key, value]) => (
-                      <div key={key} className="rounded-xl border border-slate-700/60 bg-slate-950/35 px-3 py-2">
-                        <div className="text-[11px] font-bold uppercase text-slate-500">{CATEGORY_LABELS[key] || key}</div>
-                        <div className="mt-1 text-xl font-black text-slate-50">{value}</div>
+                  <div className="mb-3 rounded-xl border border-cyan-400/15 bg-cyan-400/[0.04] px-3 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-black text-slate-50">{lastAction.run?.action_label || lastAction.run?.action || '最近执行'}</div>
+                        <div className="mt-1 text-[11px] font-semibold text-slate-400">
+                          {formatRunTime(lastAction.run?.started_at)} · {safeText(lastAction.run?.actor_name, '系统')} · 耗时 {lastAction.run?.duration_seconds || 0}s
+                        </div>
                       </div>
-                    ))}
+                      <StatusPill tone={lastAction.run?.status === 'success' ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-200' : lastAction.run?.status === 'partial' ? 'border-amber-400/40 bg-amber-400/10 text-amber-200' : 'border-rose-400/40 bg-rose-400/10 text-rose-200'}>
+                        {lastAction.run?.status_label || lastAction.run?.status || '已记录'}
+                      </StatusPill>
+                    </div>
                   </div>
+                  <RunMetricGrid summary={lastAction.summary} />
                   {Object.keys(resultSummary).length ? (
                     <div className="mt-3 grid grid-cols-2 gap-2">
                       {Object.entries(resultSummary).slice(0, 6).map(([key, value]) => (
@@ -611,11 +879,7 @@ export default function AnsibleCenterView() {
                       ))}
                     </div>
                   ) : null}
-                  <div className="mt-3 space-y-2">
-                    {latestResults.map((result) => (
-                      <ResultLine key={`${result.id}-${result.status}-${result.detail}`} result={result} />
-                    ))}
-                  </div>
+                  <RunPreviewList results={latestResults} />
                 </>
               ) : recentRuns.length ? (
                 <div className="space-y-2">
@@ -629,11 +893,17 @@ export default function AnsibleCenterView() {
                       </div>
                       <div className="mt-2 text-xs font-semibold leading-5 text-slate-400">{safeText(run.detail)}</div>
                       <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-black text-slate-500">
+                        <span>{formatRunTime(run.started_at)}</span>
+                        <span>{safeText(run.actor_name, '系统')}</span>
                         <span>目标 {run.total}</span>
                         <span>成功 {run.success_count}</span>
                         <span>失败 {run.failed_count}</span>
                         <span>耗时 {run.duration_seconds}s</span>
                       </div>
+                      <div className="mt-3">
+                        <RunMetricGrid summary={run.summary} />
+                      </div>
+                      <RunPreviewList results={run.results_preview} />
                     </div>
                   ))}
                 </div>
@@ -669,6 +939,21 @@ export default function AnsibleCenterView() {
                     {size} 台
                   </button>
                 ))}
+              </div>
+              <div className="mt-3 rounded-xl border border-cyan-400/15 bg-cyan-400/[0.04] p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-black text-cyan-100">
+                      {selectedCount ? `按已勾选设备生成，最多 ${rotationBatchSize} 台` : `从已纳管设备中取前 ${rotationBatchSize} 台`}
+                    </div>
+                    <div className="mt-1 text-[11px] font-semibold text-slate-400">
+                      只生成流程和任务记录，不会修改设备密码，也不会覆盖 OpenBao。
+                    </div>
+                  </div>
+                  <ActionButton icon={KeyRound} primary loading={actionLoading === 'rotation'} onClick={runRotationPlan}>
+                    生成预案
+                  </ActionButton>
+                </div>
               </div>
               <div className="mt-3 space-y-2">
                 {[

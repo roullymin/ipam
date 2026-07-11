@@ -2913,6 +2913,18 @@ def _ansible_groups(datacenter='', device_type='', vendor='', managed=False):
     return groups
 
 
+def _is_priority_ansible_credential(credential):
+    if credential is None:
+        return False
+    notes = str(getattr(credential, 'notes', '') or '').lower()
+    vault_path = str(getattr(credential, 'vault_path', '') or '').lower()
+    return (
+        '重点设备清单导入' in notes
+        or 'priority_device_import' in notes
+        or 'priority_device_import' in vault_path
+    )
+
+
 def _ansible_target_queryset():
     return ConfigBackupTarget.objects.select_related(
         'rack_device',
@@ -2937,6 +2949,7 @@ def _ansible_row_from_target(target):
     credential = target.credential if target.credential_id else _find_backup_credential(rack_device=device, ip_asset=ip_asset)
     management_ip = _extract_management_host(target.management_ip)
     managed = bool(target.enabled and management_ip and credential)
+    priority_managed = managed and _is_priority_ansible_credential(credential)
     location = _ansible_location_for_device(device) or (ip_asset.ip_address if ip_asset else '')
     return {
         'id': f'target-{target.id}',
@@ -2957,6 +2970,7 @@ def _ansible_row_from_target(target):
         'inventory_name': _ansible_inventory_name(target.name or (device.name if device else ''), management_ip),
         'groups': _ansible_groups(datacenter, raw_type or target.device_type, vendor, managed),
         'managed': managed,
+        'priority_managed': priority_managed,
         'enabled': bool(target.enabled),
         'credential_id': credential.id if credential else None,
         'credential_name': credential.name if credential else '',
@@ -2986,6 +3000,7 @@ def _ansible_row_from_target(target):
 def _ansible_row_from_device(device):
     management_ip = _extract_management_host(device.mgmt_ip)
     credential = _find_backup_credential(rack_device=device)
+    priority_managed = bool(management_ip and credential and _is_priority_ansible_credential(credential))
     datacenter = device.rack.datacenter.name if device.rack_id and device.rack.datacenter_id else ''
     rack_code = device.rack.code if device.rack_id else ''
     raw_type = device.device_type or ''
@@ -3008,6 +3023,7 @@ def _ansible_row_from_device(device):
         'inventory_name': _ansible_inventory_name(device.name, management_ip),
         'groups': _ansible_groups(datacenter, raw_type, device.brand, False),
         'managed': False,
+        'priority_managed': priority_managed,
         'enabled': False,
         'credential_id': credential.id if credential else None,
         'credential_name': credential.name if credential else '',
@@ -3037,6 +3053,7 @@ def _ansible_row_from_device(device):
 def _ansible_row_from_ip(ip_asset):
     management_ip = _extract_management_host(ip_asset.ip_address)
     credential = _find_backup_credential(ip_asset=ip_asset)
+    priority_managed = bool(management_ip and credential and _is_priority_ansible_credential(credential))
     raw_type = ip_asset.device_type or ''
     return {
         'id': f'ip-{ip_asset.id}',
@@ -3057,6 +3074,7 @@ def _ansible_row_from_ip(ip_asset):
         'inventory_name': _ansible_inventory_name(ip_asset.device_name, management_ip),
         'groups': _ansible_groups('', raw_type, '', False),
         'managed': False,
+        'priority_managed': priority_managed,
         'enabled': False,
         'credential_id': credential.id if credential else None,
         'credential_name': credential.name if credential else '',
@@ -3163,12 +3181,43 @@ def _ansible_host_selection(hosts, payload):
         except ValueError:
             host_ids.extend(str(item).strip() for item in target_ids if str(item).strip())
     if not host_ids:
-        return [row for row in hosts if row.get('managed')]
+        return _default_ansible_managed_hosts(hosts)
     selected = set(host_ids)
     return [row for row in hosts if row.get('id') in selected or row.get('asset_id') in selected]
 
 
+def _default_ansible_managed_hosts(hosts):
+    managed = [row for row in hosts if row.get('managed')]
+    priority = [row for row in managed if row.get('priority_managed')]
+    return priority or managed
+
+
 def _serialize_ansible_task_run(run):
+    results = run.results if isinstance(run.results, list) else []
+    result_summary = {}
+    preview = []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        key = item.get('category') or item.get('status') or 'other'
+        result_summary[key] = result_summary.get(key, 0) + 1
+        if len(preview) < 6:
+            preview.append(
+                {
+                    'id': item.get('id') or item.get('asset_id') or item.get('target_id') or len(preview) + 1,
+                    'name': item.get('name') or '',
+                    'management_ip': item.get('management_ip') or '',
+                    'status': item.get('status') or '',
+                    'category': item.get('category') or '',
+                    'category_label': item.get('category_label') or '',
+                    'detail': item.get('detail') or '',
+                    'duration_seconds': item.get('duration_seconds') or 0,
+                    'applied_fields': item.get('applied_fields') or [],
+                    'facts': item.get('facts') or {},
+                    'rotation_steps': item.get('rotation_steps') or [],
+                    'batch_size': item.get('batch_size') or 0,
+                }
+            )
     return {
         'id': run.id,
         'action': run.action,
@@ -3184,12 +3233,24 @@ def _serialize_ansible_task_run(run):
         'duration_seconds': run.duration_seconds,
         'started_at': run.started_at.isoformat() if run.started_at else '',
         'finished_at': run.finished_at.isoformat() if run.finished_at else '',
+        'summary': {
+            'total': run.total,
+            'success': run.success_count,
+            'failed': run.failed_count,
+            'skipped': run.skipped_count,
+            **result_summary,
+        },
+        'results_preview': preview,
     }
 
 
 def _record_ansible_task_run(request, action, counters, results, detail, started_at=None):
     total = int(counters.get('total') or len(results or []))
-    success_count = int(counters.get('success') or counters.get('created') or 0) + int(counters.get('updated') or 0)
+    success_count = (
+        int(counters.get('success') or 0)
+        + int(counters.get('created') or 0)
+        + int(counters.get('updated') or 0)
+    )
     failed_count = int(counters.get('failed') or 0)
     skipped_count = int(counters.get('skipped') or 0)
     if total and success_count == total and failed_count == 0 and skipped_count == 0:
@@ -3257,10 +3318,9 @@ def _apply_ansible_facts_to_asset(row, facts, overwrite=False):
 
 def _ansible_summary_payload(scope='managed'):
     all_hosts = _build_ansible_hosts()
-    managed_pool = [
-        row for row in all_hosts
-        if row.get('managed') or row.get('backup_target_id') or row.get('backup_enabled')
-    ]
+    all_managed_pool = [row for row in all_hosts if row.get('managed')]
+    priority_pool = [row for row in all_managed_pool if row.get('priority_managed')]
+    managed_pool = priority_pool or all_managed_pool
     if scope == 'all':
         hosts = all_hosts
     else:
@@ -3270,6 +3330,7 @@ def _ansible_summary_payload(scope='managed'):
     credential_missing = [row for row in hosts if not row.get('credential_id')]
     backup_missing = [row for row in hosts if not row.get('backup_target_id')]
     failed = [row for row in hosts if row.get('backup_status') == 'failed' or row.get('last_job_detail')]
+    facts_collected = [row for row in hosts if any((row.get('asset_facts') or {}).get(key) for key in ('model', 'serial_number', 'os_version', 'brand'))]
     groups = {}
     for row in hosts:
         for group in row.get('groups') or []:
@@ -3286,7 +3347,11 @@ def _ansible_summary_payload(scope='managed'):
             'backup_missing': len(backup_missing),
             'failed_hosts': len(failed),
             'candidate_hosts': max(len(all_hosts) - len(managed_pool), 0),
+            'all_managed_hosts': len(all_managed_pool),
+            'priority_hosts': len(priority_pool),
             'all_hosts': len(all_hosts),
+            'facts_collected': len(facts_collected),
+            'facts_missing': max(len(hosts) - len(facts_collected), 0),
             'visible_scope': scope,
         },
         'hosts': hosts,
@@ -3550,6 +3615,69 @@ def ansible_provision(request):
         counters,
         results,
         f'纳入 Ansible Inventory：新增 {counters["created"]}，更新 {counters["updated"]}，失败 {counters["failed"]}',
+        started_at=started_at,
+    )
+    return Response({'summary': counters, 'results': results, 'run': _serialize_ansible_task_run(run)})
+
+
+@api_view(['POST'])
+@authentication_classes((SessionAuthentication, BasicAuthentication))
+@permission_classes([DcimAccessPermission])
+def ansible_rotation_plan(request):
+    if get_user_role(request.user) not in ANSIBLE_MANAGE_ROLES:
+        raise PermissionDenied('当前角色无权生成密码轮换预案。')
+    started_at = timezone.now()
+    batch_size = _parse_positive_int(request.data.get('batch_size'), 1, minimum=1, maximum=20, field_name='轮换批量')
+    hosts = _build_ansible_hosts()
+    selected_hosts = _ansible_host_selection(hosts, request.data)
+    if not any(request.data.get(key) for key in ('host_ids', 'asset_ids', 'target_ids')):
+        selected_hosts = [row for row in selected_hosts if row.get('managed')][:batch_size]
+    else:
+        selected_hosts = selected_hosts[:batch_size]
+    results = []
+    counters = {
+        'total': len(selected_hosts),
+        'success': 0,
+        'failed': 0,
+        'skipped': 0,
+        'planned': 0,
+    }
+    rotation_steps = [
+        '生成候选新密码，只写入预案，不覆盖 OpenBao。',
+        '测试旧密码，确认当前凭据仍可登录。',
+        '设备侧小批量切换并测试新密码。',
+        '人工确认后更新 OpenBao，并保留回滚凭据窗口。',
+    ]
+    for index, row in enumerate(selected_hosts, start=1):
+        if not row.get('management_ip'):
+            counters['skipped'] += 1
+            results.append({**row, 'status': 'skipped', 'category': 'missing_ip', 'detail': '缺少管理 IP，暂不纳入轮换预案。'})
+            continue
+        if not row.get('credential_id'):
+            counters['skipped'] += 1
+            results.append({**row, 'status': 'skipped', 'category': 'credential_missing', 'detail': '缺少可用凭据，暂不纳入轮换预案。'})
+            continue
+        counters['success'] += 1
+        counters['planned'] += 1
+        results.append(
+            {
+                **row,
+                'status': 'success',
+                'category': 'planned',
+                'category_label': '已生成预案',
+                'detail': f'第 {index} 台进入密码轮换预案。先测试旧密码，再做新密码验证，确认后再更新 OpenBao。',
+                'rotation_steps': rotation_steps,
+                'batch_size': batch_size,
+            }
+        )
+    detail = f'密码轮换预案：计划 {counters["planned"]}，跳过 {counters["skipped"]}，批量上限 {batch_size}'
+    record_audit(request, 'ansible', 'rotation_plan', detail=detail)
+    run = _record_ansible_task_run(
+        request,
+        'rotation_plan',
+        counters,
+        results,
+        detail,
         started_at=started_at,
     )
     return Response({'summary': counters, 'results': results, 'run': _serialize_ansible_task_run(run)})
