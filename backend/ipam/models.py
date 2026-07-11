@@ -88,6 +88,7 @@ class RackDevice(models.Model):
     device_type = models.CharField('设备类型', max_length=50, default='server')
     brand = models.CharField('品牌', max_length=100, blank=True)
     model = models.CharField('型号', max_length=100, blank=True)
+    hostname = models.CharField('主机名', max_length=180, blank=True, default='')
     mgmt_ip = models.CharField('管理 IP', max_length=100, blank=True, null=True)
     project = models.CharField('项目名称', max_length=100, blank=True)
     contact = models.CharField('负责人', max_length=100, blank=True)

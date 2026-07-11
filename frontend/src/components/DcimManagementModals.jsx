@@ -250,6 +250,7 @@ export function DeviceModal({
     device_type: 'server',
     brand: '',
     model: '',
+    hostname: '',
     mgmt_ip: '',
     sn: '',
     asset_tag: '',
@@ -323,6 +324,14 @@ export function DeviceModal({
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 required
                 placeholder="Core-SW-01"
+              />
+            </div>
+            <div className="md:col-span-6">
+              <FormInput
+                label="主机名"
+                value={formData.hostname || ''}
+                onChange={(e) => setFormData({ ...formData, hostname: e.target.value })}
+                placeholder="Gdsafety-7F-SW-01"
               />
             </div>
             <div className="md:col-span-6">

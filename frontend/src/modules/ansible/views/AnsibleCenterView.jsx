@@ -136,7 +136,7 @@ const FACT_FIELD_LABELS = {
 
 const hasAssetFacts = (host) => {
   const facts = host?.asset_facts || {};
-  return Boolean(facts.model || facts.serial_number || facts.os_version || facts.brand);
+  return Boolean(facts.hostname || facts.model || facts.serial_number || facts.os_version || facts.brand);
 };
 
 const formatRunTime = (value) => {
@@ -307,8 +307,8 @@ function RunMetricGrid({ summary = {} }) {
 function FactCell({ host }) {
   const facts = host?.asset_facts || {};
   const collected = hasAssetFacts(host);
-  const primary = facts.model || facts.os_version || facts.brand;
-  const secondary = facts.serial_number || facts.asset_tag || facts.brand;
+  const primary = facts.hostname || facts.model || facts.os_version || facts.brand;
+  const secondary = facts.model || facts.serial_number || facts.asset_tag || facts.brand;
   return (
     <div className="space-y-1.5 text-[11px] font-semibold text-slate-300">
       <StatusPill tone={collected ? 'border-cyan-300/40 bg-cyan-300/10 text-cyan-100' : 'border-amber-300/40 bg-amber-300/10 text-amber-100'}>
@@ -384,6 +384,7 @@ export default function AnsibleCenterView() {
       if (!query) return true;
       return [
         host.name,
+        host.asset_facts?.hostname,
         host.management_ip,
         host.inventory_name,
         host.raw_device_type,

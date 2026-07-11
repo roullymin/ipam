@@ -705,6 +705,7 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
       typeGroup: assetTypeInfo.group,
       vendor: assetVendor,
       model: device.model || '',
+      hostname: device.hostname || '',
       osVersion: device.os_version || '',
       serialNumber: device.sn || '',
       assetTag: device.asset_tag || '',
@@ -771,6 +772,7 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
         typeGroup: assetTypeInfo.group,
         vendor: '',
         model: '',
+        hostname: ip.hostname || '',
         osVersion: '',
         serialNumber: '',
         assetTag: '',
@@ -823,6 +825,7 @@ function filterAssets(assets, filters) {
     if (!keyword) return true;
     return [
       asset.name,
+      asset.hostname,
       asset.managementIp,
       asset.typeLabel,
       asset.vendor,
@@ -2534,6 +2537,7 @@ function AssetDetail({
       {activeTab === 'basic' ? (
         <>
           <DetailBlock icon={MapPin} title="身份与位置">
+            <InfoRow label="主机名" value={asset.hostname} mono />
             <InfoRow label="厂商" value={asset.vendor} />
             <InfoRow label="型号" value={asset.model} />
             <InfoRow label="系统版本" value={asset.osVersion} />
@@ -3664,7 +3668,7 @@ export default function AssetCenterView({
                     value={keyword}
                     onChange={(event) => setKeyword(event.target.value)}
                     className="h-11 w-full rounded-2xl border border-slate-200 bg-white pl-10 pr-3 text-sm font-bold text-slate-800 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-                    placeholder="搜索名称、IP、序列号、项目、负责人"
+                    placeholder="搜索名称、主机名、IP、序列号、项目、负责人"
                   />
                 </label>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-[repeat(9,minmax(112px,1fr))_90px]">

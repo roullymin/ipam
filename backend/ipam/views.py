@@ -233,6 +233,7 @@ DCIM_DEVICE_HEADERS = [
     '机柜编号',
     '机柜名称',
     '设备名称',
+    '主机名',
     '起始U位',
     '占用高度(U)',
     '设备类型',
@@ -2888,6 +2889,7 @@ def _ansible_asset_facts(device=None, ip_asset=None):
         return {
             'brand': device.brand or '',
             'model': device.model or '',
+            'hostname': device.hostname or '',
             'serial_number': device.sn or '',
             'os_version': device.os_version or '',
             'asset_tag': device.asset_tag or '',
@@ -2896,6 +2898,7 @@ def _ansible_asset_facts(device=None, ip_asset=None):
         return {
             'brand': '',
             'model': '',
+            'hostname': '',
             'serial_number': '',
             'os_version': '',
             'asset_tag': '',
@@ -3322,6 +3325,7 @@ def _apply_ansible_facts_to_asset(row, facts, overwrite=False):
         for field, value in (
             ('brand', facts.get('vendor')),
             ('model', facts.get('model')),
+            ('hostname', facts.get('hostname')),
             ('sn', facts.get('serial_number')),
             ('os_version', facts.get('version')),
             ('mgmt_ip', management_ips[0] if management_ips else facts.get('management_ip')),
@@ -3373,7 +3377,7 @@ def _ansible_summary_payload(scope='managed'):
     credential_missing = [row for row in hosts if not row.get('credential_id')]
     backup_missing = [row for row in hosts if not row.get('backup_target_id')]
     failed = [row for row in hosts if row.get('backup_status') == 'failed' or row.get('last_job_detail')]
-    facts_collected = [row for row in hosts if any((row.get('asset_facts') or {}).get(key) for key in ('model', 'serial_number', 'os_version', 'brand'))]
+    facts_collected = [row for row in hosts if any((row.get('asset_facts') or {}).get(key) for key in ('hostname', 'model', 'serial_number', 'os_version', 'brand'))]
     groups = {}
     for row in hosts:
         for group in row.get('groups') or []:
@@ -4037,7 +4041,7 @@ class RackDeviceViewSet(OptionalPaginationMixin, BaseViewSet):
     queryset = RackDevice.objects.select_related('rack', 'rack__datacenter').all()
     serializer_class = RackDeviceSerializer
     filter_backends = [filters.SearchFilter]
-    search_fields = ['name', 'brand', 'sn', 'asset_tag', 'mgmt_ip', 'project', 'contact', 'rack__code', 'rack__datacenter__name']
+    search_fields = ['name', 'hostname', 'brand', 'sn', 'asset_tag', 'mgmt_ip', 'project', 'contact', 'rack__code', 'rack__datacenter__name']
 
 
 class ResidentStaffViewSet(OptionalPaginationMixin, BaseViewSet):
@@ -5381,6 +5385,7 @@ def download_dcim_template(request):
                 '机柜编号': 'RK-01',
                 '机柜名称': '核心交换机柜',
                 '设备名称': '核心交换机 A',
+                '主机名': 'Core-SW-01',
                 '起始U位': 40,
                 '占用高度(U)': 2,
                 '设备类型': 'switch',
@@ -5447,6 +5452,7 @@ def export_dcim_excel(request):
                 '机柜编号': device.rack.code,
                 '机柜名称': device.rack.name,
                 '设备名称': device.name,
+                '主机名': device.hostname,
                 '起始U位': device.position,
                 '占用高度(U)': device.u_height,
                 '设备类型': device.device_type,
@@ -5570,6 +5576,7 @@ def import_dcim_excel(request):
 
             defaults = {
                 'name': device_name,
+                'hostname': str(row.get('主机名', '')).strip(),
                 'u_height': int(row.get('占用高度(U)', 1) or 1),
                 'device_type': str(row.get('设备类型', 'server') or 'server').strip(),
                 'brand': str(row.get('品牌', '')).strip(),

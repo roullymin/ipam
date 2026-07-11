@@ -178,7 +178,6 @@ def _fact_probe_commands(command_profile):
         'display current-configuration | include sysname',
         'display device manuinfo',
         'display device manufacture-info',
-        'display elabel',
         'display esn',
         'display clock',
     ]

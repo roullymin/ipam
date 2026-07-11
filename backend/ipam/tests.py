@@ -218,6 +218,7 @@ class AnsibleFactWriteBackTests(APITestCase):
             {
                 'vendor': 'H3C',
                 'model': 'S5560X-30F-EI',
+                'hostname': 'Core-SW',
                 'serial_number': '219801A2ABC0Q100002',
                 'version': 'H3C Comware Software, Version 7.1.070',
                 'management_ip': '172.25.254.254',
@@ -228,7 +229,10 @@ class AnsibleFactWriteBackTests(APITestCase):
         duplicate.refresh_from_db()
         self.assertEqual(linked.model, 'S5560X-30F-EI')
         self.assertEqual(duplicate.model, 'S5560X-30F-EI')
+        self.assertEqual(linked.hostname, 'Core-SW')
+        self.assertEqual(duplicate.hostname, 'Core-SW')
         self.assertEqual(duplicate.sn, '219801A2ABC0Q100002')
+        self.assertIn('hostname', applied)
         self.assertIn('os_version', applied)
 
 

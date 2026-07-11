@@ -172,4 +172,4 @@ class Command(BaseCommand):
             'summary': counters,
             'run': _serialize_ansible_task_run(run),
         }
-        self.stdout.write(json.dumps(output, ensure_ascii=False, indent=2))
+        self.stdout.write(json.dumps(output, ensure_ascii=True, indent=2))

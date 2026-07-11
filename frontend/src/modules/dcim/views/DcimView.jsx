@@ -208,6 +208,7 @@ export default function DcimView({
         rack.code,
         rack.name,
         device?.name,
+        device?.hostname,
         device?.device_type,
         device?.brand,
         device?.model,
@@ -894,7 +895,7 @@ export default function DcimView({
               <tr>
                 {[
                   '序号', '机房', '机柜编号', '机柜名称', '高度(U)', 'PDU数', 'PDU实测(W)',
-                  '设备名称', '起始U', '占用U', '设备类型', '品牌', '型号', '管理IP',
+                  '设备名称', '主机名', '起始U', '占用U', '设备类型', '品牌', '型号', '管理IP',
                   '项目名称', '负责人', '状态', '额定功率(W)', '典型功率(W)',
                   '固定资产编号', '序列号(SN)', '操作',
                 ].map((label, index) => (
@@ -902,7 +903,7 @@ export default function DcimView({
                     key={label}
                     className={`whitespace-nowrap border-b border-r border-slate-200 px-3 py-3 ${
                       index < 4 ? 'sticky z-30 bg-slate-100' : ''
-                    } ${index === 21 ? 'sticky right-0 z-40 border-l bg-slate-100 text-center shadow-[-8px_0_16px_-14px_rgba(15,23,42,0.45)]' : ''}`}
+                    } ${index === 22 ? 'sticky right-0 z-40 border-l bg-slate-100 text-center shadow-[-8px_0_16px_-14px_rgba(15,23,42,0.45)]' : ''}`}
                     style={
                       index === 0
                         ? { left: 0 }
@@ -912,7 +913,7 @@ export default function DcimView({
                             ? { left: 168 }
                             : index === 3
                               ? { left: 280 }
-                              : index === 21
+                              : index === 22
                                 ? { right: 0 }
                                 : undefined
                     }
@@ -948,6 +949,7 @@ export default function DcimView({
                   <td className="border-b border-r border-slate-200 px-3 py-2.5 font-semibold text-slate-800">
                     {device?.name || <span className="text-slate-400">空机柜</span>}
                   </td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2.5 font-mono text-xs text-slate-600">{device?.hostname || '-'}</td>
                   <td className="border-b border-r border-slate-200 px-3 py-2.5 text-right">{device ? safeInt(device.position, 1) : '-'}</td>
                   <td className="border-b border-r border-slate-200 px-3 py-2.5 text-right">{device ? safeInt(device.u_height, 1) : '-'}</td>
                   <td className="border-b border-r border-slate-200 px-3 py-2.5">{device?.device_type || '-'}</td>
