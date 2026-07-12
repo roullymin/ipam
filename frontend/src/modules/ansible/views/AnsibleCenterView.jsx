@@ -134,11 +134,6 @@ const FACT_FIELD_LABELS = {
   management_ip: '管理 IP',
 };
 
-const hasAssetFacts = (host) => {
-  const facts = host?.asset_facts || {};
-  return Boolean(facts.hostname || facts.model || facts.serial_number || facts.os_version || facts.brand);
-};
-
 const formatRunTime = (value) => {
   if (!value) return '';
   const date = new Date(value);
@@ -149,6 +144,25 @@ const formatRunTime = (value) => {
     hour: '2-digit',
     minute: '2-digit',
   });
+};
+
+const getDisplayFacts = (host) => {
+  const assetFacts = host?.asset_facts || {};
+  const latestFacts = host?.latest_fact_run?.facts || {};
+  return {
+    hostname: assetFacts.hostname || latestFacts.hostname || '',
+    vendor: assetFacts.brand || latestFacts.vendor || '',
+    model: assetFacts.model || latestFacts.model || '',
+    serial_number: assetFacts.serial_number || latestFacts.serial_number || '',
+    version: assetFacts.os_version || latestFacts.version || '',
+    uptime: latestFacts.uptime || '',
+    management_ip: host?.management_ip || latestFacts.management_ip || '',
+  };
+};
+
+const hasAssetFacts = (host) => {
+  const facts = getDisplayFacts(host);
+  return Boolean(facts.hostname || facts.model || facts.serial_number || facts.version || facts.vendor);
 };
 
 function getHostStatus(host) {
@@ -275,8 +289,8 @@ function ResultLine({ result }) {
   );
 }
 
-function RunPreviewList({ results = [] }) {
-  const items = asArray(results).slice(0, 5);
+function RunPreviewList({ results = [], limit = 5 }) {
+  const items = asArray(results).slice(0, limit);
   if (!items.length) return null;
   return (
     <div className="mt-3 space-y-2">
@@ -305,10 +319,12 @@ function RunMetricGrid({ summary = {} }) {
 }
 
 function FactCell({ host }) {
-  const facts = host?.asset_facts || {};
+  const facts = getDisplayFacts(host);
+  const latest = host?.latest_fact_run || null;
   const collected = hasAssetFacts(host);
-  const primary = facts.hostname || facts.model || facts.os_version || facts.brand;
-  const secondary = facts.model || facts.serial_number || facts.asset_tag || facts.brand;
+  const primary = facts.hostname || facts.model || facts.version || facts.vendor;
+  const secondary = facts.model || facts.serial_number || facts.version || facts.vendor;
+  const appliedCount = asArray(latest?.applied_fields).length;
   return (
     <div className="space-y-1.5 text-[11px] font-semibold text-slate-300">
       <StatusPill tone={collected ? 'border-cyan-300/40 bg-cyan-300/10 text-cyan-100' : 'border-amber-300/40 bg-amber-300/10 text-amber-100'}>
@@ -316,6 +332,11 @@ function FactCell({ host }) {
       </StatusPill>
       <div className="max-w-[220px] truncate text-xs font-black text-slate-100">{safeText(primary, '型号/版本待补全')}</div>
       <div className="max-w-[220px] truncate font-mono text-slate-500">{safeText(secondary, '序列号待补全')}</div>
+      {latest ? (
+        <div className="max-w-[220px] truncate text-[10px] font-bold text-cyan-200/80">
+          最近 {formatRunTime(latest.started_at) || '-'} · 回写 {appliedCount}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -333,6 +354,8 @@ export default function AnsibleCenterView() {
   const [factsFilter, setFactsFilter] = useState('all');
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [lastAction, setLastAction] = useState(null);
+  const [selectedRunDetail, setSelectedRunDetail] = useState(null);
+  const [runDetailLoading, setRunDetailLoading] = useState(0);
   const [testMode, setTestMode] = useState('login');
   const [scope, setScope] = useState('managed');
   const [rotationBatchSize, setRotationBatchSize] = useState(1);
@@ -382,9 +405,15 @@ export default function AnsibleCenterView() {
       if (factsFilter === 'collected' && !hasAssetFacts(host)) return false;
       if (factsFilter === 'missing' && hasAssetFacts(host)) return false;
       if (!query) return true;
+      const displayFacts = getDisplayFacts(host);
+      const latestFactRun = host.latest_fact_run || {};
       return [
         host.name,
-        host.asset_facts?.hostname,
+        displayFacts.hostname,
+        displayFacts.vendor,
+        displayFacts.model,
+        displayFacts.serial_number,
+        displayFacts.version,
         host.management_ip,
         host.inventory_name,
         host.raw_device_type,
@@ -394,6 +423,7 @@ export default function AnsibleCenterView() {
         host.location,
         host.credential_name,
         host.username_hint,
+        latestFactRun.detail,
       ].some((value) => normalize(value).includes(query));
     });
   }, [factsFilter, groupFilter, hosts, keyword, statusFilter, typeFilter]);
@@ -461,6 +491,7 @@ export default function AnsibleCenterView() {
         throw new Error(payload.detail || payload.message || fallback);
       }
       setLastAction({ type, ...payload });
+      setSelectedRunDetail(null);
       const actionLabel = type === 'test'
         ? (payload.mode === 'readonly' ? '只读命令测试' : '登录测试')
         : type === 'collect'
@@ -477,6 +508,24 @@ export default function AnsibleCenterView() {
       setError(actionError.message || '操作失败');
     } finally {
       setActionLoading('');
+    }
+  };
+
+  const loadRunDetail = async (run) => {
+    if (!run?.id) return;
+    setRunDetailLoading(run.id);
+    setError('');
+    try {
+      const response = await safeFetch(`/api/ansible/runs/${run.id}/`);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.detail || payload.message || '加载任务详情失败');
+      }
+      setSelectedRunDetail(payload.run || null);
+    } catch (detailError) {
+      setError(detailError.message || '加载任务详情失败');
+    } finally {
+      setRunDetailLoading(0);
     }
   };
 
@@ -888,9 +937,20 @@ export default function AnsibleCenterView() {
                     <div key={run.id} className="rounded-xl border border-slate-700/60 bg-slate-950/35 px-3 py-3">
                       <div className="flex items-center justify-between gap-3">
                         <div className="text-sm font-black text-slate-50">{run.action_label || run.action}</div>
-                        <StatusPill tone={run.status === 'success' ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-200' : run.status === 'partial' ? 'border-amber-400/40 bg-amber-400/10 text-amber-200' : 'border-rose-400/40 bg-rose-400/10 text-rose-200'}>
-                          {run.status_label || run.status}
-                        </StatusPill>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <StatusPill tone={run.status === 'success' ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-200' : run.status === 'partial' ? 'border-amber-400/40 bg-amber-400/10 text-amber-200' : 'border-rose-400/40 bg-rose-400/10 text-rose-200'}>
+                            {run.status_label || run.status}
+                          </StatusPill>
+                          <button
+                            type="button"
+                            onClick={() => loadRunDetail(run)}
+                            disabled={runDetailLoading === run.id}
+                            className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-cyan-400/20 bg-cyan-400/[0.05] px-2 text-[11px] font-black text-cyan-100 transition hover:border-cyan-300/50 hover:bg-cyan-400/10 disabled:opacity-60"
+                          >
+                            {runDetailLoading === run.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+                            详情
+                          </button>
+                        </div>
                       </div>
                       <div className="mt-2 text-xs font-semibold leading-5 text-slate-400">{safeText(run.detail)}</div>
                       <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-black text-slate-500">
@@ -907,6 +967,25 @@ export default function AnsibleCenterView() {
                       <RunPreviewList results={run.results_preview} />
                     </div>
                   ))}
+                  {selectedRunDetail ? (
+                    <div className="rounded-xl border border-cyan-400/25 bg-cyan-400/[0.04] px-3 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-black text-cyan-100">{selectedRunDetail.action_label || '任务详情'}</div>
+                          <div className="mt-1 text-[11px] font-semibold text-slate-400">
+                            {formatRunTime(selectedRunDetail.started_at)} · 目标 {selectedRunDetail.total} · 耗时 {selectedRunDetail.duration_seconds || 0}s
+                          </div>
+                        </div>
+                        <StatusPill tone={selectedRunDetail.status === 'success' ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-200' : selectedRunDetail.status === 'partial' ? 'border-amber-400/40 bg-amber-400/10 text-amber-200' : 'border-rose-400/40 bg-rose-400/10 text-rose-200'}>
+                          {selectedRunDetail.status_label || selectedRunDetail.status}
+                        </StatusPill>
+                      </div>
+                      <div className="mt-3">
+                        <RunMetricGrid summary={selectedRunDetail.summary} />
+                      </div>
+                      <RunPreviewList results={selectedRunDetail.results} limit={12} />
+                    </div>
+                  ) : null}
                 </div>
               ) : (
                 <div className="rounded-xl border border-dashed border-slate-700/70 bg-slate-950/30 p-6 text-center">

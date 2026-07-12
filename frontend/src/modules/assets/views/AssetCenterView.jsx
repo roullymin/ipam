@@ -566,6 +566,7 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
   const secretList = asArray(secrets);
   const configBackupMap = new Map(Object.entries(configBackups?.devices || {}));
   const configBackupTargetMap = new Map(Object.entries(configBackups?.targets || {}));
+  const latestFactMap = new Map(Object.entries(configBackups?.latest_facts || {}));
   const usedIpIds = new Set();
   const usedDeviceKeys = new Set();
 
@@ -607,6 +608,8 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
     const ipKey = String(managementIp || '').trim();
     const entry = configBackupMap.get(ipKey);
     const target = configBackupTargetMap.get(ipKey) || entry?.target || null;
+    const factKey = extractManagementHost(ipKey);
+    const latestFactRun = latestFactMap.get(factKey) || entry?.latest_fact_run || target?.latest_fact_run || null;
     if (!entry) {
       return {
         status: 'pending',
@@ -629,6 +632,7 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
         targetSaveBeforeBackup: target?.save_before_backup ?? true,
         targetRetentionCount: target?.retention_count || 1,
         targetError: target?.last_error || '',
+        latestFactRun,
       };
     }
     const latest = entry.latest || entry.versions?.[0] || null;
@@ -660,6 +664,25 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
       targetSaveBeforeBackup: target?.save_before_backup ?? true,
       targetRetentionCount: target?.retention_count || 1,
       targetError: target?.last_error || '',
+      latestFactRun,
+    };
+  };
+
+  const getCollectedFacts = (backup) => {
+    const latest = backup?.latestFactRun || null;
+    const facts = latest?.facts || {};
+    const hasFacts = Boolean(facts.hostname || facts.vendor || facts.model || facts.serial_number || facts.version || facts.uptime);
+    return {
+      hostname: facts.hostname || '',
+      vendor: facts.vendor || '',
+      model: facts.model || '',
+      serialNumber: facts.serial_number || '',
+      osVersion: facts.version || '',
+      uptime: facts.uptime || '',
+      collectedAt: latest?.started_at || latest?.finished_at || '',
+      detail: latest?.detail || latest?.category_label || '',
+      appliedFields: latest?.applied_fields || [],
+      hasFacts,
     };
   };
 
@@ -673,10 +696,11 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
     const status = device.status || 'unknown';
     const managementIp = device.mgmt_ip || relatedIps[0]?.ip_address || '';
     const backup = getConfigBackupState(managementIp);
+    const collectedFacts = getCollectedFacts(backup);
     const assetName = safeText(device.name, `Device ${device.id}`);
     const assetTypeInfo = classifyAssetType(device.device_type, assetName);
     const assetType = assetTypeInfo.key;
-    const assetVendor = device.brand || '';
+    const assetVendor = device.brand || collectedFacts.vendor || '';
     const automation = buildAutomationState(
       {
         name: assetName,
@@ -704,10 +728,10 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
       typeLabel: assetTypeInfo.label,
       typeGroup: assetTypeInfo.group,
       vendor: assetVendor,
-      model: device.model || '',
-      hostname: device.hostname || '',
-      osVersion: device.os_version || '',
-      serialNumber: device.sn || '',
+      model: device.model || collectedFacts.model || '',
+      hostname: device.hostname || collectedFacts.hostname || '',
+      osVersion: device.os_version || collectedFacts.osVersion || '',
+      serialNumber: device.sn || collectedFacts.serialNumber || '',
       assetTag: device.asset_tag || '',
       managementIp,
       status,
@@ -725,7 +749,12 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
       backup,
       automation,
       riskCodes,
-      updatedAt: device.updated_at || device.created_at || '',
+      factsCollectedAt: collectedFacts.collectedAt,
+      factsDetail: collectedFacts.detail,
+      factsUptime: collectedFacts.uptime,
+      factsAppliedFields: collectedFacts.appliedFields,
+      factsSource: collectedFacts.hasFacts ? 'ansible' : '',
+      updatedAt: device.updated_at || device.created_at || collectedFacts.collectedAt || '',
     };
   });
 
@@ -741,6 +770,7 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
       const credential = getSecretState(assetIpIds, null);
       const status = ip.status || 'unknown';
       const backup = getConfigBackupState(ip.ip_address);
+      const collectedFacts = getCollectedFacts(backup);
       const assetName = safeText(ip.device_name, ip.ip_address);
       const assetTypeInfo = classifyAssetType(ip.device_type, assetName);
       const assetType = assetTypeInfo.key;
@@ -770,11 +800,11 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
         rawType: ip.device_type || '',
         typeLabel: assetTypeInfo.label,
         typeGroup: assetTypeInfo.group,
-        vendor: '',
-        model: '',
-        hostname: ip.hostname || '',
-        osVersion: '',
-        serialNumber: '',
+        vendor: collectedFacts.vendor || '',
+        model: collectedFacts.model || '',
+        hostname: ip.hostname || collectedFacts.hostname || '',
+        osVersion: collectedFacts.osVersion || '',
+        serialNumber: collectedFacts.serialNumber || '',
         assetTag: '',
         managementIp: ip.ip_address || '',
         status,
@@ -792,7 +822,12 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
         backup,
         automation,
         riskCodes,
-        updatedAt: ip.last_online || '',
+        factsCollectedAt: collectedFacts.collectedAt,
+        factsDetail: collectedFacts.detail,
+        factsUptime: collectedFacts.uptime,
+        factsAppliedFields: collectedFacts.appliedFields,
+        factsSource: collectedFacts.hasFacts ? 'ansible' : '',
+        updatedAt: ip.last_online || collectedFacts.collectedAt || '',
       };
     });
 
@@ -831,6 +866,9 @@ function filterAssets(assets, filters) {
       asset.vendor,
       asset.model,
       asset.serialNumber,
+      asset.osVersion,
+      asset.factsDetail,
+      asset.factsUptime,
       asset.assetTag,
       asset.datacenterName,
       asset.rackCode,
@@ -2542,6 +2580,10 @@ function AssetDetail({
             <InfoRow label="型号" value={asset.model} />
             <InfoRow label="系统版本" value={asset.osVersion} />
             <InfoRow label="序列号" value={asset.serialNumber} mono />
+            {asset.factsCollectedAt ? (
+              <InfoRow label="最近采集" value={`${formatTime(asset.factsCollectedAt)} / ${asset.factsDetail || '采集成功'}`} />
+            ) : null}
+            {asset.factsUptime ? <InfoRow label="运行时长" value={asset.factsUptime} /> : null}
             <InfoRow label="资产编号" value={asset.assetTag} />
             <InfoRow label="机房" value={asset.datacenterName} />
             <InfoRow label="机柜位置" value={[asset.rackCode, asset.rackPosition].filter(Boolean).join(' / ')} />

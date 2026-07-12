@@ -3196,7 +3196,29 @@ def _default_ansible_managed_hosts(hosts):
     return priority or managed
 
 
-def _serialize_ansible_task_run(run):
+def _compact_ansible_result(item):
+    return {
+        'id': item.get('id') or item.get('asset_id') or item.get('target_id') or item.get('management_ip') or '',
+        'asset_id': item.get('asset_id') or '',
+        'target_id': item.get('target_id') or None,
+        'rack_device_id': item.get('rack_device_id') or None,
+        'ip_address_id': item.get('ip_address_id') or None,
+        'name': item.get('name') or '',
+        'management_ip': item.get('management_ip') or '',
+        'status': item.get('status') or '',
+        'category': item.get('category') or '',
+        'category_label': item.get('category_label') or '',
+        'detail': item.get('detail') or '',
+        'duration_seconds': item.get('duration_seconds') or 0,
+        'applied_fields': item.get('applied_fields') or [],
+        'facts': item.get('facts') or {},
+        'commands': item.get('commands') or [],
+        'rotation_steps': item.get('rotation_steps') or [],
+        'batch_size': item.get('batch_size') or 0,
+    }
+
+
+def _serialize_ansible_task_run(run, include_results=False):
     results = run.results if isinstance(run.results, list) else []
     result_summary = {}
     preview = []
@@ -3205,24 +3227,11 @@ def _serialize_ansible_task_run(run):
             continue
         key = item.get('category') or item.get('status') or 'other'
         result_summary[key] = result_summary.get(key, 0) + 1
+        if item.get('applied_fields'):
+            result_summary['written_back'] = result_summary.get('written_back', 0) + 1
         if len(preview) < 6:
-            preview.append(
-                {
-                    'id': item.get('id') or item.get('asset_id') or item.get('target_id') or len(preview) + 1,
-                    'name': item.get('name') or '',
-                    'management_ip': item.get('management_ip') or '',
-                    'status': item.get('status') or '',
-                    'category': item.get('category') or '',
-                    'category_label': item.get('category_label') or '',
-                    'detail': item.get('detail') or '',
-                    'duration_seconds': item.get('duration_seconds') or 0,
-                    'applied_fields': item.get('applied_fields') or [],
-                    'facts': item.get('facts') or {},
-                    'rotation_steps': item.get('rotation_steps') or [],
-                    'batch_size': item.get('batch_size') or 0,
-                }
-            )
-    return {
+            preview.append(_compact_ansible_result(item))
+    payload = {
         'id': run.id,
         'action': run.action,
         'action_label': dict(AnsibleTaskRun.ACTION_CHOICES).get(run.action, run.action),
@@ -3246,6 +3255,79 @@ def _serialize_ansible_task_run(run):
         },
         'results_preview': preview,
     }
+    if include_results:
+        payload['results'] = [_compact_ansible_result(item) for item in results if isinstance(item, dict)]
+    return payload
+
+
+def _ansible_identity_keys(row):
+    keys = []
+    for key in ('id', 'asset_id'):
+        value = row.get(key)
+        if value:
+            keys.append(str(value))
+    if row.get('target_id'):
+        keys.append(f'target-{row["target_id"]}')
+    if row.get('rack_device_id'):
+        keys.append(f'device-{row["rack_device_id"]}')
+    if row.get('ip_address_id'):
+        keys.append(f'ip-{row["ip_address_id"]}')
+    management_ip = _extract_management_host(row.get('management_ip'))
+    if management_ip:
+        keys.append(f'mgmt:{management_ip}')
+    return list(dict.fromkeys(keys))
+
+
+def _latest_ansible_fact_results_by_host(limit=20):
+    latest = {}
+    runs = AnsibleTaskRun.objects.filter(action='facts_collect').order_by('-started_at', '-id')[:limit]
+    for run in runs:
+        results = run.results if isinstance(run.results, list) else []
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            compact = _compact_ansible_result(item)
+            compact.update(
+                {
+                    'run_id': run.id,
+                    'run_status': run.status,
+                    'run_status_label': dict(AnsibleTaskRun.STATUS_CHOICES).get(run.status, run.status),
+                    'started_at': run.started_at.isoformat() if run.started_at else '',
+                    'finished_at': run.finished_at.isoformat() if run.finished_at else '',
+                    'actor_name': run.actor_name,
+                }
+            )
+            for key in _ansible_identity_keys(item):
+                latest.setdefault(key, compact)
+    return latest
+
+
+def _attach_latest_fact_results(hosts):
+    latest_results = _latest_ansible_fact_results_by_host()
+    for row in hosts:
+        row['latest_fact_run'] = next(
+            (latest_results[key] for key in _ansible_identity_keys(row) if key in latest_results),
+            None,
+        )
+
+
+def _ansible_fact_value(row, key):
+    asset_facts = row.get('asset_facts') or {}
+    latest = row.get('latest_fact_run') or {}
+    collected_facts = latest.get('facts') or {}
+    aliases = {
+        'brand': ('brand', 'vendor'),
+        'os_version': ('os_version', 'version'),
+    }
+    for candidate in aliases.get(key, (key,)):
+        value = asset_facts.get(candidate) or collected_facts.get(candidate)
+        if value:
+            return value
+    return ''
+
+
+def _ansible_host_has_facts(row):
+    return any(_ansible_fact_value(row, key) for key in ('hostname', 'model', 'serial_number', 'os_version', 'brand'))
 
 
 def _record_ansible_task_run(request, action, counters, results, detail, started_at=None):
@@ -3365,6 +3447,7 @@ def _apply_ansible_facts_to_asset(row, facts, overwrite=False):
 
 def _ansible_summary_payload(scope='managed'):
     all_hosts = _build_ansible_hosts()
+    _attach_latest_fact_results(all_hosts)
     all_managed_pool = [row for row in all_hosts if row.get('managed')]
     priority_pool = [row for row in all_managed_pool if row.get('priority_managed')]
     managed_pool = priority_pool or all_managed_pool
@@ -3377,7 +3460,7 @@ def _ansible_summary_payload(scope='managed'):
     credential_missing = [row for row in hosts if not row.get('credential_id')]
     backup_missing = [row for row in hosts if not row.get('backup_target_id')]
     failed = [row for row in hosts if row.get('backup_status') == 'failed' or row.get('last_job_detail')]
-    facts_collected = [row for row in hosts if any((row.get('asset_facts') or {}).get(key) for key in ('hostname', 'model', 'serial_number', 'os_version', 'brand'))]
+    facts_collected = [row for row in hosts if _ansible_host_has_facts(row)]
     groups = {}
     for row in hosts:
         for group in row.get('groups') or []:
@@ -3419,6 +3502,14 @@ def ansible_summary(request):
     if scope not in ('managed', 'all'):
         scope = 'managed'
     return Response(_ansible_summary_payload(scope=scope))
+
+
+@api_view(['GET'])
+@authentication_classes((SessionAuthentication, BasicAuthentication))
+@permission_classes([DcimAccessPermission])
+def ansible_task_run_detail(request, run_id):
+    run = get_object_or_404(AnsibleTaskRun, pk=run_id)
+    return Response({'run': _serialize_ansible_task_run(run, include_results=True)})
 
 
 @api_view(['POST'])
@@ -5045,10 +5136,19 @@ def config_backup_summary(request):
     files = collect_config_backup_files(backup_dir)
     payload = build_config_backup_summary(files, backup_dir)
     policy = get_or_create_config_backup_policy()
+    latest_fact_results = _latest_ansible_fact_results_by_host()
+    latest_facts_by_ip = {}
+    for key, result in latest_fact_results.items():
+        if not key.startswith('mgmt:'):
+            continue
+        management_ip = _extract_management_host(result.get('management_ip'))
+        if management_ip:
+            latest_facts_by_ip.setdefault(management_ip, result)
     payload['container_storage_path'] = backup_dir
     payload['host_storage_path'] = host_backup_dir
     payload['policy'] = ConfigBackupPolicySerializer(policy).data
     payload['targets'] = {}
+    payload['latest_facts'] = latest_facts_by_ip
     targets = ConfigBackupTarget.objects.select_related(
         'rack_device',
         'rack_device__rack',
@@ -5061,6 +5161,10 @@ def config_backup_summary(request):
     for target in targets:
         target_payload = ConfigBackupTargetSerializer(target, context={'request': request}).data
         ip_key = str(target.management_ip)
+        fact_key = _extract_management_host(ip_key)
+        latest_fact = latest_facts_by_ip.get(fact_key)
+        if latest_fact:
+            target_payload['latest_fact_run'] = latest_fact
         payload['targets'][ip_key] = target_payload
         device_group = payload['devices'].setdefault(
             ip_key,
@@ -5073,6 +5177,8 @@ def config_backup_summary(request):
             },
         )
         device_group['target'] = target_payload
+        if latest_fact:
+            device_group['latest_fact_run'] = latest_fact
         db_versions = list(target.versions.all().order_by('-started_at', '-id')[:20])
         if db_versions and (latest_db_version is None or db_versions[0].started_at > latest_db_version.started_at):
             latest_db_version = db_versions[0]
@@ -5081,6 +5187,11 @@ def config_backup_summary(request):
             device_group['versions'] = serialized_versions
             device_group['version_count'] = len(serialized_versions)
             device_group['latest'] = serialized_versions[0]
+    for ip_key, device_group in payload.get('devices', {}).items():
+        fact_key = _extract_management_host(ip_key)
+        latest_fact = latest_facts_by_ip.get(fact_key)
+        if latest_fact and not device_group.get('latest_fact_run'):
+            device_group['latest_fact_run'] = latest_fact
     payload['target_count'] = len(payload['targets'])
     payload['enabled_target_count'] = sum(1 for target in targets if target.enabled)
     payload['total_devices'] = len(payload['devices'])
