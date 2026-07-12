@@ -3637,6 +3637,102 @@ def ansible_task_run_detail(request, run_id):
 @api_view(['POST'])
 @authentication_classes((SessionAuthentication, BasicAuthentication))
 @permission_classes([DcimAccessPermission])
+def ansible_task_run_writeback(request, run_id):
+    if get_user_role(request.user) not in ANSIBLE_MANAGE_ROLES:
+        raise PermissionDenied('当前角色无权确认回写设备采集信息。')
+
+    run = get_object_or_404(AnsibleTaskRun, pk=run_id)
+    results = run.results if isinstance(run.results, list) else []
+    mode = str(request.data.get('mode') or '').strip().lower()
+    overwrite = mode in ('all', 'overwrite', 'confirmed') or _coerce_bool(request.data.get('overwrite'), False)
+    if mode not in ('writeable', 'all', 'overwrite', 'confirmed'):
+        mode = 'overwrite' if overwrite else 'writeable'
+
+    raw_ids = request.data.get('result_ids') or request.data.get('host_ids') or []
+    if isinstance(raw_ids, str):
+        raw_ids = [raw_ids]
+    selected_ids = {str(item) for item in raw_ids if item not in (None, '')}
+
+    counters = {
+        'total': 0,
+        'changed': 0,
+        'applied_fields': 0,
+        'skipped': 0,
+        'remaining_conflicts': 0,
+    }
+    updated_results = []
+    actor_name = request.user.get_username() if request.user.is_authenticated else 'system'
+    confirmed_at = timezone.now().isoformat()
+
+    for item in results:
+        if not isinstance(item, dict):
+            updated_results.append(item)
+            continue
+        identity_keys = set(_ansible_identity_keys(item))
+        identity_keys.add(str(item.get('id') or ''))
+        if selected_ids and identity_keys.isdisjoint(selected_ids):
+            updated_results.append(item)
+            continue
+
+        facts = item.get('facts') or {}
+        if not facts:
+            counters['skipped'] += 1
+            updated_results.append(item)
+            continue
+
+        before_preview = _ansible_fact_writeback_preview(item, facts, overwrite=overwrite)
+        before_summary = before_preview.get('summary') or {}
+        if not int(before_summary.get('changes') or 0):
+            counters['skipped'] += 1
+            item['writeback_preview'] = before_preview
+            updated_results.append(item)
+            continue
+
+        counters['total'] += 1
+        applied_fields = _apply_ansible_facts_to_asset(item, facts, overwrite=overwrite)
+        after_preview = _ansible_fact_writeback_preview(item, facts, overwrite=overwrite)
+        after_summary = after_preview.get('summary') or {}
+        merged_fields = sorted(set([*(item.get('applied_fields') or []), *applied_fields]))
+        existing_policy = item.get('writeback_policy') if isinstance(item.get('writeback_policy'), dict) else {}
+        item['applied_fields'] = merged_fields
+        item['writeback_preview'] = after_preview
+        item['writeback_policy'] = {
+            **existing_policy,
+            'write_back': True,
+            'overwrite': overwrite,
+            'confirmed': True,
+            'confirmed_at': confirmed_at,
+            'confirmed_by': actor_name,
+            'mode': mode,
+        }
+        item['confirmed_writeback'] = {
+            'applied_fields': applied_fields,
+            'before_summary': before_summary,
+            'after_summary': after_summary,
+        }
+        if applied_fields:
+            counters['changed'] += 1
+            counters['applied_fields'] += len(applied_fields)
+        counters['remaining_conflicts'] += int(after_summary.get('conflicts') or 0)
+        updated_results.append(item)
+
+    run.results = updated_results
+    run.save(update_fields=['results'])
+    detail = f'确认回写 Ansible 采集差异：处理 {counters["total"]}，变更 {counters["changed"]}，剩余待确认 {counters["remaining_conflicts"]}'
+    record_audit(request, 'ansible', 'facts_writeback', detail=detail)
+    return Response(
+        {
+            'status': 'success',
+            'mode': mode,
+            'summary': counters,
+            'run': _serialize_ansible_task_run(run, include_results=True),
+        }
+    )
+
+
+@api_view(['POST'])
+@authentication_classes((SessionAuthentication, BasicAuthentication))
+@permission_classes([DcimAccessPermission])
 def ansible_test(request):
     if get_user_role(request.user) not in ANSIBLE_MANAGE_ROLES:
         raise PermissionDenied('当前角色无权执行 Ansible 登录测试。')

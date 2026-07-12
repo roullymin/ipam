@@ -409,6 +409,7 @@ export default function AnsibleCenterView() {
   const [lastAction, setLastAction] = useState(null);
   const [selectedRunDetail, setSelectedRunDetail] = useState(null);
   const [runDetailLoading, setRunDetailLoading] = useState(0);
+  const [writebackLoading, setWritebackLoading] = useState(0);
   const [testMode, setTestMode] = useState('login');
   const [scope, setScope] = useState('managed');
   const [rotationBatchSize, setRotationBatchSize] = useState(1);
@@ -583,6 +584,38 @@ export default function AnsibleCenterView() {
     }
   };
 
+  const confirmRunWriteback = async (run, overwrite = true) => {
+    if (!run?.id) return;
+    setWritebackLoading(run.id);
+    setError('');
+    setNotice('');
+    try {
+      const response = await safeFetch(`/api/ansible/runs/${run.id}/writeback/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: overwrite ? 'overwrite' : 'writeable' }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.detail || payload.message || '确认回写采集信息失败');
+      }
+      const updatedRun = payload.run || run;
+      setSelectedRunDetail(updatedRun);
+      setLastAction({
+        type: 'writeback',
+        summary: payload.summary || updatedRun.summary || {},
+        results: asArray(updatedRun.results),
+        run: updatedRun,
+      });
+      setNotice(`采集信息已回写：处理 ${payload.summary?.total ?? 0}，变更 ${payload.summary?.changed ?? 0}。`);
+      await loadSummary();
+    } catch (writebackError) {
+      setError(writebackError.message || '确认回写采集信息失败');
+    } finally {
+      setWritebackLoading(0);
+    }
+  };
+
   const copyInventory = async () => {
     const text = summary.inventory || '';
     if (!text) {
@@ -652,6 +685,10 @@ export default function AnsibleCenterView() {
   const inventoryText = summary.inventory || '# 暂无已纳管并绑定凭据的主机';
   const latestResults = asArray(lastAction?.results).slice(0, 10);
   const recentRuns = asArray(summary.recent_runs);
+  const runNeedsWriteback = (run) => {
+    const runSummary = run?.summary || {};
+    return Number(runSummary.proposed_changes || 0) > 0 || Number(runSummary.writeback_conflicts || 0) > 0;
+  };
   const factsSummary = useMemo(() => {
     const collected = Number.isFinite(Number(stats.facts_collected))
       ? Number(stats.facts_collected)
@@ -972,9 +1009,20 @@ export default function AnsibleCenterView() {
                           {formatRunTime(lastAction.run?.started_at)} · {safeText(lastAction.run?.actor_name, '系统')} · 耗时 {lastAction.run?.duration_seconds || 0}s
                         </div>
                       </div>
-                      <StatusPill tone={lastAction.run?.status === 'success' ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-200' : lastAction.run?.status === 'partial' ? 'border-amber-400/40 bg-amber-400/10 text-amber-200' : 'border-rose-400/40 bg-rose-400/10 text-rose-200'}>
-                        {lastAction.run?.status_label || lastAction.run?.status || '已记录'}
-                      </StatusPill>
+                      <div className="flex shrink-0 items-center gap-2">
+                        {runNeedsWriteback(lastAction.run) ? (
+                          <ActionButton
+                            icon={CheckCircle2}
+                            loading={writebackLoading === lastAction.run?.id}
+                            onClick={() => confirmRunWriteback(lastAction.run, true)}
+                          >
+                            确认回写
+                          </ActionButton>
+                        ) : null}
+                        <StatusPill tone={lastAction.run?.status === 'success' ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-200' : lastAction.run?.status === 'partial' ? 'border-amber-400/40 bg-amber-400/10 text-amber-200' : 'border-rose-400/40 bg-rose-400/10 text-rose-200'}>
+                          {lastAction.run?.status_label || lastAction.run?.status || '已记录'}
+                        </StatusPill>
+                      </div>
                     </div>
                   </div>
                   <RunMetricGrid summary={lastAction.summary} />
@@ -1035,9 +1083,20 @@ export default function AnsibleCenterView() {
                             {formatRunTime(selectedRunDetail.started_at)} · 目标 {selectedRunDetail.total} · 耗时 {selectedRunDetail.duration_seconds || 0}s
                           </div>
                         </div>
-                        <StatusPill tone={selectedRunDetail.status === 'success' ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-200' : selectedRunDetail.status === 'partial' ? 'border-amber-400/40 bg-amber-400/10 text-amber-200' : 'border-rose-400/40 bg-rose-400/10 text-rose-200'}>
-                          {selectedRunDetail.status_label || selectedRunDetail.status}
-                        </StatusPill>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {runNeedsWriteback(selectedRunDetail) ? (
+                            <ActionButton
+                              icon={CheckCircle2}
+                              loading={writebackLoading === selectedRunDetail.id}
+                              onClick={() => confirmRunWriteback(selectedRunDetail, true)}
+                            >
+                              确认回写
+                            </ActionButton>
+                          ) : null}
+                          <StatusPill tone={selectedRunDetail.status === 'success' ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-200' : selectedRunDetail.status === 'partial' ? 'border-amber-400/40 bg-amber-400/10 text-amber-200' : 'border-rose-400/40 bg-rose-400/10 text-rose-200'}>
+                            {selectedRunDetail.status_label || selectedRunDetail.status}
+                          </StatusPill>
+                        </div>
                       </div>
                       <div className="mt-3">
                         <RunMetricGrid summary={selectedRunDetail.summary} />

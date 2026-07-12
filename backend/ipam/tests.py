@@ -252,6 +252,78 @@ class AnsibleFactWriteBackTests(APITestCase):
         self.assertIn('hostname', applied)
         self.assertIn('os_version', applied)
 
+    def test_confirm_fact_writeback_overwrites_conflicting_asset_fields(self):
+        admin = User.objects.create_user(username='admin', password='pass12345', is_staff=True)
+        UserProfile.objects.create(user=admin, role='admin', display_name='Admin')
+        self.client.force_login(admin)
+        datacenter = Datacenter.objects.create(name='7F')
+        rack = Rack.objects.create(datacenter=datacenter, code='R04', height=42)
+        device = RackDevice.objects.create(
+            rack=rack,
+            name='Core switch',
+            position=42,
+            u_height=1,
+            device_type='switch_core',
+            mgmt_ip='172.25.254.254',
+            brand='Huawei',
+            model='OldModel',
+            hostname='old-host',
+            os_version='OldVersion',
+        )
+        row = {
+            'id': f'device-{device.id}',
+            'rack_device_id': device.id,
+            'name': device.name,
+            'management_ip': device.mgmt_ip,
+        }
+        facts = {
+            'vendor': 'H3C',
+            'model': 'S5560X-30F-EI',
+            'hostname': 'Core-SW',
+            'serial_number': '219801A2ABC0Q100002',
+            'version': 'H3C Comware Software, Version 7.1.070',
+            'management_ip': '172.25.254.254',
+        }
+        run = AnsibleTaskRun.objects.create(
+            action='facts_collect',
+            status='success',
+            total=1,
+            success_count=1,
+            failed_count=0,
+            skipped_count=0,
+            actor=admin,
+            actor_name='admin',
+            detail='facts',
+            results=[
+                {
+                    **row,
+                    'status': 'success',
+                    'category': 'success',
+                    'facts': facts,
+                    'writeback_preview': _ansible_fact_writeback_preview(row, facts),
+                    'applied_fields': [],
+                }
+            ],
+            started_at=timezone.now(),
+            finished_at=timezone.now(),
+        )
+
+        response = self.client.post(
+            f'/api/ansible/runs/{run.id}/writeback/',
+            {'mode': 'overwrite'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['summary']['changed'], 1)
+        self.assertEqual(response.data['run']['summary'].get('writeback_conflicts', 0), 0)
+        device.refresh_from_db()
+        self.assertEqual(device.brand, 'H3C')
+        self.assertEqual(device.model, 'S5560X-30F-EI')
+        self.assertEqual(device.hostname, 'Core-SW')
+        self.assertEqual(device.os_version, 'H3C Comware Software, Version 7.1.070')
+        self.assertEqual(device.sn, '219801A2ABC0Q100002')
+
 
 class BaseApiTestCase(APITestCase):
     @classmethod
