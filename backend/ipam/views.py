@@ -3211,6 +3211,8 @@ def _compact_ansible_result(item):
         'detail': item.get('detail') or '',
         'duration_seconds': item.get('duration_seconds') or 0,
         'applied_fields': item.get('applied_fields') or [],
+        'writeback_preview': item.get('writeback_preview') or {},
+        'writeback_policy': item.get('writeback_policy') or {},
         'facts': item.get('facts') or {},
         'commands': item.get('commands') or [],
         'rotation_steps': item.get('rotation_steps') or [],
@@ -3229,6 +3231,11 @@ def _serialize_ansible_task_run(run, include_results=False):
         result_summary[key] = result_summary.get(key, 0) + 1
         if item.get('applied_fields'):
             result_summary['written_back'] = result_summary.get('written_back', 0) + 1
+        writeback_preview = item.get('writeback_preview') or {}
+        writeback_summary = writeback_preview.get('summary') if isinstance(writeback_preview, dict) else {}
+        if isinstance(writeback_summary, dict):
+            result_summary['proposed_changes'] = result_summary.get('proposed_changes', 0) + int(writeback_summary.get('changes') or 0)
+            result_summary['writeback_conflicts'] = result_summary.get('writeback_conflicts', 0) + int(writeback_summary.get('conflicts') or 0)
         if len(preview) < 6:
             preview.append(_compact_ansible_result(item))
     payload = {
@@ -3445,6 +3452,121 @@ def _apply_ansible_facts_to_asset(row, facts, overwrite=False):
     return sorted(set(applied))
 
 
+def _ansible_fact_writeback_preview(row, facts, overwrite=False):
+    facts = facts or {}
+    changes = []
+    rack_device = RackDevice.objects.filter(pk=row.get('rack_device_id')).first() if row.get('rack_device_id') else None
+    ip_asset = IPAddress.objects.filter(pk=row.get('ip_address_id')).first() if row.get('ip_address_id') else None
+    management_ips = []
+    for value in (facts.get('management_ip'), row.get('management_ip')):
+        host = _extract_management_host(value)
+        if host and host not in management_ips:
+            management_ips.append(host)
+
+    reason_labels = {
+        'empty_current': '台账为空，可回写',
+        'overwrite': '覆盖模式，将回写',
+        'invalid_current': '台账脏值，将修正',
+        'different_existing': '台账已有不同值，需确认',
+        'status_refresh': '状态刷新',
+    }
+
+    def normalize_value(value):
+        return str(value or '').strip()
+
+    def append_change(target, target_id, target_name, field, label, current, collected, will_write, reason):
+        current = normalize_value(current)
+        collected = normalize_value(collected)
+        if current == collected:
+            return
+        if not collected and reason != 'invalid_current':
+            return
+        changes.append(
+            {
+                'target': target,
+                'target_id': target_id,
+                'target_name': target_name or '',
+                'field': field,
+                'label': label,
+                'current': current,
+                'collected': collected,
+                'will_write': bool(will_write),
+                'reason': reason,
+                'reason_label': reason_labels.get(reason, reason),
+            }
+        )
+
+    def evaluate_field(instance, target, field, label, collected):
+        if instance is None:
+            return
+        current = normalize_value(getattr(instance, field, '') or '')
+        collected = normalize_value(collected)
+        if field == 'sn' and current and not _is_valid_serial_number(current):
+            cleaned = collected if collected and _is_valid_serial_number(collected) else ''
+            append_change(target, instance.id, getattr(instance, 'name', ''), field, label, current, cleaned, True, 'invalid_current')
+            return
+        if not collected or current == collected:
+            return
+        if overwrite:
+            append_change(target, instance.id, getattr(instance, 'name', ''), field, label, current, collected, True, 'overwrite')
+        elif not current:
+            append_change(target, instance.id, getattr(instance, 'name', ''), field, label, current, collected, True, 'empty_current')
+        else:
+            append_change(target, instance.id, getattr(instance, 'name', ''), field, label, current, collected, False, 'different_existing')
+
+    rack_devices = []
+    seen_device_ids = set()
+    if rack_device is not None:
+        rack_devices.append(rack_device)
+        seen_device_ids.add(rack_device.id)
+    if management_ips:
+        for device in RackDevice.objects.filter(mgmt_ip__in=management_ips).order_by('id'):
+            if device.id in seen_device_ids:
+                continue
+            rack_devices.append(device)
+            seen_device_ids.add(device.id)
+
+    for device in rack_devices:
+        for field, label, value in (
+            ('brand', '厂商', facts.get('vendor')),
+            ('model', '型号', facts.get('model')),
+            ('hostname', '主机名', facts.get('hostname')),
+            ('sn', '序列号', facts.get('serial_number')),
+            ('os_version', '系统版本', facts.get('version')),
+            ('mgmt_ip', '管理 IP', management_ips[0] if management_ips else facts.get('management_ip')),
+        ):
+            evaluate_field(device, 'rack_device', field, label, value)
+
+    ip_assets = []
+    seen_ip_ids = set()
+    if ip_asset is not None:
+        ip_assets.append(ip_asset)
+        seen_ip_ids.add(ip_asset.id)
+    if management_ips:
+        for asset in IPAddress.objects.filter(ip_address__in=management_ips).order_by('id'):
+            if asset.id in seen_ip_ids:
+                continue
+            ip_assets.append(asset)
+            seen_ip_ids.add(asset.id)
+
+    for asset in ip_assets:
+        if facts.get('hostname'):
+            evaluate_field(asset, 'ip_address', 'device_name', 'IP 设备名', facts.get('hostname'))
+        if asset.status != 'online':
+            append_change('ip_address', asset.id, asset.ip_address, 'status', 'IP 状态', asset.status, 'online', True, 'status_refresh')
+
+    return {
+        'overwrite': bool(overwrite),
+        'changes': changes,
+        'summary': {
+            'changes': len(changes),
+            'writeable': len([item for item in changes if item.get('will_write')]),
+            'conflicts': len([item for item in changes if not item.get('will_write')]),
+            'targets': len(set((item.get('target'), item.get('target_id')) for item in changes)),
+        },
+    }
+
+
 def _ansible_summary_payload(scope='managed'):
     all_hosts = _build_ansible_hosts()
     _attach_latest_fact_results(all_hosts)
@@ -3643,7 +3765,9 @@ def ansible_collect_facts(request):
                 timeout_seconds=row.get('timeout_seconds') or 30,
                 command_profile=row.get('command_profile') or 'huawei_vrp',
             )
-            applied_fields = _apply_ansible_facts_to_asset(row, payload.get('facts') or {}, overwrite=overwrite) if write_back else []
+            facts = payload.get('facts') or {}
+            writeback_preview = _ansible_fact_writeback_preview(row, facts, overwrite=overwrite)
+            applied_fields = _apply_ansible_facts_to_asset(row, facts, overwrite=overwrite) if write_back else []
             if applied_fields:
                 counters['written_back'] += 1
             counters['success'] += 1
@@ -3656,8 +3780,10 @@ def ansible_collect_facts(request):
                     'detail': payload.get('message') or '设备信息采集成功。',
                     'duration_seconds': payload.get('duration_seconds', 0),
                     'commands': payload.get('commands') or [],
-                    'facts': payload.get('facts') or {},
+                    'facts': facts,
                     'applied_fields': applied_fields,
+                    'writeback_preview': writeback_preview,
+                    'writeback_policy': {'write_back': write_back, 'overwrite': overwrite},
                     'username': payload.get('username') or credential.username_hint,
                 }
             )

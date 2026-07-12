@@ -95,6 +95,8 @@ const RUN_METRIC_LABELS = {
   created: '新增',
   updated: '更新',
   written_back: '回写档案',
+  proposed_changes: '采集差异',
+  writeback_conflicts: '待确认',
   auth_failed: '认证失败',
   timeout: '超时',
   refused: '端口拒绝',
@@ -113,6 +115,8 @@ const RUN_METRIC_ORDER = [
   'created',
   'updated',
   'written_back',
+  'proposed_changes',
+  'writeback_conflicts',
   'failed',
   'skipped',
   'auth_failed',
@@ -132,6 +136,14 @@ const FACT_FIELD_LABELS = {
   version: '系统版本',
   uptime: '运行时长',
   management_ip: '管理 IP',
+};
+
+const WRITEBACK_REASON_TONES = {
+  empty_current: 'border-cyan-400/30 bg-cyan-400/10 text-cyan-100',
+  overwrite: 'border-blue-400/30 bg-blue-400/10 text-blue-100',
+  invalid_current: 'border-amber-400/35 bg-amber-400/10 text-amber-100',
+  status_refresh: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100',
+  different_existing: 'border-violet-400/35 bg-violet-400/10 text-violet-100',
 };
 
 const formatRunTime = (value) => {
@@ -228,6 +240,9 @@ function ResultLine({ result }) {
   const facts = result.facts || {};
   const appliedFields = asArray(result.applied_fields);
   const rotationSteps = asArray(result.rotation_steps);
+  const writebackPreview = result.writeback_preview || {};
+  const writebackSummary = writebackPreview.summary || {};
+  const writebackChanges = asArray(writebackPreview.changes);
   return (
     <div className="rounded-xl border border-slate-700/60 bg-slate-950/35 px-3 py-3">
       <div className="flex items-start justify-between gap-3">
@@ -265,6 +280,32 @@ function ResultLine({ result }) {
                 <div className="truncate text-[11px] font-black text-slate-200">{value}</div>
               </div>
             ))}
+        </div>
+      ) : null}
+      {writebackChanges.length ? (
+        <div className="mt-2 rounded-lg border border-violet-400/20 bg-violet-400/[0.05] p-2">
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-black text-violet-100">
+            <span>采集差异 {writebackSummary.changes || writebackChanges.length}</span>
+            <StatusPill tone="border-cyan-400/30 bg-cyan-400/10 text-cyan-100">可回写 {writebackSummary.writeable || 0}</StatusPill>
+            <StatusPill tone="border-amber-400/35 bg-amber-400/10 text-amber-100">待确认 {writebackSummary.conflicts || 0}</StatusPill>
+          </div>
+          <div className="mt-2 space-y-1">
+            {writebackChanges.slice(0, 4).map((change, index) => (
+              <div key={`${change.target}-${change.target_id}-${change.field}-${index}`} className="rounded-md border border-slate-700/50 bg-slate-950/35 px-2 py-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-black text-slate-100">{change.label || change.field}</span>
+                  <StatusPill tone={WRITEBACK_REASON_TONES[change.reason] || 'border-slate-400/30 bg-slate-400/10 text-slate-200'}>
+                    {change.reason_label || (change.will_write ? '将回写' : '待确认')}
+                  </StatusPill>
+                </div>
+                <div className="mt-1 grid grid-cols-[1fr_auto_1fr] items-center gap-1 text-[10px] font-semibold text-slate-400">
+                  <span className="truncate">{safeText(change.current, '空')}</span>
+                  <span className="text-cyan-200">→</span>
+                  <span className="truncate text-slate-200">{safeText(change.collected, '空')}</span>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       ) : null}
       {appliedFields.length ? (
@@ -341,6 +382,18 @@ function FactCell({ host }) {
   );
 }
 
+function FactDiffHint({ diffCount, conflictCount }) {
+  if (!diffCount) return null;
+  return (
+    <div className={cx(
+      'max-w-[220px] truncate text-[10px] font-black',
+      conflictCount ? 'text-amber-200' : 'text-violet-200',
+    )}>
+      采集差异 {diffCount} · 待确认 {conflictCount}
+    </div>
+  );
+}
+
 export default function AnsibleCenterView() {
   const [summary, setSummary] = useState(EMPTY_SUMMARY);
   const [loading, setLoading] = useState(false);
@@ -404,6 +457,7 @@ export default function AnsibleCenterView() {
       if (groupFilter !== 'all' && !asArray(host.groups).includes(groupFilter)) return false;
       if (factsFilter === 'collected' && !hasAssetFacts(host)) return false;
       if (factsFilter === 'missing' && hasAssetFacts(host)) return false;
+      if (factsFilter === 'diff' && !Number(host.latest_fact_run?.writeback_preview?.summary?.changes || 0)) return false;
       if (!query) return true;
       const displayFacts = getDisplayFacts(host);
       const latestFactRun = host.latest_fact_run || {};
@@ -772,6 +826,7 @@ export default function AnsibleCenterView() {
                   <option value="all">全部档案</option>
                   <option value="collected">已采集档案</option>
                   <option value="missing">待采集档案</option>
+                  <option value="diff">有采集差异</option>
                 </select>
                 <select
                   value={groupFilter}
@@ -829,6 +884,10 @@ export default function AnsibleCenterView() {
                         </td>
                         <td className="px-4 py-3">
                           <FactCell host={host} />
+                          <FactDiffHint
+                            diffCount={Number(host.latest_fact_run?.writeback_preview?.summary?.changes || 0)}
+                            conflictCount={Number(host.latest_fact_run?.writeback_preview?.summary?.conflicts || 0)}
+                          />
                         </td>
                         <td className="px-4 py-3">
                           <StatusPill tone={getStatusTone(status)}>{STATUS_LABELS[status] || status}</StatusPill>

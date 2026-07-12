@@ -19,7 +19,12 @@ from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from .domains.config_backup.services import _parse_device_facts
-from .views import _apply_ansible_facts_to_asset, _default_ansible_managed_hosts, _is_priority_ansible_credential
+from .views import (
+    _apply_ansible_facts_to_asset,
+    _ansible_fact_writeback_preview,
+    _default_ansible_managed_hosts,
+    _is_priority_ansible_credential,
+)
 from .models import (
     AnsibleTaskRun,
     Blocklist,
@@ -210,20 +215,32 @@ class AnsibleFactWriteBackTests(APITestCase):
             sn='of',
         )
 
-        applied = _apply_ansible_facts_to_asset(
-            {
-                'rack_device_id': linked.id,
-                'management_ip': '172.25.254.254',
-            },
-            {
-                'vendor': 'H3C',
-                'model': 'S5560X-30F-EI',
-                'hostname': 'Core-SW',
-                'serial_number': '219801A2ABC0Q100002',
-                'version': 'H3C Comware Software, Version 7.1.070',
-                'management_ip': '172.25.254.254',
-            },
+        row = {
+            'rack_device_id': linked.id,
+            'management_ip': '172.25.254.254',
+        }
+        facts = {
+            'vendor': 'H3C',
+            'model': 'S5560X-30F-EI',
+            'hostname': 'Core-SW',
+            'serial_number': '219801A2ABC0Q100002',
+            'version': 'H3C Comware Software, Version 7.1.070',
+            'management_ip': '172.25.254.254',
+        }
+
+        preview = _ansible_fact_writeback_preview(row, facts)
+        self.assertGreater(preview['summary']['writeable'], 0)
+        self.assertTrue(
+            any(
+                change['target'] == 'rack_device'
+                and change['target_id'] == duplicate.id
+                and change['field'] == 'sn'
+                and change['will_write']
+                for change in preview['changes']
+            )
         )
+
+        applied = _apply_ansible_facts_to_asset(row, facts)
 
         linked.refresh_from_db()
         duplicate.refresh_from_db()

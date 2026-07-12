@@ -12,6 +12,7 @@ from ipam.domains.vault.services import VaultError, read_secret
 from ipam.models import AnsibleTaskRun, SecretRecord
 from ipam.views import (
     _apply_ansible_facts_to_asset,
+    _ansible_fact_writeback_preview,
     _build_ansible_hosts,
     _classify_login_failure,
     _default_ansible_managed_hosts,
@@ -96,8 +97,10 @@ class Command(BaseCommand):
                     timeout_seconds=row.get('timeout_seconds') or 30,
                     command_profile=row.get('command_profile') or 'huawei_vrp',
                 )
+                facts = payload.get('facts') or {}
+                writeback_preview = _ansible_fact_writeback_preview(row, facts, overwrite=options['overwrite'])
                 applied_fields = (
-                    _apply_ansible_facts_to_asset(row, payload.get('facts') or {}, overwrite=options['overwrite'])
+                    _apply_ansible_facts_to_asset(row, facts, overwrite=options['overwrite'])
                     if write_back
                     else []
                 )
@@ -113,8 +116,10 @@ class Command(BaseCommand):
                         'detail': payload.get('message') or '设备信息采集成功。',
                         'duration_seconds': payload.get('duration_seconds', 0),
                         'commands': payload.get('commands') or [],
-                        'facts': payload.get('facts') or {},
+                        'facts': facts,
                         'applied_fields': applied_fields,
+                        'writeback_preview': writeback_preview,
+                        'writeback_policy': {'write_back': write_back, 'overwrite': options['overwrite']},
                         'username': payload.get('username') or credential.username_hint,
                     }
                 )
