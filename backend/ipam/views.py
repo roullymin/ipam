@@ -3372,6 +3372,14 @@ def _record_ansible_task_run(request, action, counters, results, detail, started
     return run
 
 
+def _is_blank_inventory_value(value):
+    text = str(value or '').strip()
+    if not text:
+        return True
+    normalized = text.lower()
+    return normalized in {'-', '--', '—', 'null', 'none', 'undefined', 'n/a', 'na'} or text in {'无', '暂无', '未填写', '未采集'}
+
+
 def _apply_ansible_facts_to_asset(row, facts, overwrite=False):
     applied = []
     rack_device = RackDevice.objects.filter(pk=row.get('rack_device_id')).first() if row.get('rack_device_id') else None
@@ -3387,12 +3395,13 @@ def _apply_ansible_facts_to_asset(row, facts, overwrite=False):
             return False
         value = str(value or '').strip()
         current = str(getattr(instance, field, '') or '').strip()
-        if field == 'sn' and current and not _is_valid_serial_number(current):
+        current_is_blank = _is_blank_inventory_value(current)
+        if field == 'sn' and current and not current_is_blank and not _is_valid_serial_number(current):
             setattr(instance, field, value if value and _is_valid_serial_number(value) else '')
             return True
         if not value:
             return False
-        if overwrite or not current:
+        if overwrite or current_is_blank:
             setattr(instance, field, value)
             return True
         return False
@@ -3439,7 +3448,7 @@ def _apply_ansible_facts_to_asset(row, facts, overwrite=False):
 
     for asset in ip_assets:
         changed = []
-        if facts.get('hostname') and (overwrite or not asset.device_name):
+        if facts.get('hostname') and (overwrite or _is_blank_inventory_value(asset.device_name)):
             asset.device_name = facts['hostname']
             changed.append('device_name')
         if asset.status != 'online':
@@ -3501,7 +3510,8 @@ def _ansible_fact_writeback_preview(row, facts, overwrite=False):
             return
         current = normalize_value(getattr(instance, field, '') or '')
         collected = normalize_value(collected)
-        if field == 'sn' and current and not _is_valid_serial_number(current):
+        current_is_blank = _is_blank_inventory_value(current)
+        if field == 'sn' and current and not current_is_blank and not _is_valid_serial_number(current):
             cleaned = collected if collected and _is_valid_serial_number(collected) else ''
             append_change(target, instance.id, getattr(instance, 'name', ''), field, label, current, cleaned, True, 'invalid_current')
             return
@@ -3509,7 +3519,7 @@ def _ansible_fact_writeback_preview(row, facts, overwrite=False):
             return
         if overwrite:
             append_change(target, instance.id, getattr(instance, 'name', ''), field, label, current, collected, True, 'overwrite')
-        elif not current:
+        elif current_is_blank:
             append_change(target, instance.id, getattr(instance, 'name', ''), field, label, current, collected, True, 'empty_current')
         else:
             append_change(target, instance.id, getattr(instance, 'name', ''), field, label, current, collected, False, 'different_existing')

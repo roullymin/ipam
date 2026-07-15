@@ -48,8 +48,15 @@ const asArray = (value) => {
   return [];
 };
 
-const safeText = (value, fallback = '-') => {
+const EMPTY_TEXT_VALUES = new Set(['', '-', '--', '—', 'null', 'none', 'undefined', 'n/a', 'na', '无', '暂无', '未填写', '未采集']);
+
+const cleanAssetField = (value) => {
   const text = String(value ?? '').trim();
+  return EMPTY_TEXT_VALUES.has(text.toLowerCase()) ? '' : text;
+};
+
+const safeText = (value, fallback = '-') => {
+  const text = cleanAssetField(value);
   return text || fallback;
 };
 
@@ -673,15 +680,21 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
     const facts = latest?.facts || {};
     const hasFacts = Boolean(facts.hostname || facts.vendor || facts.model || facts.serial_number || facts.version || facts.uptime);
     return {
-      hostname: facts.hostname || '',
-      vendor: facts.vendor || '',
-      model: facts.model || '',
-      serialNumber: facts.serial_number || '',
-      osVersion: facts.version || '',
-      uptime: facts.uptime || '',
-      collectedAt: latest?.started_at || latest?.finished_at || '',
-      detail: latest?.detail || latest?.category_label || '',
+      hostname: cleanAssetField(facts.hostname),
+      vendor: cleanAssetField(facts.vendor),
+      model: cleanAssetField(facts.model),
+      serialNumber: cleanAssetField(facts.serial_number),
+      osVersion: cleanAssetField(facts.version),
+      uptime: cleanAssetField(facts.uptime),
+      collectedAt: latest?.finished_at || latest?.started_at || '',
+      detail: latest?.detail || latest?.category_label || latest?.status_label || '',
       appliedFields: latest?.applied_fields || [],
+      runId: latest?.run_id || '',
+      status: latest?.status || latest?.category || '',
+      statusLabel: latest?.category_label || latest?.status_label || '',
+      writebackPreview: latest?.writeback_preview || {},
+      writebackPolicy: latest?.writeback_policy || {},
+      raw: facts,
       hasFacts,
     };
   };
@@ -694,13 +707,13 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
     const assetIpIds = new Set(relatedIps.map((ip) => String(ip.id)));
     const credential = getSecretState(assetIpIds, device.id);
     const status = device.status || 'unknown';
-    const managementIp = device.mgmt_ip || relatedIps[0]?.ip_address || '';
+    const managementIp = cleanAssetField(device.mgmt_ip) || relatedIps[0]?.ip_address || '';
     const backup = getConfigBackupState(managementIp);
     const collectedFacts = getCollectedFacts(backup);
     const assetName = safeText(device.name, `Device ${device.id}`);
     const assetTypeInfo = classifyAssetType(device.device_type, assetName);
     const assetType = assetTypeInfo.key;
-    const assetVendor = device.brand || collectedFacts.vendor || '';
+    const assetVendor = cleanAssetField(device.brand) || collectedFacts.vendor || '';
     const automation = buildAutomationState(
       {
         name: assetName,
@@ -728,19 +741,19 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
       typeLabel: assetTypeInfo.label,
       typeGroup: assetTypeInfo.group,
       vendor: assetVendor,
-      model: device.model || collectedFacts.model || '',
-      hostname: device.hostname || collectedFacts.hostname || '',
-      osVersion: device.os_version || collectedFacts.osVersion || '',
-      serialNumber: device.sn || collectedFacts.serialNumber || '',
-      assetTag: device.asset_tag || '',
+      model: cleanAssetField(device.model) || collectedFacts.model || '',
+      hostname: cleanAssetField(device.hostname) || collectedFacts.hostname || '',
+      osVersion: cleanAssetField(device.os_version) || collectedFacts.osVersion || '',
+      serialNumber: cleanAssetField(device.sn) || collectedFacts.serialNumber || '',
+      assetTag: cleanAssetField(device.asset_tag),
       managementIp,
       status,
       datacenterName: datacenter?.name || '',
       rackCode: rack?.code || '',
       rackName: rack?.name || '',
       rackPosition: device.position ? `U${device.position}${device.u_height > 1 ? `-${safeInt(device.position) + safeInt(device.u_height) - 1}` : ''}` : '',
-      project: device.project || '',
-      contact: device.contact || '',
+      project: cleanAssetField(device.project),
+      contact: cleanAssetField(device.contact),
       powerUsage: safeInt(device.power_usage),
       typicalPower: safeInt(device.typical_power),
       specs: device.specs || '',
@@ -753,6 +766,12 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
       factsDetail: collectedFacts.detail,
       factsUptime: collectedFacts.uptime,
       factsAppliedFields: collectedFacts.appliedFields,
+      factsRunId: collectedFacts.runId,
+      factsStatus: collectedFacts.status,
+      factsStatusLabel: collectedFacts.statusLabel,
+      factsWritebackPreview: collectedFacts.writebackPreview,
+      factsWritebackPolicy: collectedFacts.writebackPolicy,
+      factsRaw: collectedFacts.raw,
       factsSource: collectedFacts.hasFacts ? 'ansible' : '',
       updatedAt: device.updated_at || device.created_at || collectedFacts.collectedAt || '',
     };
@@ -802,7 +821,7 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
         typeGroup: assetTypeInfo.group,
         vendor: collectedFacts.vendor || '',
         model: collectedFacts.model || '',
-        hostname: ip.hostname || collectedFacts.hostname || '',
+        hostname: cleanAssetField(ip.hostname) || collectedFacts.hostname || '',
         osVersion: collectedFacts.osVersion || '',
         serialNumber: collectedFacts.serialNumber || '',
         assetTag: '',
@@ -826,6 +845,12 @@ function buildAssets({ datacenters, racks, rackDevices, ips, secrets, configBack
         factsDetail: collectedFacts.detail,
         factsUptime: collectedFacts.uptime,
         factsAppliedFields: collectedFacts.appliedFields,
+        factsRunId: collectedFacts.runId,
+        factsStatus: collectedFacts.status,
+        factsStatusLabel: collectedFacts.statusLabel,
+        factsWritebackPreview: collectedFacts.writebackPreview,
+        factsWritebackPolicy: collectedFacts.writebackPolicy,
+        factsRaw: collectedFacts.raw,
         factsSource: collectedFacts.hasFacts ? 'ansible' : '',
         updatedAt: ip.last_online || collectedFacts.collectedAt || '',
       };
@@ -2397,6 +2422,59 @@ function buildInventoryPreview(asset) {
   ].join('\n');
 }
 
+function getAssetFactRows(asset) {
+  if (!asset) return [];
+  return [
+    { key: 'hostname', label: '主机名', value: asset.hostname, mono: true },
+    { key: 'vendor', label: '厂商', value: asset.vendor },
+    { key: 'model', label: '型号', value: asset.model },
+    { key: 'osVersion', label: '系统版本', value: asset.osVersion },
+    { key: 'serialNumber', label: '序列号', value: asset.serialNumber, mono: true },
+    { key: 'uptime', label: '运行时长', value: asset.factsUptime },
+  ].filter((item) => cleanAssetField(item.value));
+}
+
+function getFactSyncSummary(asset) {
+  const preview = asset?.factsWritebackPreview || {};
+  const summary = preview.summary || {};
+  return {
+    changes: safeInt(summary.changes),
+    writeable: safeInt(summary.writeable),
+    conflicts: safeInt(summary.conflicts),
+    targets: safeInt(summary.targets),
+  };
+}
+
+function getFactArchiveStatus(asset, factRows) {
+  const syncSummary = getFactSyncSummary(asset);
+  if (asset?.factsCollectedAt) {
+    if (syncSummary.conflicts > 0) {
+      return {
+        tone: 'amber',
+        label: '采集成功，待确认回写',
+        detail: `${formatTime(asset.factsCollectedAt)}，有 ${syncSummary.conflicts} 项与现有台账不同。`,
+      };
+    }
+    if (syncSummary.writeable > 0) {
+      return {
+        tone: 'blue',
+        label: '采集成功，可补全台账',
+        detail: `${formatTime(asset.factsCollectedAt)}，有 ${syncSummary.writeable} 项可自动补全。`,
+      };
+    }
+    return {
+      tone: 'emerald',
+      label: factRows.length ? '已采集设备档案' : '采集完成',
+      detail: `${formatTime(asset.factsCollectedAt)} / ${asset.factsDetail || asset.factsStatusLabel || '采集成功'}`,
+    };
+  }
+  return {
+    tone: 'slate',
+    label: '尚未采集',
+    detail: '点击采集后会读取厂商、型号、系统版本、序列号和运行时长。',
+  };
+}
+
 function AssetDetail({
   asset,
   onProvisionBackup,
@@ -2408,6 +2486,7 @@ function AssetDetail({
   onTestBackupTarget,
   onProvisionAnsible,
   onTestAnsible,
+  onCollectFacts,
   onNotice,
   backupActionAssetId,
   backupTestAssetId,
@@ -2415,6 +2494,7 @@ function AssetDetail({
   managementIpActionAssetId,
   ansibleActionAssetId,
   ansibleTestAssetId,
+  ansibleFactsAssetId,
 }) {
   const [activeTab, setActiveTab] = useState('basic');
   const [isEditingManagementIp, setIsEditingManagementIp] = useState(false);
@@ -2445,8 +2525,12 @@ function AssetDetail({
   const managementIpBusy = managementIpActionAssetId === asset.id;
   const ansibleBusy = ansibleActionAssetId === asset.id;
   const ansibleTestBusy = ansibleTestAssetId === asset.id;
+  const ansibleFactsBusy = ansibleFactsAssetId === asset.id;
   const normalizedManagementIp = extractManagementHost(asset.managementIp);
   const hasManagementIpFormatHint = asset.managementIp && normalizedManagementIp && normalizedManagementIp !== asset.managementIp;
+  const factRows = getAssetFactRows(asset);
+  const factArchiveStatus = getFactArchiveStatus(asset, factRows);
+  const factSyncSummary = getFactSyncSummary(asset);
 
   const handleSaveManagementIp = async () => {
     const nextValue = extractManagementHost(managementIpDraft);
@@ -2574,6 +2658,74 @@ function AssetDetail({
 
       {activeTab === 'basic' ? (
         <>
+          <DetailBlock icon={Cpu} title="Ansible 采集档案">
+            <div className={`mb-3 rounded-md border px-3 py-2 ${
+              factArchiveStatus.tone === 'emerald'
+                ? 'border-emerald-200 bg-emerald-50'
+                : factArchiveStatus.tone === 'amber'
+                  ? 'border-amber-200 bg-amber-50'
+                  : factArchiveStatus.tone === 'blue'
+                    ? 'border-blue-200 bg-blue-50'
+                    : 'border-slate-200 bg-slate-50'
+            }`}>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className={`text-xs font-black ${
+                    factArchiveStatus.tone === 'emerald'
+                      ? 'text-emerald-800'
+                      : factArchiveStatus.tone === 'amber'
+                        ? 'text-amber-800'
+                        : factArchiveStatus.tone === 'blue'
+                          ? 'text-blue-800'
+                          : 'text-slate-700'
+                  }`}>
+                    {factArchiveStatus.label}
+                  </div>
+                  <div className={`mt-1 text-xs font-semibold leading-5 ${
+                    factArchiveStatus.tone === 'emerald'
+                      ? 'text-emerald-700'
+                      : factArchiveStatus.tone === 'amber'
+                        ? 'text-amber-700'
+                        : factArchiveStatus.tone === 'blue'
+                          ? 'text-blue-700'
+                          : 'text-slate-500'
+                  }`}>
+                    {factArchiveStatus.detail}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onCollectFacts?.(asset)}
+                  disabled={ansibleFactsBusy || !asset.managementIp || !asset.credential.count}
+                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-blue-600 px-2.5 text-xs font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  title={!asset.managementIp ? '缺少管理 IP' : !asset.credential.count ? '缺少登录凭据' : '采集设备信息'}
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${ansibleFactsBusy ? 'animate-spin' : ''}`} />
+                  采集信息
+                </button>
+              </div>
+            </div>
+            {factRows.length ? (
+              <div className="grid grid-cols-2 gap-2">
+                {factRows.map((item) => (
+                  <div key={item.key} className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div className="text-xs font-semibold text-slate-500">{item.label}</div>
+                    <div className={`mt-1 truncate text-sm font-black text-slate-900 ${item.mono ? 'font-mono' : ''}`}>
+                      {safeText(item.value)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyDetailNote>暂无采集档案。对已纳管设备执行一次“采集信息”后，这里会显示型号、版本、序列号等关键字段。</EmptyDetailNote>
+            )}
+            {factSyncSummary.conflicts > 0 ? (
+              <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-800">
+                采集结果与台账存在 {factSyncSummary.conflicts} 项差异，建议到 Ansible 中心确认回写，避免覆盖人工维护字段。
+              </div>
+            ) : null}
+          </DetailBlock>
+
           <DetailBlock icon={MapPin} title="身份与位置">
             <InfoRow label="主机名" value={asset.hostname} mono />
             <InfoRow label="厂商" value={asset.vendor} />
@@ -2826,6 +2978,15 @@ function AssetDetail({
             </button>
             <button
               type="button"
+              onClick={() => onCollectFacts?.(asset)}
+              disabled={ansibleFactsBusy || (!asset.automation.managed && !asset.credential.count)}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Cpu className={`h-3.5 w-3.5 ${ansibleFactsBusy ? 'animate-pulse' : ''}`} />
+              采集信息
+            </button>
+            <button
+              type="button"
               onClick={() => onProvisionAnsible(asset)}
               disabled={ansibleBusy}
               className="inline-flex h-8 items-center gap-1.5 rounded-md bg-blue-600 px-2.5 text-xs font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
@@ -2942,6 +3103,7 @@ export default function AssetCenterView({
   const [backupTestAssetId, setBackupTestAssetId] = useState(null);
   const [ansibleActionAssetId, setAnsibleActionAssetId] = useState(null);
   const [ansibleTestAssetId, setAnsibleTestAssetId] = useState(null);
+  const [ansibleFactsAssetId, setAnsibleFactsAssetId] = useState(null);
   const [credentialModal, setCredentialModal] = useState(null);
   const [credentialForm, setCredentialForm] = useState(null);
   const [backupSettingsModal, setBackupSettingsModal] = useState(null);
@@ -3504,6 +3666,56 @@ export default function AssetCenterView({
     }
   };
 
+  const handleCollectAnsibleFacts = async (asset) => {
+    if (!extractManagementHost(asset?.managementIp)) {
+      showOperationNotice('warning', '请先补充管理 IP', '采集设备信息前需要先给资产填写可连接的管理 IP。');
+      return;
+    }
+    if (!asset?.credential?.count) {
+      showOperationNotice('warning', '请先绑定登录凭据', '采集设备信息需要使用密码本中的 SSH 凭据。');
+      return;
+    }
+    setAnsibleFactsAssetId(asset.id);
+    try {
+      const response = await safeFetch('/api/ansible/collect-facts/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          host_ids: [getAnsibleHostId(asset)],
+          write_back: true,
+          overwrite: false,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        showOperationNotice('error', '设备信息采集失败', normalizeActionMessage(payload.detail || payload.message, '设备信息采集失败。'));
+        return;
+      }
+      const summary = payload.run?.summary || payload.summary || {};
+      const firstResult = payload.results?.[0] || payload.run?.results_preview?.[0] || {};
+      const previewSummary = firstResult.writeback_preview?.summary || {};
+      const success = safeInt(summary.success);
+      const failed = safeInt(summary.failed);
+      const writtenBack = safeInt(summary.written_back) || safeInt(firstResult.applied_fields?.length);
+      const conflicts = safeInt(summary.writeback_conflicts) || safeInt(previewSummary.conflicts);
+      const proposed = safeInt(summary.proposed_changes) || safeInt(previewSummary.changes);
+      const noticeTone = failed || conflicts ? 'warning' : 'success';
+      const suffix = conflicts
+        ? `，${conflicts} 项差异待确认回写`
+        : proposed > writtenBack
+          ? `，${proposed - writtenBack} 项差异待确认`
+          : '';
+      showOperationNotice(
+        noticeTone,
+        '设备信息采集完成',
+        `成功 ${success}，失败 ${failed}，已回写 ${writtenBack}${suffix}。`,
+      );
+      await refreshAssets();
+    } finally {
+      setAnsibleFactsAssetId(null);
+    }
+  };
+
 
   const typeOptions = useMemo(() => {
     const entries = new Map();
@@ -3842,6 +4054,7 @@ export default function AssetCenterView({
                 onTestBackupTarget={handleTestBackupTargetNotice}
                 onProvisionAnsible={handleProvisionAnsible}
                 onTestAnsible={handleTestAnsible}
+                onCollectFacts={handleCollectAnsibleFacts}
                 onNotice={showOperationNotice}
                 backupActionAssetId={backupActionAssetId}
                 backupTestAssetId={backupTestAssetId}
@@ -3849,6 +4062,7 @@ export default function AssetCenterView({
                 managementIpActionAssetId={managementIpActionAssetId}
                 ansibleActionAssetId={ansibleActionAssetId}
                 ansibleTestAssetId={ansibleTestAssetId}
+                ansibleFactsAssetId={ansibleFactsAssetId}
               />
             </AssetDirectory>
           </>
