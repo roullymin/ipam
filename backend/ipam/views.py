@@ -3337,6 +3337,41 @@ def _ansible_host_has_facts(row):
     return any(_ansible_fact_value(row, key) for key in ('hostname', 'model', 'serial_number', 'os_version', 'brand'))
 
 
+def _ansible_fact_health(row):
+    latest = row.get('latest_fact_run') or {}
+    preview = latest.get('writeback_preview') if isinstance(latest, dict) else {}
+    preview_summary = (preview.get('summary') if isinstance(preview, dict) else {}) or {}
+    changes = int(preview_summary.get('changes') or 0)
+    writeable = int(preview_summary.get('writeable') or 0)
+    conflicts = int(preview_summary.get('conflicts') or 0)
+    fields = [
+        key
+        for key in ('hostname', 'model', 'serial_number', 'os_version', 'brand')
+        if _ansible_fact_value(row, key)
+    ]
+    if conflicts:
+        status = 'conflict'
+        label = '待确认回写'
+    elif changes or writeable:
+        status = 'writeable'
+        label = '可回写'
+    elif fields:
+        status = 'collected'
+        label = '已采集'
+    else:
+        status = 'missing'
+        label = '待采集'
+    return {
+        'status': status,
+        'label': label,
+        'fields_count': len(fields),
+        'changes': changes,
+        'writeable': writeable,
+        'conflicts': conflicts,
+        'collected_at': latest.get('started_at') if isinstance(latest, dict) else '',
+    }
+
+
 def _record_ansible_task_run(request, action, counters, results, detail, started_at=None):
     total = int(counters.get('total') or len(results or []))
     success_count = (
@@ -3580,6 +3615,8 @@ def _ansible_fact_writeback_preview(row, facts, overwrite=False):
 def _ansible_summary_payload(scope='managed'):
     all_hosts = _build_ansible_hosts()
     _attach_latest_fact_results(all_hosts)
+    for row in all_hosts:
+        row['fact_health'] = _ansible_fact_health(row)
     all_managed_pool = [row for row in all_hosts if row.get('managed')]
     priority_pool = [row for row in all_managed_pool if row.get('priority_managed')]
     managed_pool = priority_pool or all_managed_pool
@@ -3593,6 +3630,8 @@ def _ansible_summary_payload(scope='managed'):
     backup_missing = [row for row in hosts if not row.get('backup_target_id')]
     failed = [row for row in hosts if row.get('backup_status') == 'failed' or row.get('last_job_detail')]
     facts_collected = [row for row in hosts if _ansible_host_has_facts(row)]
+    facts_conflicts = [row for row in hosts if (row.get('fact_health') or {}).get('status') == 'conflict']
+    facts_writeable = [row for row in hosts if (row.get('fact_health') or {}).get('status') == 'writeable']
     groups = {}
     for row in hosts:
         for group in row.get('groups') or []:
@@ -3614,6 +3653,8 @@ def _ansible_summary_payload(scope='managed'):
             'all_hosts': len(all_hosts),
             'facts_collected': len(facts_collected),
             'facts_missing': max(len(hosts) - len(facts_collected), 0),
+            'facts_conflicts': len(facts_conflicts),
+            'facts_writeable': len(facts_writeable),
             'visible_scope': scope,
         },
         'hosts': hosts,
@@ -3621,7 +3662,7 @@ def _ansible_summary_payload(scope='managed'):
         'inventory': _build_ansible_inventory(hosts),
         'recent_runs': [
             _serialize_ansible_task_run(run)
-            for run in AnsibleTaskRun.objects.order_by('-started_at', '-id')[:8]
+            for run in AnsibleTaskRun.objects.order_by('-started_at', '-id')[:12]
         ],
     }
 

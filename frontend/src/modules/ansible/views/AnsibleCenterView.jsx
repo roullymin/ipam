@@ -37,6 +37,10 @@ const EMPTY_SUMMARY = {
     failed_hosts: 0,
     candidate_hosts: 0,
     all_hosts: 0,
+    facts_collected: 0,
+    facts_missing: 0,
+    facts_conflicts: 0,
+    facts_writeable: 0,
     visible_scope: 'managed',
   },
   hosts: [],
@@ -175,6 +179,50 @@ const getDisplayFacts = (host) => {
 const hasAssetFacts = (host) => {
   const facts = getDisplayFacts(host);
   return Boolean(facts.hostname || facts.model || facts.serial_number || facts.version || facts.vendor);
+};
+
+const countFactFields = (host) => {
+  const facts = getDisplayFacts(host);
+  return ['hostname', 'vendor', 'model', 'serial_number', 'version'].filter((key) => safeText(facts[key], '')).length;
+};
+
+const getFactHealth = (host) => {
+  const backendHealth = host?.fact_health || {};
+  const latest = host?.latest_fact_run || {};
+  const writebackSummary = latest.writeback_preview?.summary || {};
+  const changes = Number(backendHealth.changes ?? writebackSummary.changes ?? 0);
+  const writeable = Number(backendHealth.writeable ?? writebackSummary.writeable ?? 0);
+  const conflicts = Number(backendHealth.conflicts ?? writebackSummary.conflicts ?? 0);
+  const fields = Number(backendHealth.fields_count ?? countFactFields(host));
+  let status = backendHealth.status || '';
+  if (!status) {
+    if (conflicts > 0) status = 'conflict';
+    else if (changes > 0 || writeable > 0) status = 'writeable';
+    else if (fields > 0) status = 'collected';
+    else status = 'missing';
+  }
+  const labels = {
+    collected: '已采集',
+    missing: '待采集',
+    writeable: '可回写',
+    conflict: '待确认',
+  };
+  const tones = {
+    collected: 'border-cyan-300/40 bg-cyan-300/10 text-cyan-100',
+    missing: 'border-amber-300/40 bg-amber-300/10 text-amber-100',
+    writeable: 'border-violet-300/40 bg-violet-300/10 text-violet-100',
+    conflict: 'border-rose-300/40 bg-rose-300/10 text-rose-100',
+  };
+  return {
+    status,
+    label: backendHealth.label || labels[status] || '待采集',
+    tone: tones[status] || tones.missing,
+    changes,
+    writeable,
+    conflicts,
+    fields,
+    collectedAt: backendHealth.collected_at || latest.started_at || '',
+  };
 };
 
 function getHostStatus(host) {
@@ -359,23 +407,110 @@ function RunMetricGrid({ summary = {} }) {
   );
 }
 
+function FactHealthBoard({ summary, latestRun, loading, onCollect }) {
+  const cards = [
+    {
+      key: 'collected',
+      label: '已采集档案',
+      value: summary.collected,
+      hint: '已有型号、版本或序列号',
+      icon: Sparkles,
+      tone: 'text-cyan-100',
+      ring: 'from-cyan-400/20 to-blue-500/10',
+    },
+    {
+      key: 'writeable',
+      label: '可自动回写',
+      value: summary.writeable,
+      hint: '资产字段为空，可直接补齐',
+      icon: CheckCircle2,
+      tone: 'text-emerald-100',
+      ring: 'from-emerald-400/20 to-cyan-500/10',
+    },
+    {
+      key: 'conflict',
+      label: '待人工确认',
+      value: summary.conflict,
+      hint: '采集值与现有档案不一致',
+      icon: AlertTriangle,
+      tone: 'text-amber-100',
+      ring: 'from-amber-400/20 to-orange-500/10',
+    },
+    {
+      key: 'missing',
+      label: '待采集',
+      value: summary.missing,
+      hint: '未发现可用设备档案',
+      icon: Database,
+      tone: 'text-slate-100',
+      ring: 'from-slate-400/20 to-cyan-500/10',
+    },
+  ];
+
+  return (
+    <section className="rounded-2xl border border-cyan-400/15 bg-slate-950/55 p-4 shadow-[0_18px_55px_rgba(0,0,0,0.22)]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-cyan-200">
+            <Sparkles className="h-4 w-4" />
+            Device Profile
+          </div>
+          <h2 className="mt-1 text-xl font-black text-slate-50">设备档案采集与回写</h2>
+          <p className="mt-1 text-xs font-semibold text-slate-400">
+            先采集型号、版本、序列号和主机名，再把可信字段回写到资产中心。
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {latestRun ? (
+            <div className="rounded-xl border border-cyan-400/15 bg-cyan-400/[0.04] px-3 py-2 text-xs font-bold text-slate-300">
+              最近采集 {formatRunTime(latestRun.started_at) || '-'} · 成功 {latestRun.success_count || 0} · 失败 {latestRun.failed_count || 0}
+            </div>
+          ) : null}
+          <ActionButton icon={Database} loading={loading} onClick={onCollect}>
+            采集已纳管
+          </ActionButton>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {cards.map((card) => {
+          const Icon = card.icon;
+          return (
+            <div key={card.key} className="rounded-2xl border border-cyan-400/15 bg-slate-950/45 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs font-black text-slate-400">{card.label}</div>
+                  <div className="mt-2 text-2xl font-black text-slate-50">{card.value || 0}</div>
+                  <div className="mt-1 text-[11px] font-semibold text-slate-500">{card.hint}</div>
+                </div>
+                <div className={cx('flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br', card.ring)}>
+                  <Icon className={cx('h-5 w-5', card.tone)} />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function FactCell({ host }) {
   const facts = getDisplayFacts(host);
   const latest = host?.latest_fact_run || null;
-  const collected = hasAssetFacts(host);
+  const health = getFactHealth(host);
   const primary = facts.hostname || facts.model || facts.version || facts.vendor;
-  const secondary = facts.model || facts.serial_number || facts.version || facts.vendor;
+  const secondary = facts.serial_number || facts.version || facts.vendor || facts.model;
   const appliedCount = asArray(latest?.applied_fields).length;
   return (
     <div className="space-y-1.5 text-[11px] font-semibold text-slate-300">
-      <StatusPill tone={collected ? 'border-cyan-300/40 bg-cyan-300/10 text-cyan-100' : 'border-amber-300/40 bg-amber-300/10 text-amber-100'}>
-        {collected ? '已采集' : '待采集'}
+      <StatusPill tone={health.tone}>
+        {health.label}
       </StatusPill>
       <div className="max-w-[220px] truncate text-xs font-black text-slate-100">{safeText(primary, '型号/版本待补全')}</div>
       <div className="max-w-[220px] truncate font-mono text-slate-500">{safeText(secondary, '序列号待补全')}</div>
       {latest ? (
         <div className="max-w-[220px] truncate text-[10px] font-bold text-cyan-200/80">
-          最近 {formatRunTime(latest.started_at) || '-'} · 回写 {appliedCount}
+          最近 {formatRunTime(health.collectedAt) || '-'} · 字段 {health.fields} · 回写 {appliedCount}
         </div>
       ) : null}
     </div>
@@ -453,11 +588,14 @@ export default function AnsibleCenterView() {
     const query = normalize(keyword);
     return hosts.filter((host) => {
       const status = getHostStatus(host);
+      const factHealth = getFactHealth(host);
       if (statusFilter !== 'all' && status !== statusFilter) return false;
       if (typeFilter !== 'all' && (host.device_type || host.raw_device_type || 'unknown') !== typeFilter) return false;
       if (groupFilter !== 'all' && !asArray(host.groups).includes(groupFilter)) return false;
-      if (factsFilter === 'collected' && !hasAssetFacts(host)) return false;
-      if (factsFilter === 'missing' && hasAssetFacts(host)) return false;
+      if (factsFilter === 'collected' && factHealth.status !== 'collected') return false;
+      if (factsFilter === 'missing' && factHealth.status !== 'missing') return false;
+      if (factsFilter === 'writeable' && factHealth.status !== 'writeable') return false;
+      if (factsFilter === 'conflict' && factHealth.status !== 'conflict') return false;
       if (factsFilter === 'diff' && !Number(host.latest_fact_run?.writeback_preview?.summary?.changes || 0)) return false;
       if (!query) return true;
       const displayFacts = getDisplayFacts(host);
@@ -701,6 +839,23 @@ export default function AnsibleCenterView() {
       missing,
     };
   }, [hosts, stats.facts_collected, stats.facts_missing]);
+  const factHealthSummary = useMemo(() => {
+    const fallback = hosts.reduce((acc, host) => {
+      const health = getFactHealth(host);
+      acc[health.status] = (acc[health.status] || 0) + 1;
+      return acc;
+    }, { collected: 0, missing: 0, writeable: 0, conflict: 0 });
+    return {
+      collected: factsSummary.collected,
+      missing: factsSummary.missing,
+      writeable: Number.isFinite(Number(stats.facts_writeable)) ? Number(stats.facts_writeable) : fallback.writeable,
+      conflict: Number.isFinite(Number(stats.facts_conflicts)) ? Number(stats.facts_conflicts) : fallback.conflict,
+    };
+  }, [factsSummary.collected, factsSummary.missing, hosts, stats.facts_conflicts, stats.facts_writeable]);
+  const latestFactRun = useMemo(
+    () => recentRuns.find((run) => run.action === 'facts_collect') || null,
+    [recentRuns],
+  );
   const inventoryGroups = useMemo(
     () => groups.filter((group) => group.name !== 'managed' && group.name !== 'unmanaged').slice(0, 8),
     [groups],
@@ -815,6 +970,13 @@ export default function AnsibleCenterView() {
           <StatCard icon={Filter} label="暂不用候选" value={stats.candidate_hosts || 0} hint="切到全部候选可查看" tone="text-slate-200" ring="from-slate-400/20 to-cyan-500/10" />
         </section>
 
+        <FactHealthBoard
+          summary={factHealthSummary}
+          latestRun={latestFactRun}
+          loading={actionLoading === 'collect'}
+          onCollect={() => runHostAction('collect')}
+        />
+
         <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_430px]">
           <div className="overflow-hidden rounded-2xl border border-cyan-400/15 bg-slate-950/55 shadow-[0_18px_55px_rgba(0,0,0,0.22)]">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-700/60 p-4">
@@ -863,6 +1025,8 @@ export default function AnsibleCenterView() {
                   <option value="all">全部档案</option>
                   <option value="collected">已采集档案</option>
                   <option value="missing">待采集档案</option>
+                  <option value="writeable">可自动回写</option>
+                  <option value="conflict">待确认回写</option>
                   <option value="diff">有采集差异</option>
                 </select>
                 <select
